@@ -4,7 +4,7 @@
 
 ---
 
-A production-grade **Retrieval-Augmented Generation (RAG)** application that understands complex questions, retrieves relevant documents from a knowledge base, and generates accurate answers through LLM inference. Built for enterprise knowledge management.
+A **Retrieval-Augmented Generation (RAG)** application that understands complex questions, retrieves relevant documents from a knowledge base, and generates accurate answers through LLM inference. Built for enterprise knowledge management.
 
 > An intelligent knowledge partner that retrieves the most relevant content from a vast document library and has it read, reasoned about, and answered by a large language model.
 
