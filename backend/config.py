@@ -1,0 +1,46 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # LLM
+    LLM_PROVIDER: str = "openai"
+    LLM_MODEL: str = "gpt-4o"
+    LLM_API_KEY: str = ""
+    LLM_API_BASE_URL: str = ""
+
+    # Embedding
+    EMBEDDING_PROVIDER: str = "huggingface"
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_DEVICE: str = "cpu"
+    EMBEDDING_NORMALIZE: bool = True
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_API_BASE_URL: str = ""
+    HF_TOKEN: str = ""
+
+    # LangSmith
+    LANGSMITH_API_KEY: str = ""
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_PROJECT: str = "default"
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
+
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate"
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Milvus
+    MILVUS_HOST: str = "localhost"
+    MILVUS_PORT: str = "19530"
+    MILVUS_COLLECTION: str = "ragmate_docs"
+    MILVUS_TIMEOUT: float = 10.0
+
+    # Ingestion
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 50
+
+    # Documents
+    DOCUMENTS_DIR: str = "./documents"
+
+
+settings = Settings()

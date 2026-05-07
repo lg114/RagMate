@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'">
+<title>RagMate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<main id="main">
+
+  <section id="panel-chat" class="panel active">
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span class="logo">RagMate</span>
+          <nav class="sidebar-tabs">
+            <button class="sidebar-tab active" data-tab="chat">对话</button>
+            <button class="sidebar-tab" data-tab="documents">文档</button>
+          </nav>
+        </div>
+        <div class="sidebar-section">
+          <div class="history-header">
+            <span>历史</span>
+            <button id="btn-refresh-sessions" class="btn-icon" title="刷新">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+          </div>
+          <div id="history-list" class="history-list">
+            <div class="history-empty">暂无记录</div>
+          </div>
+        </div>
+      </aside>
+      <div class="content">
+        <div id="view-chat" class="view">
+          <div class="chat-header">
+            <span id="chat-title">对话</span>
+            <button id="btn-new-chat" class="btn-text">新对话</button>
+          </div>
+          <div id="chat-messages" class="chat-messages">
+            <div class="empty-state">
+              <div class="empty-label">提出问题，从知识库中检索答案</div>
+            </div>
+          </div>
+          <div id="chat-error" class="chat-error hidden"></div>
+          <form id="chat-form" class="chat-input-wrap">
+            <div class="chat-input-row">
+              <input type="text" id="chat-textarea" placeholder="输入问题…" autocomplete="off" />
+              <button type="submit" id="btn-send" class="btn-send" title="发送">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div id="view-documents" class="view hidden">
+          <div class="doc-toolbar">
+            <div class="doc-upload-area">
+              <label class="upload-zone" id="upload-zone">
+                <input type="file" id="file-input" accept=".pdf" multiple hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>上传 PDF</span>
+              </label>
+              <span id="upload-error" class="upload-error hidden"></span>
+            </div>
+            <button id="btn-ingest" class="btn-primary">
+              <span id="btn-ingest-text">入库</span>
+              <span id="btn-ingest-spinner" class="spinner hidden"></span>
+            </button>
+          </div>
+          <div id="ingest-status-bar" class="ingest-status hidden">
+            <span id="ingest-status-text"></span>
+          </div>
+          <div class="doc-table-wrap">
+            <table class="doc-table">
+              <thead>
+                <tr>
+                  <th>文件名</th>
+                  <th>大小</th>
+                  <th>状态</th>
+                  <th>上传时间</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="doc-table-body"></tbody>
+            </table>
+            <div id="doc-empty" class="empty-state">
+              <div class="empty-label">暂无文档，上传 PDF 开始</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
