@@ -2,9 +2,17 @@ import datetime
 import logging
 import os
 from collections import Counter
+from functools import lru_cache
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from FlagEmbedding import BGEM3FlagModel
+from langchain_community.document_loaders import (
+    Docx2txtLoader,
+    PyPDFLoader,
+    TextLoader,
+    UnstructuredExcelLoader,
+)
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from pymilvus import DataType, CollectionSchema, FieldSchema
 from sqlalchemy import select
 
 from config import settings
@@ -15,12 +23,56 @@ from models import Document
 from redis_client import set_ingest_status_sync
 from retriever import _check_milvus_available, get_milvus_client
 
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt", ".md"}
+
+
+@lru_cache(maxsize=1)
+def get_bge_m3():
+    """加载 bge-m3 模型（单例），用于提取 dense + sparse 向量。"""
+    return BGEM3FlagModel(settings.EMBEDDING_MODEL, use_fp16=False)
+
+
+def encode_documents(texts: list[str]) -> tuple[list, list]:
+    """用 bge-m3 提取 dense 和 sparse 向量。返回 (dense_vecs, sparse_vecs)。"""
+    model = get_bge_m3()
+    output = model.encode(texts, return_dense=True, return_sparse=True)
+    dense_vecs = output["dense_vecs"].tolist()
+    sparse_vecs = []
+    for lexical_weight in output["lexical_weights"]:
+        sparse_vecs.append({int(k): float(v) for k, v in lexical_weight.items()})
+    return dense_vecs, sparse_vecs
+
+
+def encode_query(query: str) -> tuple[list, dict]:
+    """用 bge-m3 提取 query 的 dense 和 sparse 向量。"""
+    model = get_bge_m3()
+    output = model.encode([query], return_dense=True, return_sparse=True)
+    dense_vec = output["dense_vecs"][0].tolist()
+    sparse_vec = {int(k): float(v) for k, v in output["lexical_weights"][0].items()}
+    return dense_vec, sparse_vec
+
+
+def load_document(filepath: str):
+    """根据文件扩展名选择合适的 loader 加载文档。"""
+    ext = os.path.splitext(filepath)[1].lower()
+
+    if ext == ".pdf":
+        return PyPDFLoader(filepath).load()
+    elif ext in (".docx", ".doc"):
+        return Docx2txtLoader(filepath).load()
+    elif ext in (".xlsx", ".xls"):
+        return UnstructuredExcelLoader(filepath).load()
+    elif ext in (".txt", ".md"):
+        return TextLoader(filepath, encoding="utf-8").load()
+    else:
+        print(f"[INGEST] Unsupported file type: {ext}")
+        return []
+
 
 def _sync_documents_table(directory: str, filenames: list[str], chunk_counts: dict[str, int]):
     """同步 PostgreSQL documents 表：将本次入库的文件标记为 ingested。已有记录则更新，没有则自动创建"""
     now = datetime.datetime.now(datetime.timezone.utc)
     with SyncSession() as session:
-        # 批量查询，一次 DB 往返，避免 N+1
         result = session.execute(
             select(Document).where(Document.filename.in_(filenames))
         )
@@ -49,32 +101,32 @@ def _sync_documents_table(directory: str, filenames: list[str], chunk_counts: di
 
 
 def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
-    """读取 PDF 文档，切分，向量入库到 Milvus。增量模式：只处理新文件。返回结构化结果 dict。"""
+    """读取文档，切分，向量入库到 Milvus。增量模式：只处理新文件。返回结构化结果 dict。"""
     docs_dir = directory or settings.DOCUMENTS_DIR
 
     if not os.path.exists(docs_dir):
         return {"status": "failed", "error": f"Documents directory not found: {docs_dir}"}
 
-    pdf_files = [f for f in os.listdir(docs_dir) if f.endswith(".pdf")]
-    if not pdf_files:
-        return {"status": "failed", "error": f"No PDF files found in {docs_dir}"}
+    all_files = [f for f in os.listdir(docs_dir) if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS]
+    if not all_files:
+        return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
 
     if not _check_milvus_available():
         raise ServiceUnavailableError(
             f"Milvus 服务不可达 ({settings.MILVUS_HOST}:{settings.MILVUS_PORT})"
         )
 
-    # 查找已入库的文件，只处理新文件
     with SyncSession() as session:
         result = session.execute(
             select(Document.filename).where(
-                Document.filename.in_(pdf_files),
+                Document.filename.in_(all_files),
                 Document.status == "ingested",
             )
         )
         ingested_filenames = {row[0] for row in result.fetchall()}
 
-    new_files = [f for f in pdf_files if f not in ingested_filenames]
+    new_files = [f for f in all_files if f not in ingested_filenames]
+    print(f"[INGEST] Found {len(all_files)} files, {len(ingested_filenames)} already ingested, {len(new_files)} new")
     if not new_files:
         return {
             "status": "success",
@@ -86,54 +138,85 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             "message": "All documents already ingested",
         }
 
-    if verbose:
-        logging.getLogger(__name__).info(
-            f"Skipping {len(ingested_filenames)} already ingested, "
-            f"processing {len(new_files)} new file(s)"
-        )
-
     documents = []
-    for pdf_file in new_files:
-        pdf_path = os.path.join(docs_dir, pdf_file)
-        if verbose:
-            logging.getLogger(__name__).debug(f"Loading {pdf_path}...")
-        loader = PyPDFLoader(pdf_path)
-        documents.extend(loader.load())
+    for filename in new_files:
+        filepath = os.path.join(docs_dir, filename)
+        pages = load_document(filepath)
+        print(f"[INGEST] {filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
+        documents.extend(pages)
 
-    if verbose:
-        logging.getLogger(__name__).debug(f"Loaded {len(documents)} pages")
+    if not documents:
+        return {"status": "failed", "error": "No text extracted from any file"}
 
-    splitter = RecursiveCharacterTextSplitter(
+    # 按文件类型分组切分
+    chunks = []
+    md_headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
+    md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=md_headers)
+    text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
     )
-    chunks = splitter.split_documents(documents)
-    if verbose:
-        logging.getLogger(__name__).debug(f"Split into {len(chunks)} chunks")
 
+    for doc in documents:
+        ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
+        if ext in (".md", ".markdown"):
+            md_chunks = md_splitter.split_text(doc.page_content)
+            for c in md_chunks:
+                c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
+            chunks.extend(md_chunks)
+        else:
+            chunks.extend(text_splitter.split_documents([doc]))
+
+    # 添加 chunk_index 元数据
     chunk_counter = Counter()
+    file_chunk_index: dict[str, int] = {}
     for chunk in chunks:
         source = chunk.metadata.get("source", "unknown")
         filename = os.path.basename(source)
         chunk_counter[filename] += 1
+        file_chunk_index[filename] = file_chunk_index.get(filename, 0)
+        chunk.metadata["chunk_index"] = file_chunk_index[filename]
+        file_chunk_index[filename] += 1
 
-    embeddings = get_embeddings()
+    print(f"[INGEST] Split {len(documents)} pages into {len(chunks)} chunks")
 
     client = get_milvus_client()
 
     collection_exists = client.has_collection(settings.MILVUS_COLLECTION)
 
+    # 检查旧 collection 是否有 sparse 字段和索引，没有则重建
+    if collection_exists:
+        try:
+            info = client.describe_collection(settings.MILVUS_COLLECTION)
+            field_names = [f["name"] for f in info.get("fields", [])]
+            indexes = client.list_indexes(settings.MILVUS_COLLECTION)
+            has_sparse_field = "sparse" in field_names
+            has_sparse_index = any(idx.get("field") == "sparse" for idx in indexes)
+            if not has_sparse_field or not has_sparse_index:
+                print("[INGEST] Schema/index mismatch, dropping old collection...")
+                client.drop_collection(settings.MILVUS_COLLECTION)
+                collection_exists = False
+        except Exception:
+            pass
+
     if not collection_exists:
-        dim = len(embeddings.embed_query("dim"))
+        dim = len(get_bge_m3().encode(["dim"])["dense_vecs"][0])
+        schema = CollectionSchema(fields=[
+            FieldSchema("id", DataType.INT64, is_primary=True, auto_id=False),
+            FieldSchema("dense", DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema("sparse", DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema("text", DataType.VARCHAR, max_length=65535),
+            FieldSchema("metadata", DataType.JSON),
+        ])
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="dense", index_type="AUTOINDEX", metric_type="IP")
+        index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="IP", params={"drop_ratio_build": 0.2})
         client.create_collection(
             collection_name=settings.MILVUS_COLLECTION,
-            dimension=dim,
-            metric_type="IP",
-            vector_field_name="dense",
+            schema=schema,
+            index_params=index_params,
         )
-        if verbose:
-            logging.getLogger(__name__).info(f"Created collection: {settings.MILVUS_COLLECTION}")
+        client.load_collection(settings.MILVUS_COLLECTION)
 
-    # 计算 ID 偏移量，避免与已有数据主键冲突
     id_offset = 0
     if collection_exists:
         try:
@@ -142,7 +225,6 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         except Exception:
             pass
 
-    # 删除待处理文件已有的 chunks（处理重新入库场景）
     for filename in new_files:
         try:
             escaped = filename.replace('"', '\\"')
@@ -154,26 +236,28 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             pass
 
     texts = [chunk.page_content for chunk in chunks]
-    metadatas = [{"source": os.path.basename(chunk.metadata.get("source", "unknown"))} for chunk in chunks]
+    metadatas = [{
+        "source": os.path.basename(chunk.metadata.get("source", "unknown")),
+        "page": chunk.metadata.get("page"),
+        "chunk_index": chunk.metadata.get("chunk_index", 0),
+    } for chunk in chunks]
 
-    vecs = embeddings.embed_documents(texts)
+    dense_vecs, sparse_vecs = encode_documents(texts)
 
     data = [
-        {"id": id_offset + i, "dense": vec, "text": text, "metadata": meta}
-        for i, (vec, text, meta) in enumerate(zip(vecs, texts, metadatas))
+        {"id": id_offset + i, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
+        for i, (d_vec, s_vec, text, meta) in enumerate(zip(dense_vecs, sparse_vecs, texts, metadatas))
     ]
     client.insert(
         collection_name=settings.MILVUS_COLLECTION,
         data=data,
     )
-    if verbose:
-        logging.getLogger(__name__).info(f"Inserted {len(texts)} chunks into Milvus")
+    client.load_collection(settings.MILVUS_COLLECTION)
 
-    # 同步 PostgreSQL
     try:
         _sync_documents_table(docs_dir, new_files, dict(chunk_counter))
     except Exception as e:
-        logging.getLogger(__name__).warning(f"Failed to sync documents table: {e}")
+        logging.getLogger("ragmate").warning(f"Failed to sync documents table: {e}")
 
     result = {
         "status": "success",
@@ -189,4 +273,4 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
 
 if __name__ == "__main__":
     result = ingest_documents(verbose=True)
-    logging.getLogger(__name__).info(result)
+    logging.getLogger("ragmate").info(result)

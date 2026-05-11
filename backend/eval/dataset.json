@@ -1,0 +1,52 @@
+[
+  {
+    "question": "DeepSeek API 如何调用？",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf", "首次调用 API _ DeepSeek API Docs_2.pdf", "首次调用 API _ DeepSeek API Docs_3.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "API 的 base_url 是什么？",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "DeepSeek 有哪些模型？价格分别是多少？",
+    "expected_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "Token 用量怎么计算？",
+    "expected_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "如何实现多轮对话？",
+    "expected_sources": ["多轮对话 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "API 返回错误码 429 是什么意思？",
+    "expected_sources": ["错误码 _ DeepSeek API Docs.pdf", "限速 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "限速策略是什么？",
+    "expected_sources": ["限速 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "调用 API 需要什么认证方式？",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "deepseek-chat 和 deepseek-reasoner 有什么区别？",
+    "expected_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  },
+  {
+    "question": "API 调用失败怎么排查？",
+    "expected_sources": ["错误码 _ DeepSeek API Docs.pdf"],
+    "category": "factual"
+  }
+]

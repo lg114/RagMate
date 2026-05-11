@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Embedding
     EMBEDDING_PROVIDER: str = "huggingface"
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = "BAAI/bge-m3"
     EMBEDDING_DEVICE: str = "cpu"
     EMBEDDING_NORMALIZE: bool = True
     EMBEDDING_API_KEY: str = ""
@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Ingestion
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50
+
+    # Hybrid Search + Reranking
+    HYBRID_SEARCH_ENABLED: bool = True
+    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_TOP_K: int = 5
 
     # Documents
     DOCUMENTS_DIR: str = "./documents"

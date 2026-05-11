@@ -1,146 +1,155 @@
 # RagMate
 
-[English Version](README.md)
+[English](README.md)
 
----
-
-一个 **检索增强生成(RAG)** 应用，能自主理解复杂问题、从知识库中检索相关文档，并通过大语言模型推理生成准确答案。为企业知识管理而构建。
-
-> 一个智能的知识伙伴，从海量文档中检索最相关的内容，交由大语言模型阅读、推理并给出准确答案。
+一个基于检索增强生成（RAG）的企业级知识管理系统。用户上传文档后，系统通过向量检索和大语言模型推理，从知识库中检索最相关内容并生成准确答案。
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![FastAPI](https://img.shields.io/badge/fastapi-0.110-green.svg)](https://fastapi.tiangolo.com/)
+[![FastAPI](https://img.shields.io/badge/fastapi-0.115-green.svg)](https://fastapi.tiangolo.com/)
 
 ---
 
-## 🌟 功能特点
+## 核心特性
 
-- **智能问答** — 基于检索增强生成的问答，支持多轮对话
-- **语义向量检索** — Milvus 驱动的高精度大规模文档检索
-- **深度 Agent** — 多轮推理助手，支持子 Agent 派生和任务规划
-- **多格式支持** — PDF 解析、智能切分与向量化
-- **生产级架构** — Milvus + PostgreSQL + Redis 全栈基础设施
-- **灵活的 LLM/Embedding** — 通过 LiteLLM 统一接入 OpenAI、Anthropic、DeepSeek
+- **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking，召回率和准确率显著优于纯向量检索
+- **深度 Agent** — 基于 LangGraph 的多轮推理 Agent，支持工具调用、子 Agent 派生和任务规划
+- **流式输出** — SSE 实时流式返回，用户可逐 token 看到生成过程
+- **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown
+- **智能 Chunk** — Markdown 按标题层级切分，PDF 保留页码，所有 chunk 带序号元数据
+- **多语言 Embedding** — BAAI/bge-m3（1024 维），原生支持 dense + sparse 双向量
+- **灵活的 LLM 接入** — 通过 LiteLLM 统一接入 OpenAI、Anthropic、DeepSeek、MiMo 等任意兼容 OpenAI 格式的 API
+- **全链路可观测** — LangSmith 追踪 Agent 执行过程
 - **本地部署** — 所有数据自托管，无外部依赖
-- **LangSmith 追踪** — 全链路 Agent 执行监控与调试
+- **检索评估** — 内置评估系统，可量化检索召回率和精确率
 
 ---
 
-## 🏗️ 架构
+## 架构
 
 ```
-PDF 上传                              用户提问
-    │                                    │
-    ▼                                    ▼
-┌─────────────────┐            ┌─────────────────┐
-│  PDF 解析器      │           │  FastAPI 服务   │ 
-│  (PyPDFLoader)  │            └────────┬────────┘
-└────────┬────────┘                     │
-         ▼                             ▼
-┌─────────────────┐            ┌─────────────────┐
-│  文本切分器     │            │  深度 Agent     │
-│  (Recursive)    │            │ (检索工具 + LLM)│
-└────────┬────────┘            │                 │
-         ▼                     │                 │
-┌─────────────────┐            └──────────┬──────┘
-│  Embedding      │                       │
-│  (all-MiniLM)   │                       ▼
-└────────┬────────┘            ┌─────────────────┐
-         │                     │  Redis 会话     │
-         ▼                     │  (多轮对话)     │
-┌─────────────────┐            └────────┬────────┘
-│  Milvus         │                     │
-│  (向量存储)     │                     ▼
-└────────┬────────┘            ┌─────────────────┐
-         │                     │  PostgreSQL     │
-         ▼                     │  (聊天历史)     │
-    ┌────────────┐             └─────────────────┘
-    │  向量检索   │
-    │  (top-k)   │
-    └─────┬──────┘
-          │
-          ▼
-    ┌────────────┐
-    │    LLM     │
-    │  (生成答案) │
-    └────────────┘
+用户提问
+    │
+    ▼
+┌─────────────────────┐
+│   FastAPI 服务       │
+│   POST /chat/stream  │
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐
+│   Deep Agent         │
+│   (LangGraph +       │
+│    StreamingLiteLLM) │
+└──────────┬──────────┘
+           │ tool_call: retrieval_tool
+           ▼
+┌─────────────────────┐
+│   混合检索           │
+│   Dense + Sparse     │
+│   + RRF + Reranking  │
+└──────────┬──────────┘
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+┌────────┐  ┌─────────┐
+│ Milvus │  │ Redis   │
+│ 向量库 │  │ 会话缓存│
+└────┬───┘  └────┬────┘
+     │           │
+     ▼           ▼
+┌────────┐  ┌─────────────┐
+│ 文档   │  │ PostgreSQL  │
+│ 入库   │  │ 对话历史    │
+└────────┘  └─────────────┘
 ```
+
+### 检索流程
+
+1. 用户查询通过 BGE-M3 编码为 dense + sparse 双向量
+2. Milvus 并行执行 dense（AUTOINDEX, IP）+ sparse（SPARSE_INVERTED_INDEX, IP）搜索
+3. RRF（Reciprocal Rank Fusion）融合两路结果
+4. 交叉编码器（BAAI/bge-reranker-v2-m3）对候选重排序
+5. 返回 top-k 结果，包含文本、来源、页码、片段序号、相关性分数
+
+### 入库流程
+
+1. 扫描文档目录，增量处理新文件
+2. 按格式选择加载器（PyPDF / Docx2txt / UnstructuredExcel / TextLoader）
+3. Markdown 用 `MarkdownHeaderTextSplitter`（保留 H1/H2/H3 层级），其他用 `RecursiveCharacterTextSplitter`
+4. BGE-M3 编码为 dense + sparse 双向量
+5. 存入 Milvus（含 source、page、chunk_index 元数据）
+6. 同步 PostgreSQL 文档状态
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
-### 环境准备
+### 环境要求
 
-- **Python 3.12+** — 推荐使用 `pyenv install 3.12`
-- **Docker Desktop** — 用于运行 Milvus、PostgreSQL、Redis
+- Python 3.12+
+- Docker Desktop（用于 Milvus、PostgreSQL、Redis）
 
-### 1. 安装依赖
+### 1. 启动基础设施
+
+```bash
+docker-compose up -d
+```
+
+| 服务 | 端口 | 用途 |
+|------|------|------|
+| Milvus | 19530 | 向量数据库（dense + sparse） |
+| Attu | 8080 | Milvus Web 管理界面 |
+| PostgreSQL | 5432 | 文档元数据、对话历史 |
+| Redis | 6379 | 会话缓存、分布式锁 |
+| MinIO | 9001 | Milvus 对象存储后端 |
+
+### 2. 安装依赖
 
 ```bash
 cd backend
 pip install -e .
 ```
 
-### 2. 配置文件
+### 3. 配置
 
 ```bash
-cp backend/.env.example backend/.env
-# 编辑 backend/.env，配置你的 API Key
+cp .env.example .env
 ```
 
-主要配置项：
+编辑 `.env`，配置 LLM API：
 
 ```env
-# LLM 配置
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o
 LLM_API_KEY=your_api_key
 LLM_API_BASE_URL=https://api.openai.com/v1
-
-# Embedding 配置
-EMBEDDING_PROVIDER=huggingface
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-EMBEDDING_DEVICE=cpu
-
-# 可选：LangSmith 追踪
-LANGSMITH_API_KEY=your_langsmith_key
-LANGSMITH_TRACING=true
 ```
 
-### 3. 启动基础设施
+支持任意 OpenAI 兼容 API，例如 DeepSeek、MiMo 等：
 
-```bash
-docker-compose up -d
+```env
+LLM_PROVIDER=openai
+LLM_MODEL=deepseek-chat
+LLM_API_KEY=your_key
+LLM_API_BASE_URL=https://api.deepseek.com/v1
 ```
-
-| 服务 | 地址 | 用途 |
-|------|------|------|
-| **Milvus** | localhost:19530 | 向量数据库，存储文档 embedding |
-| **Attu** | http://localhost:8080 | Milvus Web UI，可视化管理向量数据 |
-| **PostgreSQL** | localhost:5432 | 文档元数据、对话历史 |
-| **Redis** | localhost:6379 | 查询缓存、会话状态 |
-| **MinIO Console** | http://localhost:9001 | Milvus 后端对象存储管理 |
 
 ### 4. 启动服务
 
 ```bash
-cd backend
 uvicorn main:app --reload --port 8000
-# 浏览器打开 http://localhost:8000
 ```
+
+浏览器打开 http://localhost:8000
 
 ---
 
-## 📖 使用说明
+## 使用
 
 ### Web UI
 
-访问 `http://localhost:8000`，使用侧边栏 Tab 切换功能：
-
-- **对话** — 基于知识库的智能问答，支持多轮对话
-- **文档** — 上传 PDF、管理文档、触发向量入库
+- **对话** — 基于知识库的流式问答，支持多轮对话
+- **文档** — 上传文档、管理文档、触发入库
 
 ### CLI
 
@@ -148,22 +157,41 @@ uvicorn main:app --reload --port 8000
 python backend/cli.py
 ```
 
-菜单选项：
-- **1** — 摄入文档
-- **2** — 检索文档
-- **3** — 聊天问答
-- **4** — 退出
+| 选项 | 功能 |
+|------|------|
+| 1 | 摄入文档 |
+| 2 | 检索文档 |
+| 3 | 聊天问答 |
+| 4 | 评估（检索质量测试） |
+| 5 | 退出 |
+
+### 评估系统
+
+```bash
+python backend/cli.py
+# 选择 4
+```
+
+评估流程：加载 `eval/dataset.json` 测试数据集，对每个问题运行检索，计算召回率和精确率，输出格式化报告。扩充测试数据集：编辑 `eval/dataset.json` 添加更多 Q&A 用例。
 
 ---
 
-## 🔌 API 参考
+## API 参考
 
-### 对话
+### 聊天
 
 ```
 POST /chat
 Body: { "message": "...", "session_id": "可选" }
 Response: { "response": "...", "session_id": "..." }
+```
+
+```
+POST /chat/stream
+Body: { "message": "...", "session_id": "可选" }
+Response: text/event-stream
+  data: {"token": "..."}
+  data: {"done": true, "session_id": "..."}
 ```
 
 ```
@@ -173,7 +201,7 @@ Response: { "sessions": [{ "session_id": "...", "first_message": "...", "created
 
 ```
 GET /chat/history/{session_id}
-Response: { "session_id": "...", "messages": [{ "role": "user|assistant", "content": "...", "created_at": "..." }] }
+Response: { "session_id": "...", "messages": [{ "role": "...", "content": "...", "created_at": "..." }] }
 ```
 
 ```
@@ -185,13 +213,13 @@ Response: { "success": true }
 
 ```
 GET /documents
-Response: { "documents": [{ "filename": "...", "size_bytes": ..., "status": "...", "chunk_count": ..., "uploaded_at": "...", "exists_on_disk": true/false }] }
+Response: { "documents": [{ "filename": "...", "size_bytes": ..., "status": "...", "chunk_count": ... }] }
 ```
 
 ```
 POST /documents/upload
-Body: multipart/form-data，字段名 "file"（仅 PDF，最大 50MB）
-Response: { "filename": "...", "size_bytes": ..., "status": "uploaded", "uploaded_at": "..." }
+Body: multipart/form-data，字段名 "file"（支持 PDF/DOCX/XLSX/TXT/MD，最大 50MB）
+Response: { "filename": "...", "status": "uploaded" }
 ```
 
 ```
@@ -208,7 +236,7 @@ Response: { "status": "started" | "already_running" }
 
 ```
 GET /ingest/status
-Response: { "status": "idle|running|success|failed", "document_count": ..., "chunk_count": ..., "last_ingest": "..." }
+Response: { "status": "idle|running|success|failed", "document_count": ..., "chunk_count": ... }
 ```
 
 ### 系统
@@ -218,63 +246,99 @@ GET /health
 Response: { "status": "ok" }
 
 GET /ready
-Response: { "status": "ready|degraded", "checks": { "milvus": true/false, "postgresql": true/false, "redis": true/false } }
+Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql": ..., "redis": ... } }
 ```
 
 ---
 
-## 📁 项目目录
+## 配置
+
+所有配置通过 `.env` 文件或环境变量设置，使用 `pydantic-settings` 验证。
+
+| 类别 | 变量 | 默认值 | 说明 |
+|------|------|--------|------|
+| **LLM** | `LLM_PROVIDER` | `openai` | LLM 提供商 |
+| | `LLM_MODEL` | `gpt-4o` | 模型名称 |
+| | `LLM_API_KEY` | | API Key |
+| | `LLM_API_BASE_URL` | | 自定义 API 地址 |
+| **Embedding** | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` 或 `openai` |
+| | `EMBEDDING_MODEL` | `BAAI/bge-m3` | Embedding 模型 |
+| | `EMBEDDING_DEVICE` | `cpu` | `cpu` 或 `cuda` |
+| | `EMBEDDING_NORMALIZE` | `true` | 向量归一化 |
+| | `HF_TOKEN` | | HuggingFace Token |
+| **数据库** | `DATABASE_URL` | `postgresql+asyncpg://...` | PostgreSQL 连接 |
+| | `REDIS_URL` | `redis://localhost:6379/0` | Redis 连接 |
+| **Milvus** | `MILVUS_HOST` | `localhost` | 主机 |
+| | `MILVUS_PORT` | `19530` | 端口 |
+| | `MILVUS_COLLECTION` | `ragmate_docs` | Collection 名称 |
+| **入库** | `CHUNK_SIZE` | `500` | 文本分块大小 |
+| | `CHUNK_OVERLAP` | `50` | 分块重叠 |
+| **检索** | `HYBRID_SEARCH_ENABLED` | `true` | 启用混合检索 |
+| | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker 模型 |
+| | `RERANKER_TOP_K` | `5` | 最终返回数量 |
+| **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
+| | `LANGSMITH_API_KEY` | | LangSmith API Key |
+
+---
+
+## 项目结构
 
 ```
 RagMate/
+├── docker-compose.yml
+├── LICENSE
+├── README.md
+├── README_zh.md
+├── CHANGELOG.md
 ├── .python-version
 ├── .gitignore
-├── LICENSE                      # MIT 许可证
-├── README.md                   # 英文版
-├── README_zh.md                # 本文件（中文版）
-├── CHANGELOG.md                # 版本历史
-├── docker-compose.yml
-├── backend/
-│   ├── pyproject.toml
-│   ├── .env.example
-│   ├── config.py                # Pydantic 配置，启动时校验，失败即终止
-│   ├── database.py              # SQLAlchemy 异步引擎
-│   ├── models.py                # Document / ChatHistory ORM 模型
-│   ├── errors.py                # 类型化错误层级
-│   ├── redis_client.py          # Redis 客户端 + 入库分布式锁
-│   ├── model_factory.py          # LLM/Embedding 工厂
-│   ├── retriever.py             # Milvus 向量检索
-│   ├── ingest.py                 # PDF 入库流程
-│   ├── agent.py                 # 深度 Agent（集成 retrieval_tool）
-│   ├── chat.py                  # 聊天编排（Redis 会话 + PG 持久化）
-│   ├── document_service.py       # 文档 CRUD 服务层
-│   ├── main.py                  # FastAPI 入口 + 所有端点
-│   ├── cli.py                   # CLI
-│   └── documents/              # PDF 存储目录
-└── frontend/
-    ├── index.html
-    ├── style.css
-    └── app.js
+├── frontend/
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+└── backend/
+    ├── pyproject.toml
+    ├── .env.example
+    ├── config.py              # 配置（pydantic-settings）
+    ├── main.py                # FastAPI 入口 + 所有端点
+    ├── agent.py               # Deep Agent（系统提示 + retrieval_tool）
+    ├── chat.py                # 聊天编排（同步 + 流式）
+    ├── retriever.py           # 混合检索 + Reranking
+    ├── ingest.py              # 文档处理 + 向量入库
+    ├── streaming_llm.py       # StreamingLiteLLM（token 级流式）
+    ├── model_factory.py       # LLM / Embedding 工厂
+    ├── document_service.py    # 文档 CRUD
+    ├── database.py            # SQLAlchemy 异步/同步引擎
+    ├── models.py              # ORM 模型（Document, ChatHistory）
+    ├── redis_client.py        # Redis 会话 / 锁 / 状态
+    ├── errors.py              # 类型化错误层级
+    ├── cli.py                 # CLI
+    ├── eval/                  # 评估系统
+    │   ├── dataset.json       # 测试 Q&A 数据集
+    │   ├── metrics.py         # 召回率 / 精确率
+    │   └── runner.py          # 评估运行器
+    └── documents/             # 文档存储目录
 ```
 
 ---
 
-## 🛠️ 技术栈
+## 技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| Web 框架 | FastAPI + Uvicorn | 高性能 ASGI，托管前端静态文件 |
-| 前端 | HTML/CSS/JS | 零依赖，原生前端 |
-| LLM | LiteLLM | 统一调用 OpenAI/Anthropic/DeepSeek |
-| Embedding | sentence-transformers | 本地 HuggingFace 向量化 |
-| 向量数据库 | Milvus | 生产级向量检索 |
-| Agent | Deep Agents | 多轮推理 + 子 Agent |
-| 追踪 | LangSmith | 全链路调试 |
-| 缓存 | Redis | 查询缓存 + 会话状态 |
+| Web 框架 | FastAPI + Uvicorn | ASGI，托管前端静态文件 |
+| 前端 | HTML/CSS/JS | 零依赖原生前端 |
+| LLM | LiteLLM | 统一调用 OpenAI/Anthropic/DeepSeek/MiMo |
+| Embedding | BAAI/bge-m3 | 1024 维，多语言，dense + sparse 双向量 |
+| 向量数据库 | Milvus 2.5 | 混合检索（dense + sparse + RRF） |
+| Reranker | BAAI/bge-reranker-v2-m3 | 交叉编码器重排序 |
+| Agent | LangGraph (Deep Agents) | 多轮推理 + 工具调用 |
+| 追踪 | LangSmith | Agent 执行监控 |
+| 缓存 | Redis | 会话状态 + 分布式锁 |
 | 存储 | PostgreSQL | 文档元数据 + 对话历史 |
 
 ---
 
-## 📄 许可证
+## 许可证
 
-MIT 许可证 — 详见 [LICENSE](LICENSE) 文件。
+MIT License — 详见 [LICENSE](LICENSE)。

@@ -36,10 +36,21 @@ AGENT_SYSTEM_PROMPT = """你是一个专业的深度研究助手，代号 Resear
 @tool
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
-    docs = retrieve(query, k=3)
-    if not docs:
+    results = retrieve(query, k=3)
+    if not results:
         return "未找到相关文档"
-    return "\n\n---\n\n".join(docs)
+    parts = []
+    for r in results:
+        source = r.get("source", "unknown")
+        page = r.get("page")
+        chunk_idx = r.get("chunk_index")
+        loc = f"【{source}】"
+        if page is not None:
+            loc += f" 第{page}页"
+        if chunk_idx is not None:
+            loc += f" 片段{chunk_idx}"
+        parts.append(f"{loc}\n{r['text']}")
+    return "\n\n---\n\n".join(parts)
 
 
 _agent = None
@@ -63,3 +74,25 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
         {"messages": messages},
         config={"configurable": {"thread_id": thread_id}},
     )
+
+
+def _extract_text_content(content) -> str:
+    """从 AIMessage.content 中提取文本，支持 str 和 list 两种格式。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [block["text"] for block in content if isinstance(block, dict) and block.get("type") == "text" and "text" in block]
+        return "\n".join(parts)
+    return ""
+
+
+def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
+    """流式运行 agent，逐 token yield。同步生成器，在线程池中调用。"""
+    for msg_chunk, _metadata in get_agent().stream(
+        {"messages": messages},
+        config={"configurable": {"thread_id": thread_id}},
+        stream_mode="messages",
+    ):
+        text = _extract_text_content(getattr(msg_chunk, "content", ""))
+        if text:
+            yield text

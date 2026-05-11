@@ -3,7 +3,7 @@ import uuid
 
 from langchain_core.messages import AIMessage
 
-from agent import run_agent
+from agent import run_agent, run_agent_streaming
 from database import async_session
 from models import ChatHistory
 from redis_client import load_session, save_session
@@ -119,3 +119,54 @@ async def chat(message: str, session_id: str | None = None) -> dict:
     await _persist_messages(session_id, msgs)
 
     return {"response": response_text, "session_id": session_id}
+
+
+_SENTINEL = object()
+
+
+async def chat_stream(message: str, session_id: str | None = None):
+    """流式聊天，逐 token yield。返回格式: {"token": str} 或 {"done": True, "session_id": str}"""
+    if not session_id:
+        session_id = uuid.uuid4().hex
+
+    history = await load_session(session_id)
+    history.append({"role": "user", "content": message})
+
+    queue: asyncio.Queue = asyncio.Queue()
+    full_response: list[str] = []
+
+    def _run():
+        try:
+            for token in run_agent_streaming(history, session_id):
+                full_response.append(token)
+                queue.put_nowait(token)
+        except Exception as e:
+            queue.put_nowait(_classify_error(e))
+        finally:
+            queue.put_nowait(_SENTINEL)
+
+    task = asyncio.get_running_loop().run_in_executor(None, _run)
+
+    try:
+        while True:
+            token = await queue.get()
+            if token is _SENTINEL:
+                break
+            yield {"token": token}
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+
+    response_text = "".join(full_response)
+    is_error = _is_error_response(response_text)
+
+    if not is_error:
+        history.append({"role": "assistant", "content": response_text})
+        await save_session(session_id, history)
+
+    msgs = [("user", message)]
+    if not is_error:
+        msgs.append(("assistant", response_text))
+    await _persist_messages(session_id, msgs)
+
+    yield {"done": True, "session_id": session_id}

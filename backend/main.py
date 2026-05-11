@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -8,8 +9,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
+from starlette.responses import StreamingResponse
 
-from chat import chat
+from chat import chat, chat_stream
 from config import settings
 from database import async_session, engine, init_db, sync_engine
 import document_service
@@ -168,6 +170,19 @@ async def ready():
 async def chat_endpoint(request: ChatRequest):
     result = await chat(request.message, request.session_id)
     return ChatResponse(response=result["response"], session_id=result["session_id"])
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    async def event_generator():
+        async for chunk in chat_stream(request.message, request.session_id):
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/chat/sessions")

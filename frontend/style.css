@@ -242,6 +242,14 @@ body {
 .typing-dots span:nth-child(2) { animation-delay: .2s; }
 .typing-dots span:nth-child(3) { animation-delay: .4s; }
 
+.stream-cursor::after {
+  content: '▋';
+  display: inline;
+  animation: blink 1s step-end infinite;
+  color: var(--accent);
+}
+@keyframes blink { 50% { opacity: 0; } }
+
 /* ── Chat Input ── */
 .chat-input-wrap {
   flex-shrink: 0; padding: 0 24px 20px; background: var(--surface);
@@ -343,3 +351,25 @@ body {
 
 /* ── Hidden ── */
 .hidden { display: none !important; }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 24px; min-width: 300px; max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.12);
+}
+.modal-box p { margin: 0 0 20px; font-size: 14px; color: var(--text); line-height: 1.5; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-modal {
+  padding: 6px 16px; border-radius: var(--radius-sm); font-size: 13px;
+  font-family: var(--font); cursor: pointer; border: none; transition: all var(--transition);
+}
+.btn-modal-cancel { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+.btn-modal-cancel:hover { background: var(--border); }
+.btn-modal-confirm { background: var(--danger); color: #fff; }
+.btn-modal-confirm:hover { opacity: .85; }

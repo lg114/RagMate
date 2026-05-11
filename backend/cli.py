@@ -3,6 +3,7 @@
 import asyncio
 import sys
 
+from eval.runner import run_eval
 from ingest import ingest_documents
 from retriever import retrieve
 from chat import chat
@@ -21,7 +22,8 @@ def menu():
     print("1. 摄入文档 (ingest documents)")
     print("2. 检索文档 (retrieve documents)")
     print("3. 聊天 (chat)")
-    print("4. 退出 (exit)")
+    print("4. 评估 (evaluate)")
+    print("5. 退出 (exit)")
     print("==================")
 
 
@@ -84,12 +86,19 @@ async def handle_chat():
                         "  2. LLM API 配置是否正确")
 
 
+def handle_eval():
+    try:
+        run_eval()
+    except Exception as e:
+        safe_print(f"评估失败: {e}")
+
+
 def main():
     print("欢迎使用 RagMate CLI")
 
     while True:
         menu()
-        choice = input("选择 (1-4): ").strip()
+        choice = input("选择 (1-5): ").strip()
 
         if choice == '1':
             handle_ingest()
@@ -98,6 +107,8 @@ def main():
         elif choice == '3':
             asyncio.run(handle_chat())
         elif choice == '4':
+            handle_eval()
+        elif choice == '5':
             print("再见!")
             sys.exit(0)
         else:

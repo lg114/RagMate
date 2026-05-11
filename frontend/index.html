@@ -62,7 +62,7 @@
           <div class="doc-toolbar">
             <div class="doc-upload-area">
               <label class="upload-zone" id="upload-zone">
-                <input type="file" id="file-input" accept=".pdf" multiple hidden>
+                <input type="file" id="file-input" accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md" multiple hidden>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 <span>上传 PDF</span>
               </label>
@@ -99,6 +99,16 @@
   </section>
 
 </main>
+
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <p id="modal-message"></p>
+    <div class="modal-actions">
+      <button id="modal-cancel" class="btn-modal btn-modal-cancel">取消</button>
+      <button id="modal-confirm" class="btn-modal btn-modal-confirm">确定</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

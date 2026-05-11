@@ -22,6 +22,39 @@ const API = {
     return this.request('POST', '/chat', { message, session_id: sessionId });
   },
 
+  async chatStream(message, sessionId, onToken, onDone, onError) {
+    try {
+      const res = await fetch('/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, session_id: sessionId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `Error ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = JSON.parse(line.slice(6));
+          if (data.done) { onDone(data.session_id); return; }
+          if (data.token) onToken(data.token);
+        }
+      }
+      onError('连接意外断开');
+    } catch (err) {
+      onError(err.message || '请求失败，请重试');
+    }
+  },
+
   getDocuments() {
     return this.request('GET', '/documents');
   },
@@ -58,6 +91,17 @@ const API = {
 };
 
 // ── Helpers ──
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-message').textContent = message;
+    overlay.classList.remove('hidden');
+    const cleanup = (result) => { overlay.classList.add('hidden'); resolve(result); };
+    document.getElementById('modal-confirm').onclick = () => cleanup(true);
+    document.getElementById('modal-cancel').onclick = () => cleanup(false);
+  });
+}
+
 function formatFileSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -172,24 +216,61 @@ const ChatPanel = {
 
     this.textareaEl.value = '';
     this.hideError();
-
     this.addMessage('user', text);
-    this.showLoading();
     this.setDisabled(true);
 
-    try {
-      const sid = getSessionId();
-      const data = await API.chat(text, sid);
-      this.hideLoading();
-      this.addMessage('assistant', data.response);
-    } catch (err) {
-      this.hideLoading();
-      this.showError(err.message || '请求失败，请重试');
-    } finally {
-      this.setDisabled(false);
-      this.textareaEl.focus();
-      HistoryPanel.load();
-    }
+    const sid = getSessionId();
+    const streamDiv = this.startStreamMessage();
+    let fullText = '';
+
+    await API.chatStream(
+      text,
+      sid,
+      (token) => { fullText += token; this.appendStreamToken(streamDiv, fullText); },
+      (sessionId) => {
+        this.finalizeStreamMessage(streamDiv, fullText);
+        sessionStorage.setItem('ragmate_session_id', sessionId);
+        this.setDisabled(false);
+        this.textareaEl.focus();
+        HistoryPanel.load();
+      },
+      (errMsg) => {
+        this.finalizeStreamMessage(streamDiv, fullText || '');
+        this.showError(errMsg);
+        this.setDisabled(false);
+        this.textareaEl.focus();
+        HistoryPanel.load();
+      },
+    );
+  },
+
+  startStreamMessage() {
+    const empty = this.messagesEl.querySelector('.empty-state');
+    if (empty) empty.remove();
+
+    const div = document.createElement('div');
+    div.className = 'msg msg-assistant';
+    div.innerHTML = `<div class="msg-avatar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/>
+        <line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+    </div><div class="msg-content"><span class="stream-cursor"></span></div>`;
+    this.messagesEl.appendChild(div);
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    return div;
+  },
+
+  appendStreamToken(div, fullText) {
+    const content = div.querySelector('.msg-content');
+    content.innerHTML = DOMPurify.sanitize(marked.parse(fullText)) + '<span class="stream-cursor"></span>';
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  },
+
+  finalizeStreamMessage(div, fullText) {
+    const content = div.querySelector('.msg-content');
+    content.innerHTML = DOMPurify.sanitize(marked.parse(fullText || '没有收到回复'));
   },
 
   clear() {
@@ -254,10 +335,11 @@ const HistoryPanel = {
   },
 
   async deleteSession(sessionId) {
-    if (!confirm('确定删除该会话？')) return;
+    if (!await showConfirm('确定删除该会话？')) return;
     try {
       await API.deleteSession(sessionId);
-      if (this.activeId === sessionId) {
+      const currentSessionId = sessionStorage.getItem('ragmate_session_id');
+      if (this.activeId === sessionId || currentSessionId === sessionId) {
         this.activeId = null;
         ChatPanel.clear();
       }
@@ -373,8 +455,10 @@ const DocumentsPanel = {
   },
 
   async upload(file) {
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      this.showUploadError('仅支持 PDF 文件');
+    const ext = file.name.toLowerCase().split('.').pop();
+    const supported = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'txt', 'md'];
+    if (!supported.includes(ext)) {
+      this.showUploadError('不支持的文件格式');
       return;
     }
     if (file.size > 50 * 1024 * 1024) {
@@ -396,7 +480,7 @@ const DocumentsPanel = {
   },
 
   async deleteDoc(filename) {
-    if (!confirm(`确定删除 "${filename}"？`)) return;
+    if (!await showConfirm(`确定删除 "${filename}"？`)) return;
     try {
       await API.deleteDocument(filename);
       await this.load();

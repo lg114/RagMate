@@ -6,6 +6,68 @@ All notable changes to this project are documented here.
 
 ---
 
+## Prototype 3 — 2026-05-11
+
+### Streaming Output
+- Chat now supports SSE streaming — tokens are displayed progressively instead of waiting for the complete response
+- `agent.py` — New `run_agent_streaming()` function using LangGraph's `.stream(stream_mode="messages")` for token-level streaming
+- `chat.py` — New `chat_stream()` async generator bridging sync agent streaming to async SSE via queue
+- `main.py` — New `POST /chat/stream` SSE endpoint, original `/chat` endpoint preserved for backward compatibility
+- `streaming_llm.py` — New `StreamingLiteLLM` class with true token-level streaming support (replaces `ThinkingChatLiteLLM` which buffers all tokens)
+- `streaming_llm.py` — `bind_tools()` support for agent tool-calling flow
+- `model_factory.py` — Switched from `ThinkingChatLiteLLM` to `StreamingLiteLLM`
+- Frontend `app.js` — New `API.chatStream()` for SSE consumption, `ChatPanel.send()` rewritten for progressive rendering with blinking cursor
+- Frontend `style.css` — New `.stream-cursor` animation for streaming indicator
+
+### Multi-Format Document Support
+- Now supports PDF, DOCX, XLSX, TXT, Markdown files (previously PDF only)
+- `ingest.py` — New `load_document()` loader factory using pypdf, docx2txt, unstructured, openpyxl
+- `ingest.py` — `SUPPORTED_EXTENSIONS` constant defines accepted file types
+- `document_service.py` — `validate_filename()` updated to accept all supported formats
+- Frontend `index.html` — File input `accept` attribute updated for multi-format upload
+- Frontend `app.js` — Upload validation updated to check against supported extensions
+- New dependencies: `docx2txt`, `unstructured`, `openpyxl`, `msoffcrypto-tool`, `xlrd`
+
+### Embedding Upgrade
+- Default embedding model changed from `all-MiniLM-L6-v2` (384-dim, English) to `BAAI/bge-m3` (1024-dim, multilingual)
+- Significantly improved Chinese semantic retrieval quality
+- `model_factory.py` — Added `trust_remote_code=True` for bge-m3 custom code support
+- `config.py` — Default `EMBEDDING_MODEL` updated to `BAAI/bge-m3`
+- `.env.example` / `README` updated with new default
+- Note: existing Milvus collections need re-ingestion after model change (dimension mismatch 384 → 1024)
+
+### Hybrid Search + Reranking
+- Retrieval upgraded from pure dense vector search to hybrid search (dense + sparse) with RRF fusion + cross-encoder reranking
+- `retriever.py` — Rewritten: uses `client.hybrid_search()` with dense + sparse `AnnSearchRequest` + `RRFRanker`, then `BAAI/bge-reranker-v2-m3` cross-encoder reranking
+- `retriever.py` — `retrieve()` now returns `List[dict]` with `text`, `source`, `page`, `score` fields
+- `ingest.py` — Uses `FlagEmbedding.BGEM3FlagModel` to encode both dense and sparse vectors per chunk
+- `ingest.py` — Milvus collection schema updated with `SPARSE_FLOAT_VECTOR` field and `SPARSE_INVERTED_INDEX`
+- `ingest.py` — New `encode_documents()` and `encode_query()` functions for bge-m3 dual-vector encoding
+- `agent.py` — `retrieval_tool` updated to format source + page metadata in results
+- `config.py` — New settings: `HYBRID_SEARCH_ENABLED`, `RERANKER_MODEL`, `RERANKER_TOP_K`
+- New dependency: `FlagEmbedding`
+- Note: Milvus collection schema changed — old data must be re-ingested
+
+### Smarter Chunking
+- Markdown files now use `MarkdownHeaderTextSplitter` to preserve document hierarchy (H1/H2/H3 as metadata)
+- PDF page numbers preserved in chunk metadata
+- All chunks now include `chunk_index` metadata for sequential tracking
+- `retriever.py` — Returns `chunk_index` in results
+- `agent.py` — `retrieval_tool` formats source + page + chunk_index in citations
+
+### Evaluation System
+- New `eval/` module for retrieval quality evaluation
+- `eval/dataset.json` — Test Q&A dataset (question + expected sources)
+- `eval/metrics.py` — Retrieval recall and precision metrics
+- `eval/runner.py` — Evaluation runner with latency tracking and formatted report
+- `cli.py` — New option "4. 评估" to run evaluation from CLI
+
+### Bug Fixes
+- Fixed delete confirmation dialog — replaced native `confirm()` with custom modal that works reliably
+- Fixed session delete not clearing chat panel when deleting the active session
+
+---
+
 ## Prototype 2 — 2025-05-07
 
 ### Retrieval Layer
