@@ -4,6 +4,55 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## Prototype 5 — 2026-05-11
+
+### Critical Fixes
+- `agent.py` — Fixed streaming leaking tool results to user: `run_agent_streaming()` now filters out `ToolMessage`, only yields `AIMessageChunk` text
+- `agent.py` — Page numbers now display as 1-based (was 0-based from PyPDFLoader metadata)
+- `cli.py` — CLI page display also fixed to 1-based
+- `database.py` — `init_db()` now runs `ALTER TABLE ADD COLUMN IF NOT EXISTS file_mtime` for existing databases
+- `ingest.py` — Fixed `NameError`: `ingested_filenames` renamed to `ingested_info`
+- `ingest.py` — Old records with `file_mtime=NULL` now trigger re-ingestion to backfill mtime
+- `main.py` — Startup no longer force-releases ingest lock (safe for multi-instance); logs warning instead
+- `retriever.py` — Entire retrieval pipeline wrapped in try/except; `RetrievalError` raised on any failure
+- `cli.py` — `handle_ingest()` now calls `init_db()` before ingestion (ensures schema migrations run)
+
+### Stability Fixes
+- `chat.py` — Fixed `asyncio.Queue` thread-safety: now uses `loop.call_soon_threadsafe()` for cross-thread writes
+- `cli.py` — Fixed `retrieve()` dict handling in CLI menu (was slicing dict as string)
+- `redis_client.py` — Added `renew_ingest_lock()` for lock TTL renewal during long ingestion
+- `main.py` — Ingest lock renewal: background task extends TTL every 5 minutes during ingestion
+- `main.py` — Startup lock cleanup now checks if lock exists before releasing (safe for multi-instance)
+- `ingest.py` — Incremental ingest now detects file changes via `mtime` (not just filename)
+- `models.py` — Added `file_mtime` field to Document model
+- `retriever.py` — Raises `RetrievalError` on service failure instead of returning empty list
+- `errors.py` — New `RetrievalError` for distinguishing "no results" from "service error"
+- `agent.py` — `retrieval_tool` catches `RetrievalError` and returns user-friendly message
+- Frontend `index.html` — Removed fake SRI integrity hashes from CDN scripts (browser was blocking)
+- Frontend `index.html` — Upload text changed from "上传 PDF" to "上传文档" (supports multiple formats)
+
+---
+
+## Prototype 4 — 2026-05-11
+
+### Code Review Fixes
+- `streaming_llm.py` — Fixed streaming tool call JSON parse crash (partial chunks now handled gracefully)
+- `streaming_llm.py` — `_bound_tools` now uses Pydantic `PrivateAttr` instead of private field
+- `redis_client.py` — Fixed singleton race condition with `asyncio.Lock` double-checked locking
+- `redis_client.py` — Distributed lock now uses UUID token + Lua script for safe release (only lock holder can release)
+- `redis_client.py` — `set_ingest_status` no longer mutates the input dict (copies first)
+- `redis_client.py` — Added `force_release_ingest_lock()` for startup cleanup
+- `database.py` — Sync engine URL now uses SQLAlchemy `make_url()` instead of string replace
+- `document_service.py` — Silent `except Exception: pass` now logs warnings with `exc_info`
+- `document_service.py` — Added security comment for Milvus filter string construction
+- `ingest.py` — Milvus collection now uses `auto_id=True` instead of manual ID offset (eliminates ID conflict risk)
+- `main.py` — `start_ingest` race condition fixed with `asyncio.Lock`
+- `main.py` — CORS origins now configurable via `CORS_ORIGINS` setting (default: `*`)
+- `retriever.py` — `retrieve()` now catches exceptions and returns empty list with error log
+- Frontend `index.html` — Locked marked.js to v15.0.7, added SRI integrity attributes to CDN scripts
+- Frontend `style.css` — Added responsive layout (`@media max-width: 768px`)
+- Frontend `style.css` — Added `prefers-reduced-motion` media query to disable animations
+
 ---
 
 ## Prototype 3 — 2026-05-11

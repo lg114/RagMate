@@ -42,3 +42,12 @@ class ServiceUnavailableError(AppError):
             code="SERVICE_UNAVAILABLE",
             status_code=503,
         )
+
+
+class RetrievalError(AppError):
+    def __init__(self, message: str = "检索服务异常，请稍后重试"):
+        super().__init__(
+            message=message,
+            code="RETRIEVAL_ERROR",
+            status_code=503,
+        )

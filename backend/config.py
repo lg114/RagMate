@@ -47,5 +47,8 @@ class Settings(BaseSettings):
     # Documents
     DOCUMENTS_DIR: str = "./documents"
 
+    # CORS
+    CORS_ORIGINS: str = "*"
+
 
 settings = Settings()

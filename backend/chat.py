@@ -134,16 +134,17 @@ async def chat_stream(message: str, session_id: str | None = None):
 
     queue: asyncio.Queue = asyncio.Queue()
     full_response: list[str] = []
+    loop = asyncio.get_running_loop()
 
     def _run():
         try:
             for token in run_agent_streaming(history, session_id):
                 full_response.append(token)
-                queue.put_nowait(token)
+                loop.call_soon_threadsafe(queue.put_nowait, token)
         except Exception as e:
-            queue.put_nowait(_classify_error(e))
+            loop.call_soon_threadsafe(queue.put_nowait, _classify_error(e))
         finally:
-            queue.put_nowait(_SENTINEL)
+            loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
 
     task = asyncio.get_running_loop().run_in_executor(None, _run)
 

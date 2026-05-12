@@ -41,65 +41,74 @@ def get_reranker() -> CrossEncoder:
 
 
 def retrieve(query: str, k: int = None) -> List[dict]:
-    """混合检索 + Reranking。返回 [{text, source, page}, ...]。"""
+    """混合检索 + Reranking。返回 [{text, source, page}, ...]。空列表表示无匹配。"""
+    import logging
+    from errors import RetrievalError
     from ingest import encode_query
 
     if k is None:
         k = settings.RERANKER_TOP_K
 
-    client = get_milvus_client()
-    client.load_collection(settings.MILVUS_COLLECTION)
-    dense_vec, sparse_vec = encode_query(query)
+    try:
+        client = get_milvus_client()
+        client.load_collection(settings.MILVUS_COLLECTION)
+        dense_vec, sparse_vec = encode_query(query)
 
-    # 混合检索：dense + sparse，多取一些给 reranker
-    over_fetch = k * 3
+        # 混合检索：dense + sparse，多取一些给 reranker
+        over_fetch = k * 3
 
-    dense_req = AnnSearchRequest(
-        data=[dense_vec],
-        anns_field="dense",
-        param={"metric_type": "IP", "params": {}},
-        limit=over_fetch,
-    )
-    sparse_req = AnnSearchRequest(
-        data=[sparse_vec],
-        anns_field="sparse",
-        param={"metric_type": "IP", "params": {"drop_ratio_search": 0.2}},
-        limit=over_fetch,
-    )
+        dense_req = AnnSearchRequest(
+            data=[dense_vec],
+            anns_field="dense",
+            param={"metric_type": "IP", "params": {}},
+            limit=over_fetch,
+        )
+        sparse_req = AnnSearchRequest(
+            data=[sparse_vec],
+            anns_field="sparse",
+            param={"metric_type": "IP", "params": {"drop_ratio_search": 0.2}},
+            limit=over_fetch,
+        )
 
-    results = client.hybrid_search(
-        collection_name=settings.MILVUS_COLLECTION,
-        reqs=[dense_req, sparse_req],
-        ranker=RRFRanker(),
-        limit=over_fetch,
-        output_fields=["text", "metadata"],
-    )
+        results = client.hybrid_search(
+            collection_name=settings.MILVUS_COLLECTION,
+            reqs=[dense_req, sparse_req],
+            ranker=RRFRanker(),
+            limit=over_fetch,
+            output_fields=["text", "metadata"],
+        )
 
-    if not results or not results[0]:
-        return []
+        if not results or not results[0]:
+            return []
 
-    # 提取候选
-    candidates = []
-    for hit in results[0]:
-        entity = hit["entity"]
-        meta = entity.get("metadata", {})
-        candidates.append({
-            "text": entity["text"],
-            "source": meta.get("source", ""),
-            "page": meta.get("page"),
-            "chunk_index": meta.get("chunk_index"),
-        })
+        # 提取候选
+        candidates = []
+        for hit in results[0]:
+            entity = hit["entity"]
+            meta = entity.get("metadata", {})
+            candidates.append({
+                "text": entity["text"],
+                "source": meta.get("source", ""),
+                "page": meta.get("page"),
+                "chunk_index": meta.get("chunk_index"),
+            })
 
-    # Reranking
-    reranker = get_reranker()
-    pairs = [(query, c["text"]) for c in candidates]
-    scores = reranker.predict(pairs)
+        # Reranking
+        reranker = get_reranker()
+        pairs = [(query, c["text"]) for c in candidates]
+        scores = reranker.predict(pairs)
 
-    for c, score in zip(candidates, scores):
-        c["score"] = float(score)
+        for c, score in zip(candidates, scores):
+            c["score"] = float(score)
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    return candidates[:k]
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+        return candidates[:k]
+
+    except RetrievalError:
+        raise
+    except Exception as e:
+        logging.getLogger("ragmate").error(f"Retrieval failed: {e}", exc_info=True)
+        raise RetrievalError() from e
 
 
 if __name__ == "__main__":

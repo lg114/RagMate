@@ -10,7 +10,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 
 def _convert_messages(messages: list[BaseMessage]) -> list[dict]:
@@ -57,7 +57,7 @@ class StreamingLiteLLM(BaseChatModel):
     api_base: str = ""
     temperature: float = 0.01
     request_timeout: float = 60
-    _bound_tools: list[dict] | None = None
+    _bound_tools: list[dict] | None = PrivateAttr(default=None)
 
     class Config:
         arbitrary_types_allowed = True
@@ -118,7 +118,10 @@ class StreamingLiteLLM(BaseChatModel):
                 tool_calls = []
                 for tc in delta.tool_calls:
                     args_raw = tc.function.arguments if tc.function else ""
-                    args = json.loads(args_raw) if isinstance(args_raw, str) and args_raw else args_raw if isinstance(args_raw, dict) else {}
+                    try:
+                        args = json.loads(args_raw) if isinstance(args_raw, str) and args_raw else args_raw if isinstance(args_raw, dict) else {}
+                    except json.JSONDecodeError:
+                        args = {}
                     tool_calls.append({"id": tc.id or "", "name": tc.function.name if tc.function else "", "args": args})
             chunk_msg = AIMessageChunk(content=content, tool_calls=tool_calls or [])
             yield ChatGenerationChunk(message=chunk_msg)

@@ -3,6 +3,7 @@
 import asyncio
 import sys
 
+from database import init_db
 from eval.runner import run_eval
 from ingest import ingest_documents
 from retriever import retrieve
@@ -31,6 +32,12 @@ INGEST_TIMEOUT = 3600  # 入库超时（秒）
 
 
 def handle_ingest():
+    print("正在初始化数据库...")
+    try:
+        asyncio.run(init_db())
+    except Exception as e:
+        safe_print(f"数据库初始化失败: {e}")
+        return
     print("正在摄入文档...")
     try:
         asyncio.run(asyncio.wait_for(asyncio.to_thread(ingest_documents), timeout=INGEST_TIMEOUT))
@@ -52,8 +59,11 @@ def handle_retrieve():
             timeout=30,
         ))
         safe_print(f"\n找到 {len(results)} 条结果:\n")
-        for i, doc in enumerate(results, 1):
-            safe_print(f"[{i}] {doc[:200]}...")
+        for i, r in enumerate(results, 1):
+            source = r.get("source", "")
+            page = r.get("page")
+            loc = f"【{source}】" + (f" 第{page + 1}页" if page is not None else "")
+            safe_print(f"[{i}] {loc} {r['text'][:200]}...")
     except asyncio.TimeoutError:
         safe_print("检索超时（30s），请重试")
     except Exception as e:

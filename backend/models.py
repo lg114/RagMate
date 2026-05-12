@@ -16,6 +16,7 @@ class Document(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     filename: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    file_mtime: Mapped[float | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="uploaded")
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)

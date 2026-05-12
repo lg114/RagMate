@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -140,21 +141,22 @@ async def delete_document(
         try:
             os.remove(filepath)
         except Exception:
-            pass
+            logging.getLogger("ragmate").warning(f"Failed to delete file {filepath}", exc_info=True)
 
     if milvus_client and milvus_client.has_collection(settings.MILVUS_COLLECTION):
         try:
+            # filter 值经过 validate_filename() 校验，不含特殊字符
             escaped_name = name.replace('"', '\\"')
             milvus_client.delete(
                 collection_name=settings.MILVUS_COLLECTION,
                 filter=f'metadata["source"] == "{escaped_name}"',
             )
         except Exception:
-            pass
+            logging.getLogger("ragmate").warning(f"Failed to delete Milvus vectors for {name}", exc_info=True)
 
     # 4. 清理 Redis 会话缓存（不影响主流程，失败忽略）
     try:
         r = await get_redis()
         await r.delete(f"ragmate:session:{name}")
     except Exception:
-        pass
+        logging.getLogger("ragmate").warning(f"Failed to delete Redis session for {name}", exc_info=True)

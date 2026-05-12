@@ -82,15 +82,18 @@ def _sync_documents_table(directory: str, filenames: list[str], chunk_counts: di
             doc = existing.get(filename)
             filepath = os.path.join(directory, filename)
             size_bytes = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+            mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else None
             if doc:
                 doc.status = "ingested"
                 doc.chunk_count = chunk_counts.get(filename, 0)
                 doc.size_bytes = size_bytes
+                doc.file_mtime = mtime
                 doc.ingested_at = now
             else:
                 doc = Document(
                     filename=filename,
                     size_bytes=size_bytes,
+                    file_mtime=mtime,
                     status="ingested",
                     chunk_count=chunk_counts.get(filename, 0),
                     uploaded_at=now,
@@ -118,15 +121,29 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
 
     with SyncSession() as session:
         result = session.execute(
-            select(Document.filename).where(
+            select(Document.filename, Document.file_mtime).where(
                 Document.filename.in_(all_files),
                 Document.status == "ingested",
             )
         )
-        ingested_filenames = {row[0] for row in result.fetchall()}
+        ingested_info = {row[0]: row[1] for row in result.fetchall()}
 
-    new_files = [f for f in all_files if f not in ingested_filenames]
-    print(f"[INGEST] Found {len(all_files)} files, {len(ingested_filenames)} already ingested, {len(new_files)} new")
+    # 检查新文件或文件已修改（mtime 变化）
+    new_files = []
+    for f in all_files:
+        if f not in ingested_info:
+            new_files.append(f)
+        else:
+            filepath = os.path.join(docs_dir, f)
+            current_mtime = os.path.getmtime(filepath)
+            stored_mtime = ingested_info[f]
+            if stored_mtime is None:
+                # 旧记录没有 mtime，重新入库以补上
+                new_files.append(f)
+            elif abs(current_mtime - stored_mtime) > 1:
+                print(f"[INGEST] File modified: {f}, will re-ingest")
+                new_files.append(f)
+    print(f"[INGEST] Found {len(all_files)} files, {len(ingested_info)} already ingested, {len(new_files)} new")
     if not new_files:
         return {
             "status": "success",
@@ -201,7 +218,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     if not collection_exists:
         dim = len(get_bge_m3().encode(["dim"])["dense_vecs"][0])
         schema = CollectionSchema(fields=[
-            FieldSchema("id", DataType.INT64, is_primary=True, auto_id=False),
+            FieldSchema("id", DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema("dense", DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema("sparse", DataType.SPARSE_FLOAT_VECTOR),
             FieldSchema("text", DataType.VARCHAR, max_length=65535),
@@ -216,14 +233,6 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             index_params=index_params,
         )
         client.load_collection(settings.MILVUS_COLLECTION)
-
-    id_offset = 0
-    if collection_exists:
-        try:
-            stats = client.get_collection_stats(settings.MILVUS_COLLECTION)
-            id_offset = stats.get("row_count", 0)
-        except Exception:
-            pass
 
     for filename in new_files:
         try:
@@ -245,8 +254,8 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     dense_vecs, sparse_vecs = encode_documents(texts)
 
     data = [
-        {"id": id_offset + i, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
-        for i, (d_vec, s_vec, text, meta) in enumerate(zip(dense_vecs, sparse_vecs, texts, metadatas))
+        {"dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
+        for d_vec, s_vec, text, meta in zip(dense_vecs, sparse_vecs, texts, metadatas)
     ]
     client.insert(
         collection_name=settings.MILVUS_COLLECTION,

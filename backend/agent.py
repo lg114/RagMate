@@ -36,7 +36,11 @@ AGENT_SYSTEM_PROMPT = """你是一个专业的深度研究助手，代号 Resear
 @tool
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
-    results = retrieve(query, k=3)
+    from errors import RetrievalError
+    try:
+        results = retrieve(query, k=3)
+    except RetrievalError:
+        return "检索服务暂时不可用，请稍后重试"
     if not results:
         return "未找到相关文档"
     parts = []
@@ -46,7 +50,7 @@ def retrieval_tool(query: str) -> str:
         chunk_idx = r.get("chunk_index")
         loc = f"【{source}】"
         if page is not None:
-            loc += f" 第{page}页"
+            loc += f" 第{page + 1}页"
         if chunk_idx is not None:
             loc += f" 片段{chunk_idx}"
         parts.append(f"{loc}\n{r['text']}")
@@ -87,12 +91,20 @@ def _extract_text_content(content) -> str:
 
 
 def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
-    """流式运行 agent，逐 token yield。同步生成器，在线程池中调用。"""
+    """流式运行 agent，逐 token yield。同步生成器，在线程池中调用。只返回最终 assistant 回答。"""
+    from langchain_core.messages import AIMessageChunk, ToolMessage
+
     for msg_chunk, _metadata in get_agent().stream(
         {"messages": messages},
         config={"configurable": {"thread_id": thread_id}},
         stream_mode="messages",
     ):
+        # 过滤掉工具消息和非 assistant 消息
+        if isinstance(msg_chunk, ToolMessage):
+            continue
+        if not isinstance(msg_chunk, AIMessageChunk):
+            continue
+
         text = _extract_text_content(getattr(msg_chunk, "content", ""))
         if text:
             yield text

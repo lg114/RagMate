@@ -18,7 +18,7 @@ import document_service
 from errors import ConflictError, NotFoundError, ServiceUnavailableError, ValidationError
 from ingest import ingest_documents
 from models import ChatHistory
-from redis_client import get_redis, acquire_ingest_lock, release_ingest_lock, get_ingest_status, set_ingest_status
+from redis_client import get_redis, acquire_ingest_lock, release_ingest_lock, force_release_ingest_lock, renew_ingest_lock, get_ingest_status, set_ingest_status
 from retriever import _check_milvus_available, get_milvus_client
 
 # LangSmith Tracing
@@ -29,10 +29,24 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
     os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
 
 _ingest_task: asyncio.Task | None = None
+_ingest_lock_token: str | None = None
 
 
 async def _run_ingest():
     """在后台线程中执行入库，通过 Redis 管理状态与锁"""
+    global _ingest_lock_token
+
+    # 后台续期任务：每 5 分钟延长锁 TTL
+    async def _renew_loop():
+        while True:
+            await asyncio.sleep(300)
+            if _ingest_lock_token:
+                try:
+                    await renew_ingest_lock(_ingest_lock_token)
+                except Exception:
+                    pass
+
+    renew_task = asyncio.create_task(_renew_loop())
     try:
         await set_ingest_status({"status": "running"})
         result = await asyncio.to_thread(ingest_documents, None, True)
@@ -43,21 +57,27 @@ async def _run_ingest():
     except Exception as e:
         await set_ingest_status({"status": "failed", "error": str(e)})
     finally:
+        renew_task.cancel()
         global _ingest_task
         _ingest_task = None
-        try:
-            await release_ingest_lock()
-        except Exception:
-            pass
+        if _ingest_lock_token:
+            try:
+                await release_ingest_lock(_ingest_lock_token)
+            except Exception:
+                pass
+            _ingest_lock_token = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 清理上次遗留的 ingest 锁
+    # 检查是否有遗留的 ingest 锁（不自动释放，避免多实例误删）
     try:
-        await release_ingest_lock()
+        r = await get_redis()
+        lock_exists = await r.exists("ragmate:ingest:lock")
+        if lock_exists:
+            logging.getLogger("ragmate").warning("Found existing ingest lock on startup — another instance may be running, or a previous run crashed. Manual cleanup may be needed.")
     except Exception as e:
-        logging.getLogger("ragmate").warning(f"Failed to release ingest lock on startup: {e}")
+        logging.getLogger("ragmate").warning(f"Failed to check ingest lock on startup: {e}")
     try:
         await init_db()
         logging.getLogger("ragmate").info("Database initialized")
@@ -94,7 +114,7 @@ app = FastAPI(title="RagMate API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS.split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -284,14 +304,20 @@ async def delete_document(filename: str):
     return {"success": True}
 
 
+_ingest_start_lock = asyncio.Lock()
+
+
 @app.post("/ingest")
 async def start_ingest():
-    global _ingest_task
-    if _ingest_task and not _ingest_task.done():
-        return {"status": "already_running"}
-    if not await acquire_ingest_lock():
-        return {"status": "already_running"}
-    _ingest_task = asyncio.create_task(_run_ingest())
+    global _ingest_task, _ingest_lock_token
+    async with _ingest_start_lock:
+        if _ingest_task and not _ingest_task.done():
+            return {"status": "already_running"}
+        token = await acquire_ingest_lock()
+        if not token:
+            return {"status": "already_running"}
+        _ingest_lock_token = token
+        _ingest_task = asyncio.create_task(_run_ingest())
     return {"status": "started"}
 
 

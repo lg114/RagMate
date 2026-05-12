@@ -373,3 +373,15 @@ body {
 .btn-modal-cancel:hover { background: var(--border); }
 .btn-modal-confirm { background: var(--danger); color: #fff; }
 .btn-modal-confirm:hover { opacity: .85; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .app-layout { flex-direction: column; }
+  .sidebar { width: 100%; max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .content { min-height: 60vh; }
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
