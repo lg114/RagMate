@@ -6,6 +6,7 @@ from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 from sentence_transformers import CrossEncoder
 
 from config import settings
+from source_utils import canonical_source
 
 _milvus_client: MilvusClient | None = None
 
@@ -54,8 +55,8 @@ def retrieve(query: str, k: int = None) -> List[dict]:
         client.load_collection(settings.MILVUS_COLLECTION)
         dense_vec, sparse_vec = encode_query(query)
 
-        # 混合检索：dense + sparse，多取一些给 reranker
-        over_fetch = k * 3
+        # 混合检索：dense + sparse，多取一些给 reranker 和 source 去重
+        over_fetch = max(k * 5, 12)
 
         dense_req = AnnSearchRequest(
             data=[dense_vec],
@@ -102,7 +103,16 @@ def retrieve(query: str, k: int = None) -> List[dict]:
             c["score"] = float(score)
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
-        return candidates[:k]
+
+        # Source 去重：同一 canonical source 最多保留 2 个 chunk
+        source_count: dict[str, int] = {}
+        filtered = []
+        for c in candidates:
+            canonical = canonical_source(c["source"])
+            if source_count.get(canonical, 0) < 2:
+                filtered.append(c)
+                source_count[canonical] = source_count.get(canonical, 0) + 1
+        return filtered[:k]
 
     except RetrievalError:
         raise

@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## Prototype 6 — 2026-05-11
+
+### RAG Quality Optimization
+- `agent.py` — Strengthened system prompt: only answer current question, no unsolicited background; dates/prices/versions must come from retrieval; engineering suggestions marked as "可考虑"
+- `agent.py` — Reworked citation rules to merge repeated same-source citations and improve answer readability
+- `chat.py` / `frontend/app.js` — Added deterministic citation cleanup that moves repeated file citations into one `数据来源` line
+- `frontend/app.js` / `frontend/style.css` — Refined chat layout: narrower reading column, lighter assistant answers, source chips, cleaner user bubbles, and RAG-specific streaming status
+- `config.py` — New `RETRIEVAL_TOP_K=2` (real Q&A) separate from `RERANKER_TOP_K=3` (evaluation)
+- `agent.py` — `retrieval_tool` now uses configurable `RETRIEVAL_TOP_K`
+- `retriever.py` — Source dedup: same canonical source max 2 chunks; near-duplicate sources (e.g. `xxx.pdf`/`xxx_2.pdf`) normalized
+- `eval/runner.py` — Detailed output per result: source, page, chunk_index, score, preview
+- `eval/runner.py` — New metrics: `contains` (keyword match) and `must_not` (leak detection)
+- `eval/metrics.py` — New `contains_check()` and `must_not_check()` functions
+- `eval/metrics.py` / `retriever.py` — Shared canonical source normalization so `xxx.pdf` and `xxx_2.pdf` are evaluated consistently
+- `eval/dataset.json` — Enhanced with `expected_contains` and `must_not_sources` fields
+
+---
+
 ## Prototype 5 — 2026-05-11
 
 ### Critical Fixes

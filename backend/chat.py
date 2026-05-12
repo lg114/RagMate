@@ -1,4 +1,5 @@
 import asyncio
+import re
 import uuid
 
 from langchain_core.messages import AIMessage
@@ -58,6 +59,28 @@ _ERROR_PREFIXES = (
 )
 
 
+_CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))】", re.IGNORECASE)
+_SOURCE_LINE_RE = re.compile(r"^\s*数据来源[:：].*$", re.MULTILINE)
+
+
+def normalize_citations(text: str) -> str:
+    """Move repeated file citations into one source line for readability."""
+    matches = _CITATION_RE.findall(text)
+    if len(matches) < 2:
+        return text
+    sources = list(dict.fromkeys(matches))
+
+    cleaned = _SOURCE_LINE_RE.sub("", text)
+    for source in sources:
+        cleaned = cleaned.replace(f"【{source}】", "")
+
+    cleaned = re.sub(r"[ \t]+([，。；：、,.!?！？])", r"\1", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    source_line = "数据来源：" + "、".join(f"【{source}】" for source in sources)
+    return f"{cleaned}\n\n{source_line}" if cleaned else source_line
+
+
 def _is_error_response(text: str) -> bool:
     return text.startswith(_ERROR_PREFIXES)
 
@@ -99,7 +122,7 @@ async def chat(message: str, session_id: str | None = None) -> dict:
             asyncio.to_thread(run_agent, history, session_id),
             timeout=AGENT_TIMEOUT,
         )
-        response_text = extract_text(result)
+        response_text = normalize_citations(extract_text(result))
     except asyncio.TimeoutError:
         response_text = "请求超时，请稍后重试"
     except asyncio.CancelledError:
@@ -158,7 +181,7 @@ async def chat_stream(message: str, session_id: str | None = None):
         task.cancel()
         raise
 
-    response_text = "".join(full_response)
+    response_text = normalize_citations("".join(full_response))
     is_error = _is_error_response(response_text)
 
     if not is_error:

@@ -124,6 +124,47 @@ function truncate(str, len) {
   return str.length > len ? str.slice(0, len - 3) + '...' : str;
 }
 
+function normalizeCitations(text) {
+  const citationRe = /【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))】/gi;
+  const sources = [];
+  let citationCount = 0;
+  let match;
+  while ((match = citationRe.exec(text)) !== null) {
+    citationCount += 1;
+    if (!sources.includes(match[1])) sources.push(match[1]);
+  }
+  if (citationCount < 2) return text;
+
+  let cleaned = text.replace(/^\s*数据来源[:：].*$/gm, '');
+  sources.forEach(source => {
+    cleaned = cleaned.split(`【${source}】`).join('');
+  });
+  cleaned = cleaned
+    .replace(/[ \t]+([，。；：、,.!?！？])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const sourceLine = '数据来源：' + sources.map(source => `【${source}】`).join('、');
+  return cleaned ? `${cleaned}\n\n${sourceLine}` : sourceLine;
+}
+
+function renderAssistantMarkdown(text) {
+  const displayText = normalizeCitations(text);
+  const withSourceChips = displayText.replace(/^数据来源[:：]\s*(.*)$/m, (_, rawSources) => {
+    const sources = [];
+    rawSources.replace(/【([^】]+)】/g, (_match, source) => {
+      if (!sources.includes(source)) sources.push(source);
+      return '';
+    });
+    if (sources.length === 0) return escapeHtml(`数据来源：${rawSources}`);
+    const chips = sources
+      .map(source => `<span class="source-chip" title="${escapeHtml(source)}">${escapeHtml(source)}</span>`)
+      .join('');
+    return `<div class="source-row"><span class="source-label">来源</span>${chips}</div>`;
+  });
+  return DOMPurify.sanitize(marked.parse(withSourceChips));
+}
+
 // ── Session ID ──
 function getSessionId() {
   let sid = sessionStorage.getItem('ragmate_session_id');
@@ -167,7 +208,7 @@ const ChatPanel = {
           <line x1="8" y1="21" x2="16" y2="21"/>
           <line x1="12" y1="17" x2="12" y2="21"/>
         </svg>
-      </div><div class="msg-content">${DOMPurify.sanitize(marked.parse(text))}</div>`;
+      </div><div class="msg-content">${renderAssistantMarkdown(text)}</div>`;
     } else {
       div.innerHTML = `<div class="msg-avatar">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -256,7 +297,7 @@ const ChatPanel = {
         <line x1="8" y1="21" x2="16" y2="21"/>
         <line x1="12" y1="17" x2="12" y2="21"/>
       </svg>
-    </div><div class="msg-content"><span class="stream-cursor"></span></div>`;
+    </div><div class="msg-content"><div class="msg-loading typing-dots">检索与生成中<span>.</span><span>.</span><span>.</span></div></div>`;
     this.messagesEl.appendChild(div);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     return div;
@@ -264,13 +305,13 @@ const ChatPanel = {
 
   appendStreamToken(div, fullText) {
     const content = div.querySelector('.msg-content');
-    content.innerHTML = DOMPurify.sanitize(marked.parse(fullText)) + '<span class="stream-cursor"></span>';
+    content.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   },
 
   finalizeStreamMessage(div, fullText) {
     const content = div.querySelector('.msg-content');
-    content.innerHTML = DOMPurify.sanitize(marked.parse(fullText || '没有收到回复'));
+    content.innerHTML = renderAssistantMarkdown(fullText || '没有收到回复');
   },
 
   clear() {

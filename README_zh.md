@@ -275,7 +275,8 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | | `CHUNK_OVERLAP` | `50` | 分块重叠 |
 | **检索** | `HYBRID_SEARCH_ENABLED` | `true` | 启用混合检索 |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker 模型 |
-| | `RERANKER_TOP_K` | `5` | 最终返回数量 |
+| | `RERANKER_TOP_K` | `3` | 默认检索/评估返回数量 |
+| | `RETRIEVAL_TOP_K` | `2` | 传给聊天 Agent 的片段数量 |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
 | | `LANGSMITH_API_KEY` | | LangSmith API Key |
 

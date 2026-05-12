@@ -276,7 +276,8 @@ All settings are configured via `.env` file or environment variables, validated 
 | | `CHUNK_OVERLAP` | `50` | Chunk overlap |
 | **Retrieval** | `HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model |
-| | `RERANKER_TOP_K` | `5` | Final result count |
+| | `RERANKER_TOP_K` | `3` | Default retrieval/evaluation result count |
+| | `RETRIEVAL_TOP_K` | `2` | Chunks passed to the chat agent |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | Enable tracing |
 | | `LANGSMITH_API_KEY` | | LangSmith API key |
 

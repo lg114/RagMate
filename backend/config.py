@@ -42,7 +42,8 @@ class Settings(BaseSettings):
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    RERANKER_TOP_K: int = 5
+    RERANKER_TOP_K: int = 3
+    RETRIEVAL_TOP_K: int = 2
 
     # Documents
     DOCUMENTS_DIR: str = "./documents"
