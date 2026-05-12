@@ -198,29 +198,42 @@ const ChatPanel = {
       HistoryPanel.activeId = null;
       HistoryPanel.load();
     });
+
+    // Textarea 自动增高 + Enter 发送 / Shift+Enter 换行
+    this.textareaEl.addEventListener('input', () => {
+      this.textareaEl.style.height = 'auto';
+      this.textareaEl.style.height = Math.min(this.textareaEl.scrollHeight, 1.5 * 16 * 5) + 'px';
+    });
+    this.textareaEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.send();
+      }
+    });
   },
 
   addMessage(role, text) {
     const empty = this.messagesEl.querySelector('.empty-state');
     if (empty) empty.remove();
 
+    // Add divider between messages
+    const hasMessages = this.messagesEl.querySelector('.msg');
+    if (hasMessages) {
+      const divider = document.createElement('div');
+      divider.className = 'msg-divider';
+      this.messagesEl.appendChild(divider);
+    }
+
     const div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-assistant');
+
+    const userIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>`;
+    const aiIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
+
     if (role === 'assistant') {
-      div.innerHTML = `<div class="msg-avatar">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <line x1="8" y1="21" x2="16" y2="21"/>
-          <line x1="12" y1="17" x2="12" y2="21"/>
-        </svg>
-      </div><div class="msg-content">${renderAssistantMarkdown(text)}</div>`;
+      div.innerHTML = `<div class="msg-body"><div class="msg-role"><span class="msg-role-icon ai-icon">${aiIcon}</span>RagMate</div><div class="msg-content">${renderAssistantMarkdown(text)}</div></div>`;
     } else {
-      div.innerHTML = `<div class="msg-avatar">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="8" r="4"/>
-          <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
-        </svg>
-      </div><div class="msg-content">${DOMPurify.sanitize(text)}</div>`;
+      div.innerHTML = `<div class="msg-body"><div class="msg-role"><span class="msg-role-icon user-icon">${userIcon}</span>You</div><div class="msg-content">${DOMPurify.sanitize(text)}</div></div>`;
     }
     this.messagesEl.appendChild(div);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
@@ -261,7 +274,9 @@ const ChatPanel = {
     if (!text || this.loading) return;
 
     this.textareaEl.value = '';
+    this.textareaEl.style.height = 'auto';
     this.hideError();
+    this._lastUserText = text;
     this.addMessage('user', text);
     this.setDisabled(true);
 
@@ -294,15 +309,19 @@ const ChatPanel = {
     const empty = this.messagesEl.querySelector('.empty-state');
     if (empty) empty.remove();
 
+    // Add divider
+    const hasMessages = this.messagesEl.querySelector('.msg');
+    if (hasMessages) {
+      const divider = document.createElement('div');
+      divider.className = 'msg-divider';
+      this.messagesEl.appendChild(divider);
+    }
+
+    const aiIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
+
     const div = document.createElement('div');
     div.className = 'msg msg-assistant';
-    div.innerHTML = `<div class="msg-avatar">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="2" y="3" width="20" height="14" rx="2"/>
-        <line x1="8" y1="21" x2="16" y2="21"/>
-        <line x1="12" y1="17" x2="12" y2="21"/>
-      </svg>
-    </div><div class="msg-content"><div class="msg-loading typing-dots">检索与生成中<span>.</span><span>.</span><span>.</span></div></div>`;
+    div.innerHTML = `<div class="msg-body"><div class="msg-role"><span class="msg-role-icon ai-icon">${aiIcon}</span>RagMate</div><div class="msg-content"><div class="msg-loading typing-dots">检索与生成中<span>.</span><span>.</span><span>.</span></div></div></div>`;
     this.messagesEl.appendChild(div);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     return div;
@@ -317,6 +336,51 @@ const ChatPanel = {
   finalizeStreamMessage(div, fullText) {
     const content = div.querySelector('.msg-content');
     content.innerHTML = renderAssistantMarkdown(fullText || '没有收到回复');
+
+    // Add action buttons
+    const actionsHtml = `<div class="msg-actions">
+      <button class="msg-action-btn" data-action="copy" title="复制">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        复制
+      </button>
+      <button class="msg-action-btn" data-action="regenerate" title="重新生成">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        重新生成
+      </button>
+    </div>`;
+    content.insertAdjacentHTML('beforeend', actionsHtml);
+
+    // Bind action handlers
+    const msgBody = div.querySelector('.msg-body') || content.parentElement;
+    const copyBtn = msgBody.querySelector('[data-action="copy"]');
+    const regenBtn = msgBody.querySelector('[data-action="regenerate"]');
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        const textToCopy = fullText || '';
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已复制`;
+          setTimeout(() => {
+            copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制`;
+          }, 1500);
+        });
+      });
+    }
+
+    if (regenBtn) {
+      regenBtn.addEventListener('click', () => {
+        if (this._lastUserText && !this.loading) {
+          const lastText = this._lastUserText;
+          // Remove the last AI message and its divider
+          const lastMsg = div;
+          const prevSibling = lastMsg.previousElementSibling;
+          if (prevSibling && prevSibling.classList.contains('msg-divider')) prevSibling.remove();
+          lastMsg.remove();
+          this.textareaEl.value = lastText;
+          this.send();
+        }
+      });
+    }
   },
 
   clear() {
