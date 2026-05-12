@@ -157,15 +157,17 @@ async def chat_stream(message: str, session_id: str | None = None):
 
     queue: asyncio.Queue = asyncio.Queue()
     full_response: list[str] = []
+    error_msg: str | None = None
     loop = asyncio.get_running_loop()
 
     def _run():
+        nonlocal error_msg
         try:
             for token in run_agent_streaming(history, session_id):
                 full_response.append(token)
                 loop.call_soon_threadsafe(queue.put_nowait, token)
         except Exception as e:
-            loop.call_soon_threadsafe(queue.put_nowait, _classify_error(e))
+            error_msg = _classify_error(e)
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
 
@@ -180,6 +182,11 @@ async def chat_stream(message: str, session_id: str | None = None):
     except asyncio.CancelledError:
         task.cancel()
         raise
+
+    # 错误单独处理，不混入 token 队列
+    if error_msg:
+        yield {"error": error_msg}
+        return
 
     response_text = normalize_citations("".join(full_response))
     is_error = _is_error_response(response_text)

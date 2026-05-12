@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +18,23 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 _PATH_SEPARATORS = {os.sep}
 if os.altsep:
     _PATH_SEPARATORS.add(os.altsep)
+
+# 文件头 magic bytes 映射
+_MAGIC_BYTES = {
+    ".pdf": b"%PDF",
+    ".docx": b"PK\x03\x04",  # ZIP format
+    ".doc": b"\xd0\xcf\x11\xe0",  # OLE2
+    ".xlsx": b"PK\x03\x04",  # ZIP format
+    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2
+}
+
+
+def _validate_magic_bytes(filename: str, content: bytes):
+    """校验文件头 magic bytes 是否与扩展名匹配。"""
+    ext = os.path.splitext(filename)[1].lower()
+    expected = _MAGIC_BYTES.get(ext)
+    if expected and not content.startswith(expected):
+        raise ValidationError(f"File content does not match extension {ext}")
 
 
 def validate_filename(filename: str) -> str:
@@ -37,6 +55,10 @@ def validate_filename(filename: str) -> str:
     ext = os.path.splitext(name)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValidationError(f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
+
+    # 白名单：只允许字母数字、中文、连字符、下划线、点、空格
+    if not re.match(r'^[\w\-. 一-鿿]+\.\w+$', name):
+        raise ValidationError("Filename contains invalid characters")
 
     return name
 
@@ -78,6 +100,9 @@ async def save_document(
 ) -> dict:
     """将上传的文件写入磁盘并记录到 PostgreSQL。PostgreSQL 为权威数据源。"""
     name = validate_filename(filename)
+
+    # Magic bytes 校验：验证文件内容与扩展名匹配
+    _validate_magic_bytes(name, content)
 
     # 1. 先查 DB，PostgreSQL 是 authoritative
     result = await session.execute(select(Document).where(Document.filename == name))

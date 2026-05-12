@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## Prototype 8 — 2026-05-11
+
+### Performance
+- `retriever.py` — `load_collection()` now cached, only called once per process
+- `main.py` — Reranker model warmed up in background on startup
+- `ingest.py` — `encode_documents()` now processes in batches of 64 to avoid memory overflow
+
+### Reliability
+- `chat.py` — Streaming errors now yielded as `{"error": msg}` events, no longer mixed into token queue
+- `main.py` — Simple in-memory rate limiter: 10 requests per session per minute
+
+### Security
+- `.env.example` — Added CORS production warning comment
+- `document_service.py` — Added magic bytes validation for PDF/DOCX/XLSX uploads
+- `main.py` — Chat rate limiting on both `/chat` and `/chat/stream`
+
+### Code Quality
+- `ingest.py` — All `print()` replaced with `logging.getLogger("ragmate").info()`
+- `app.js` — SSE `JSON.parse` now wrapped in try/catch
+
+---
+
+## Prototype 7 — 2026-05-11
+
+### Security Hardening
+- `main.py` — `session_id` now validated with regex `^[a-f0-9]{32}$` (Pydantic field_validator)
+- `document_service.py` — Filename whitelist regex `^[\w\-. 一-鿿]+\.\w+$` prevents Milvus filter injection
+- `main.py` / `ingest.py` — All silent `except Exception: pass` now log at `debug` level with `exc_info`
+- Frontend `style.css` / `app.js` — Streaming indicator changed from purple block cursor to "思考中..." typing dots
+
+---
+
 ## Prototype 6 — 2026-05-11
 
 ### RAG Quality Optimization

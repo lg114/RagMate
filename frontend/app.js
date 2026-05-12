@@ -44,9 +44,14 @@ const API = {
         buffer = lines.pop();
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.slice(6));
-          if (data.done) { onDone(data.session_id); return; }
-          if (data.token) onToken(data.token);
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.done) { onDone(data.session_id); return; }
+            if (data.error) { onError(data.error); return; }
+            if (data.token) onToken(data.token);
+          } catch (e) {
+            // 忽略无法解析的行
+          }
         }
       }
       onError('连接意外断开');

@@ -2,12 +2,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, func, select
 from starlette.responses import StreamingResponse
 
@@ -31,6 +32,23 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
 _ingest_task: asyncio.Task | None = None
 _ingest_lock_token: str | None = None
 
+# 简单的内存频率限制：每 session 每分钟最多 10 次
+_rate_limit: dict[str, list[float]] = {}
+_RATE_LIMIT_MAX = 10
+_RATE_LIMIT_WINDOW = 60.0
+
+
+def _check_rate_limit(session_id: str):
+    import time
+    now = time.time()
+    timestamps = _rate_limit.get(session_id, [])
+    timestamps = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
+    if len(timestamps) >= _RATE_LIMIT_MAX:
+        from errors import ValidationError
+        raise ValidationError("请求过于频繁，请稍后重试")
+    timestamps.append(now)
+    _rate_limit[session_id] = timestamps
+
 
 async def _run_ingest():
     """在后台线程中执行入库，通过 Redis 管理状态与锁"""
@@ -44,7 +62,7 @@ async def _run_ingest():
                 try:
                     await renew_ingest_lock(_ingest_lock_token)
                 except Exception:
-                    pass
+                    logging.getLogger("ragmate").debug("Failed to renew ingest lock", exc_info=True)
 
     renew_task = asyncio.create_task(_renew_loop())
     try:
@@ -64,7 +82,7 @@ async def _run_ingest():
             try:
                 await release_ingest_lock(_ingest_lock_token)
             except Exception:
-                pass
+                logging.getLogger("ragmate").debug("Failed to release ingest lock", exc_info=True)
             _ingest_lock_token = None
 
 
@@ -84,6 +102,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger("ragmate").error(f"Database initialization failed: {e}")
         raise  # fail fast — app cannot function without DB
+
+    # 后台预热 Reranker 模型
+    def _warmup_reranker():
+        try:
+            from retriever import get_reranker
+            get_reranker()
+            logging.getLogger("ragmate").info("Reranker model warmed up")
+        except Exception as e:
+            logging.getLogger("ragmate").warning(f"Reranker warmup failed: {e}")
+    asyncio.get_running_loop().run_in_executor(None, _warmup_reranker)
+
     try:
         yield
     finally:
@@ -99,15 +128,15 @@ async def lifespan(app: FastAPI):
             r = await get_redis()
             await r.aclose()
         except Exception:
-            pass
+            logging.getLogger("ragmate").debug("Failed to close Redis on shutdown", exc_info=True)
         try:
             await engine.dispose()
         except Exception:
-            pass
+            logging.getLogger("ragmate").debug("Failed to dispose async engine on shutdown", exc_info=True)
         try:
             await asyncio.to_thread(sync_engine.dispose)
         except Exception:
-            pass
+            logging.getLogger("ragmate").debug("Failed to dispose sync engine on shutdown", exc_info=True)
 
 
 app = FastAPI(title="RagMate API", lifespan=lifespan)
@@ -150,6 +179,13 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
 
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id(cls, v):
+        if v is not None and not re.match(r'^[a-f0-9-]{36}$', v):
+            raise ValueError("Invalid session_id format")
+        return v
+
 
 class ChatResponse(BaseModel):
     response: str
@@ -188,12 +224,14 @@ async def ready():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
+    _check_rate_limit(request.session_id or "anonymous")
     result = await chat(request.message, request.session_id)
     return ChatResponse(response=result["response"], session_id=result["session_id"])
 
 
 @app.post("/chat/stream")
 async def chat_stream_endpoint(request: ChatRequest):
+    _check_rate_limit(request.session_id or "anonymous")
     async def event_generator():
         async for chunk in chat_stream(request.message, request.session_id):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"

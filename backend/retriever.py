@@ -9,6 +9,7 @@ from config import settings
 from source_utils import canonical_source
 
 _milvus_client: MilvusClient | None = None
+_collection_loaded: bool = False
 
 
 def get_milvus_client() -> MilvusClient:
@@ -50,9 +51,12 @@ def retrieve(query: str, k: int = None) -> List[dict]:
     if k is None:
         k = settings.RERANKER_TOP_K
 
+    global _collection_loaded
     try:
         client = get_milvus_client()
-        client.load_collection(settings.MILVUS_COLLECTION)
+        if not _collection_loaded:
+            client.load_collection(settings.MILVUS_COLLECTION)
+            _collection_loaded = True
         dense_vec, sparse_vec = encode_query(query)
 
         # 混合检索：dense + sparse，多取一些给 reranker 和 source 去重

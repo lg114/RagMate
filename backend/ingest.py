@@ -32,15 +32,23 @@ def get_bge_m3():
     return BGEM3FlagModel(settings.EMBEDDING_MODEL, use_fp16=False)
 
 
+ENCODE_BATCH_SIZE = 64
+
+
 def encode_documents(texts: list[str]) -> tuple[list, list]:
-    """用 bge-m3 提取 dense 和 sparse 向量。返回 (dense_vecs, sparse_vecs)。"""
+    """用 bge-m3 提取 dense 和 sparse 向量（分批处理避免内存溢出）。返回 (dense_vecs, sparse_vecs)。"""
     model = get_bge_m3()
-    output = model.encode(texts, return_dense=True, return_sparse=True)
-    dense_vecs = output["dense_vecs"].tolist()
-    sparse_vecs = []
-    for lexical_weight in output["lexical_weights"]:
-        sparse_vecs.append({int(k): float(v) for k, v in lexical_weight.items()})
-    return dense_vecs, sparse_vecs
+    all_dense = []
+    all_sparse = []
+
+    for i in range(0, len(texts), ENCODE_BATCH_SIZE):
+        batch = texts[i:i + ENCODE_BATCH_SIZE]
+        output = model.encode(batch, return_dense=True, return_sparse=True)
+        all_dense.extend(output["dense_vecs"].tolist())
+        for lexical_weight in output["lexical_weights"]:
+            all_sparse.append({int(k): float(v) for k, v in lexical_weight.items()})
+
+    return all_dense, all_sparse
 
 
 def encode_query(query: str) -> tuple[list, dict]:
@@ -65,7 +73,7 @@ def load_document(filepath: str):
     elif ext in (".txt", ".md"):
         return TextLoader(filepath, encoding="utf-8").load()
     else:
-        print(f"[INGEST] Unsupported file type: {ext}")
+        logging.getLogger("ragmate").warning(f"Unsupported file type: {ext}")
         return []
 
 
@@ -141,9 +149,9 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
                 # 旧记录没有 mtime，重新入库以补上
                 new_files.append(f)
             elif abs(current_mtime - stored_mtime) > 1:
-                print(f"[INGEST] File modified: {f}, will re-ingest")
+                logging.getLogger("ragmate").info(f"File modified: {f}, will re-ingest")
                 new_files.append(f)
-    print(f"[INGEST] Found {len(all_files)} files, {len(ingested_info)} already ingested, {len(new_files)} new")
+    logging.getLogger("ragmate").info(f"Found {len(all_files)} files, {len(ingested_info)} already ingested, {len(new_files)} new")
     if not new_files:
         return {
             "status": "success",
@@ -159,7 +167,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     for filename in new_files:
         filepath = os.path.join(docs_dir, filename)
         pages = load_document(filepath)
-        print(f"[INGEST] {filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
+        logging.getLogger("ragmate").info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
         documents.extend(pages)
 
     if not documents:
@@ -194,7 +202,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         chunk.metadata["chunk_index"] = file_chunk_index[filename]
         file_chunk_index[filename] += 1
 
-    print(f"[INGEST] Split {len(documents)} pages into {len(chunks)} chunks")
+    logging.getLogger("ragmate").info(f"Split {len(documents)} pages into {len(chunks)} chunks")
 
     client = get_milvus_client()
 
@@ -209,11 +217,11 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             has_sparse_field = "sparse" in field_names
             has_sparse_index = any(idx.get("field") == "sparse" for idx in indexes)
             if not has_sparse_field or not has_sparse_index:
-                print("[INGEST] Schema/index mismatch, dropping old collection...")
+                logging.getLogger("ragmate").info("Schema/index mismatch, dropping old collection...")
                 client.drop_collection(settings.MILVUS_COLLECTION)
                 collection_exists = False
         except Exception:
-            pass
+            logging.getLogger("ragmate").debug("Failed to check/drop collection schema", exc_info=True)
 
     if not collection_exists:
         dim = len(get_bge_m3().encode(["dim"])["dense_vecs"][0])
@@ -242,7 +250,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
                 filter=f'metadata["source"] == "{escaped}"',
             )
         except Exception:
-            pass
+            logging.getLogger("ragmate").debug(f"Failed to delete old chunks for {filename}", exc_info=True)
 
     texts = [chunk.page_content for chunk in chunks]
     metadatas = [{
