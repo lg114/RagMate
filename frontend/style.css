@@ -181,6 +181,7 @@ body {
   display: flex; align-items: flex-start; gap: 0;
   width: min(100%, var(--chat-width));
   max-width: var(--chat-width);
+  margin: 0 auto;
   font-size: 14px; line-height: 1.65;
   animation: fadeIn 180ms ease;
   padding: 16px 0;

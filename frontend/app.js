@@ -376,6 +376,13 @@ const ChatPanel = {
           const prevSibling = lastMsg.previousElementSibling;
           if (prevSibling && prevSibling.classList.contains('msg-divider')) prevSibling.remove();
           lastMsg.remove();
+          // Remove the last user message and its divider
+          const userMsg = this.messagesEl.querySelector('.msg-user:last-of-type');
+          if (userMsg) {
+            const userDivider = userMsg.previousElementSibling;
+            if (userDivider && userDivider.classList.contains('msg-divider')) userDivider.remove();
+            userMsg.remove();
+          }
           this.textareaEl.value = lastText;
           this.send();
         }
