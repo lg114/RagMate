@@ -255,7 +255,33 @@ const ChatPanel = {
   },
 
   showError(msg) {
-    this.errorEl.textContent = msg;
+    this.errorEl.innerHTML = '';
+    this.errorEl.appendChild(document.createTextNode(msg + ' '));
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'btn-retry';
+    retryBtn.textContent = '重试';
+    retryBtn.addEventListener('click', () => {
+      if (this._lastUserText && !this.loading) {
+        this.hideError();
+        // 移除最后一条空的 assistant 消息和 divider
+        const lastMsg = this.messagesEl.querySelector('.msg-assistant:last-of-type');
+        if (lastMsg) {
+          const prev = lastMsg.previousElementSibling;
+          if (prev && prev.classList.contains('msg-divider')) prev.remove();
+          lastMsg.remove();
+        }
+        // 移除最后一条用户消息和 divider
+        const userMsg = this.messagesEl.querySelector('.msg-user:last-of-type');
+        if (userMsg) {
+          const prev = userMsg.previousElementSibling;
+          if (prev && prev.classList.contains('msg-divider')) prev.remove();
+          userMsg.remove();
+        }
+        this.textareaEl.value = this._lastUserText;
+        this.send();
+      }
+    });
+    this.errorEl.appendChild(retryBtn);
     this.errorEl.classList.remove('hidden');
   },
 

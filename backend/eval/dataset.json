@@ -68,5 +68,82 @@
     "expected_contains": ["错误"],
     "must_not_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
     "category": "factual"
+  },
+  {
+    "question": "DeepSeek 支持哪些主要模型？",
+    "expected_sources": ["DeepSeek API 介绍.md"],
+    "expected_contains": ["deepseek-chat", "deepseek-reasoner"],
+    "must_not_sources": ["模型价格表.xlsx"],
+    "category": "factual"
+  },
+  {
+    "question": "DeepSeek API 的流式输出怎么实现？",
+    "expected_sources": ["DeepSeek API 介绍.md"],
+    "expected_contains": ["stream"],
+    "must_not_sources": ["API 错误码说明.txt"],
+    "category": "factual"
+  },
+  {
+    "question": "HTTP 401 错误是什么原因？",
+    "expected_sources": ["API 错误码说明.txt"],
+    "expected_contains": ["401", "Unauthorized"],
+    "must_not_sources": ["DeepSeek API 介绍.md"],
+    "category": "factual"
+  },
+  {
+    "question": "遇到 429 错误应该怎么处理？",
+    "expected_sources": ["API 错误码说明.txt"],
+    "expected_contains": ["429", "速率"],
+    "must_not_sources": ["用户指南.docx"],
+    "category": "factual"
+  },
+  {
+    "question": "错误响应的 JSON 格式是什么？",
+    "expected_sources": ["API 错误码说明.txt"],
+    "expected_contains": ["error", "message"],
+    "must_not_sources": ["模型价格表.xlsx"],
+    "category": "factual"
+  },
+  {
+    "question": "deepseek-v4-pro 的价格是多少？",
+    "expected_sources": ["模型价格表.xlsx"],
+    "expected_contains": ["v4-pro"],
+    "must_not_sources": ["API 错误码说明.txt"],
+    "category": "factual"
+  },
+  {
+    "question": "各模型的上下文长度分别是多少？",
+    "expected_sources": ["模型价格表.xlsx"],
+    "expected_contains": ["64K", "128K"],
+    "must_not_sources": ["DeepSeek API 介绍.md"],
+    "category": "factual"
+  },
+  {
+    "question": "推理增强模型的输出价格是多少？",
+    "expected_sources": ["模型价格表.xlsx"],
+    "expected_contains": ["16.0"],
+    "must_not_sources": ["用户指南.docx"],
+    "category": "factual"
+  },
+  {
+    "question": "使用 DeepSeek API 需要哪些步骤？",
+    "expected_sources": ["用户指南.docx"],
+    "expected_contains": ["API Key", "pip install"],
+    "must_not_sources": ["API 错误码说明.txt"],
+    "category": "factual"
+  },
+  {
+    "question": "如何安装 OpenAI SDK？",
+    "expected_sources": ["用户指南.docx"],
+    "expected_contains": ["pip install openai"],
+    "must_not_sources": ["模型价格表.xlsx"],
+    "category": "factual"
+  },
+  {
+    "question": "使用 API 时有哪些注意事项？",
+    "expected_sources": ["用户指南.docx"],
+    "expected_contains": ["API Key", "速率限制"],
+    "must_not_sources": ["DeepSeek API 介绍.md"],
+    "category": "factual"
   }
 ]

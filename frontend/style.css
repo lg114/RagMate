@@ -174,7 +174,15 @@ body {
 .chat-error {
   margin: 0 24px; padding: 8px 14px; border-radius: var(--radius-sm);
   background: #fff0f0; color: var(--danger); font-size: 13px;
+  display: flex; align-items: center; gap: 8px;
 }
+.btn-retry {
+  flex-shrink: 0;
+  padding: 2px 10px; border: 1px solid var(--danger); border-radius: var(--radius-sm);
+  background: transparent; color: var(--danger); font-size: 12px; font-family: var(--font);
+  cursor: pointer; transition: all var(--transition);
+}
+.btn-retry:hover { background: var(--danger); color: #fff; }
 
 /* ── Messages ── */
 .msg {

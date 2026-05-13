@@ -56,8 +56,8 @@ def validate_filename(filename: str) -> str:
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValidationError(f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
 
-    # 白名单：只允许字母数字、中文、连字符、下划线、点、空格
-    if not re.match(r'^[\w\-. 一-鿿]+\.\w+$', name):
+    # 白名单：允许字母数字、中文、连字符、下划线、点、空格、&、()、+、=、@、#、$、%、!、~
+    if not re.match(r'^[\w\-. 一-鿿&()+=@#$%!~]+\.\w+$', name):
         raise ValidationError("Filename contains invalid characters")
 
     return name
