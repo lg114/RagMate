@@ -18,7 +18,7 @@
 - **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown
 - **智能 Chunk** — Markdown 按标题层级切分，PDF 保留页码，所有 chunk 带序号元数据
 - **多语言 Embedding** — BAAI/bge-m3（1024 维），原生支持 dense + sparse 双向量
-- **灵活的 LLM 接入** — 通过 LiteLLM 统一接入 OpenAI、Anthropic、DeepSeek、MiMo 等任意兼容 OpenAI 格式的 API
+- **灵活的 LLM 接入** — 通过 LangChain ChatOpenAI 接入任意兼容 OpenAI 格式的 API（OpenAI、Anthropic、DeepSeek、MiMo 等）
 - **全链路可观测** — LangSmith 追踪 Agent 执行过程
 - **本地部署** — 所有数据自托管，无外部依赖
 - **检索评估** — 内置评估系统，可量化检索召回率和精确率
@@ -39,7 +39,7 @@
 ┌─────────────────────┐
 │   Deep Agent         │
 │   (LangGraph +       │
-│    StreamingLiteLLM) │
+│    ChatOpenAI)       │
 └──────────┬──────────┘
            │ tool_call: retrieval_tool
            ▼
@@ -119,7 +119,6 @@ cp .env.example .env
 编辑 `.env`，配置 LLM API：
 
 ```env
-LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o
 LLM_API_KEY=your_api_key
 LLM_API_BASE_URL=https://api.openai.com/v1
@@ -128,7 +127,6 @@ LLM_API_BASE_URL=https://api.openai.com/v1
 支持任意 OpenAI 兼容 API，例如 DeepSeek、MiMo 等：
 
 ```env
-LLM_PROVIDER=openai
 LLM_MODEL=deepseek-chat
 LLM_API_KEY=your_key
 LLM_API_BASE_URL=https://api.deepseek.com/v1
@@ -257,8 +255,7 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 
 | 类别 | 变量 | 默认值 | 说明 |
 |------|------|--------|------|
-| **LLM** | `LLM_PROVIDER` | `openai` | LLM 提供商 |
-| | `LLM_MODEL` | `gpt-4o` | 模型名称 |
+| **LLM** | `LLM_MODEL` | `gpt-4o` | 模型名称 |
 | | `LLM_API_KEY` | | API Key |
 | | `LLM_API_BASE_URL` | | 自定义 API 地址 |
 | **Embedding** | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` 或 `openai` |
@@ -306,7 +303,7 @@ RagMate/
     ├── chat.py                # 聊天编排（同步 + 流式）
     ├── retriever.py           # 混合检索 + Reranking
     ├── ingest.py              # 文档处理 + 向量入库
-    ├── streaming_llm.py       # StreamingLiteLLM（token 级流式）
+    ├── streaming_llm.py       # ChatOpenAI 工厂
     ├── model_factory.py       # LLM / Embedding 工厂
     ├── document_service.py    # 文档 CRUD
     ├── database.py            # SQLAlchemy 异步/同步引擎
@@ -329,7 +326,7 @@ RagMate/
 |------|------|------|
 | Web 框架 | FastAPI + Uvicorn | ASGI，托管前端静态文件 |
 | 前端 | HTML/CSS/JS | 零依赖原生前端 |
-| LLM | LiteLLM | 统一调用 OpenAI/Anthropic/DeepSeek/MiMo |
+| LLM | LangChain ChatOpenAI | 接入任意 OpenAI 兼容 API |
 | Embedding | BAAI/bge-m3 | 1024 维，多语言，dense + sparse 双向量 |
 | 向量数据库 | Milvus 2.5 | 混合检索（dense + sparse + RRF） |
 | Reranker | BAAI/bge-reranker-v2-m3 | 交叉编码器重排序 |

@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+- `streaming_llm.py` — Replaced custom LiteLLM wrapper with LangChain `ChatOpenAI`, fixing tool_calls streaming, reasoning_content, and multi-model compatibility issues
+- `model_factory.py` — Simplified LLM factory to use `create_llm()` from `streaming_llm.py`
+- `pyproject.toml` — Removed `langchain-litellm` dependency
+- `config.py` — Removed `LLM_PROVIDER` (no longer needed, model name passed directly to ChatOpenAI)
+
+### Fixed
+- `app.js` — Regenerate button no longer creates duplicate user messages
+
 ## Prototype 8 — 2026-05-11
 
 ### Performance

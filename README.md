@@ -18,7 +18,7 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 - **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support
 - **Smart Chunking** — Markdown split by heading hierarchy, PDF page numbers preserved, all chunks carry sequential metadata
 - **Multilingual Embedding** — BAAI/bge-m3 (1024-dim), native dense + sparse dual vectors
-- **Flexible LLM Integration** — Unified access to OpenAI, Anthropic, DeepSeek, MiMo, and any OpenAI-compatible API via LiteLLM
+- **Flexible LLM Integration** — Access any OpenAI-compatible API (OpenAI, Anthropic, DeepSeek, MiMo, etc.) via LangChain ChatOpenAI
 - **Full Observability** — LangSmith tracing for agent execution
 - **Self-Hosted** — All data on-premise, no external dependencies
 - **Retrieval Evaluation** — Built-in evaluation system for quantifying recall and precision
@@ -39,7 +39,7 @@ User Query
 ┌─────────────────────┐
 │   Deep Agent         │
 │   (LangGraph +       │
-│    StreamingLiteLLM) │
+│    ChatOpenAI)       │
 └──────────┬──────────┘
            │ tool_call: retrieval_tool
            ▼
@@ -120,7 +120,6 @@ cp .env.example .env
 Edit `.env` with your LLM API settings:
 
 ```env
-LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o
 LLM_API_KEY=your_api_key
 LLM_API_BASE_URL=https://api.openai.com/v1
@@ -129,7 +128,6 @@ LLM_API_BASE_URL=https://api.openai.com/v1
 Supports any OpenAI-compatible API (DeepSeek, MiMo, etc.):
 
 ```env
-LLM_PROVIDER=openai
 LLM_MODEL=deepseek-chat
 LLM_API_KEY=your_key
 LLM_API_BASE_URL=https://api.deepseek.com/v1
@@ -258,8 +256,7 @@ All settings are configured via `.env` file or environment variables, validated 
 
 | Category | Variable | Default | Description |
 |----------|----------|---------|-------------|
-| **LLM** | `LLM_PROVIDER` | `openai` | LLM provider |
-| | `LLM_MODEL` | `gpt-4o` | Model name |
+| **LLM** | `LLM_MODEL` | `gpt-4o` | Model name |
 | | `LLM_API_KEY` | | API key |
 | | `LLM_API_BASE_URL` | | Custom API endpoint |
 | **Embedding** | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` or `openai` |
@@ -307,7 +304,7 @@ RagMate/
     ├── chat.py                # Chat orchestration (sync + streaming)
     ├── retriever.py           # Hybrid search + Reranking
     ├── ingest.py              # Document processing + vector ingestion
-    ├── streaming_llm.py       # StreamingLiteLLM (token-level streaming)
+    ├── streaming_llm.py       # ChatOpenAI factory
     ├── model_factory.py       # LLM / Embedding factory
     ├── document_service.py    # Document CRUD
     ├── database.py            # SQLAlchemy async/sync engines
@@ -330,7 +327,7 @@ RagMate/
 |-----------|------------|-------------|
 | Web Framework | FastAPI + Uvicorn | ASGI, serves frontend static files |
 | Frontend | HTML/CSS/JS | Zero-dependency native frontend |
-| LLM | LiteLLM | Unified call for OpenAI/Anthropic/DeepSeek/MiMo |
+| LLM | LangChain ChatOpenAI | Access any OpenAI-compatible API |
 | Embedding | BAAI/bge-m3 | 1024-dim, multilingual, dense + sparse dual vectors |
 | Vector DB | Milvus 2.5 | Hybrid search (dense + sparse + RRF) |
 | Reranker | BAAI/bge-reranker-v2-m3 | Cross-encoder reranking |

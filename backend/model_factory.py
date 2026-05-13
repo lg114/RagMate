@@ -9,20 +9,17 @@ from langchain_huggingface import HuggingFaceEmbeddings
 import torch
 
 from config import settings
-from streaming_llm import StreamingLiteLLM
+from streaming_llm import create_llm
 
 
 @lru_cache(maxsize=1)
 def get_llm():
-    """根据 LLM_PROVIDER 创建 LLM 实例，支持真正 token 级流式输出"""
-    model_string = f"{settings.LLM_PROVIDER}/{settings.LLM_MODEL}"
-    kwargs = dict(model=model_string, temperature=0.01, request_timeout=60)
-    if settings.LLM_API_BASE_URL:
-        kwargs["api_base"] = settings.LLM_API_BASE_URL
-    if settings.LLM_API_KEY:
-        kwargs["api_key"] = settings.LLM_API_KEY
-
-    return StreamingLiteLLM(**kwargs)
+    """创建 LLM 实例（单例）"""
+    return create_llm(
+        model=settings.LLM_MODEL,
+        api_key=settings.LLM_API_KEY,
+        base_url=settings.LLM_API_BASE_URL,
+    )
 
 
 @lru_cache(maxsize=1)

@@ -5,7 +5,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # LLM
-    LLM_PROVIDER: str = "openai"
     LLM_MODEL: str = "gpt-4o"
     LLM_API_KEY: str = ""
     LLM_API_BASE_URL: str = ""
