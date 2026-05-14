@@ -31,6 +31,14 @@ def get_sync_redis() -> redis.Redis:
     return _sync_redis
 
 
+def close_sync_redis():
+    """关闭同步 Redis 连接（应用关闭时调用）"""
+    global _sync_redis
+    if _sync_redis is not None:
+        _sync_redis.close()
+        _sync_redis = None
+
+
 def _session_key(session_id: str) -> str:
     return f"ragmate:session:{session_id}"
 

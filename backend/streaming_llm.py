@@ -28,6 +28,13 @@ class ChatOpenAICompatible(ChatOpenAI):
                 for key, value in msg.additional_kwargs.items():
                     if value and key not in ("refusal",) and i < len(payload.get("messages", [])):
                         payload["messages"][i][key] = value
+        # 调试：打印发给 API 的 assistant 消息
+        import sys, logging
+        for i, m in enumerate(payload.get("messages", [])):
+            if m.get("role") == "assistant":
+                has_tc = "tool_calls" in m
+                content_preview = str(m.get("content", ""))[:80]
+                logging.getLogger("ragmate").info(f"API msg[{i}] assistant: has_tool_calls={has_tc}, content='{content_preview}'")
         return payload
 
     def _create_chat_result(self, response, generation_info=None):

@@ -3,6 +3,10 @@ import json
 import logging
 import os
 import re
+
+# 配置 ragmate logger
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("ragmate")
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +23,7 @@ import document_service
 from errors import ConflictError, NotFoundError, ServiceUnavailableError, ValidationError
 from ingest import ingest_documents
 from models import ChatHistory
-from redis_client import get_redis, acquire_ingest_lock, release_ingest_lock, force_release_ingest_lock, renew_ingest_lock, get_ingest_status, set_ingest_status
+from redis_client import get_redis, acquire_ingest_lock, release_ingest_lock, renew_ingest_lock, get_ingest_status, set_ingest_status, close_sync_redis
 from retriever import _check_milvus_available, get_milvus_client
 
 # LangSmith Tracing
@@ -68,7 +72,7 @@ async def _run_ingest():
                 try:
                     await renew_ingest_lock(_ingest_lock_token)
                 except Exception:
-                    logging.getLogger("ragmate").debug("Failed to renew ingest lock", exc_info=True)
+                    logger.debug("Failed to renew ingest lock", exc_info=True)
 
     renew_task = asyncio.create_task(_renew_loop())
     try:
@@ -88,7 +92,7 @@ async def _run_ingest():
             try:
                 await release_ingest_lock(_ingest_lock_token)
             except Exception:
-                logging.getLogger("ragmate").debug("Failed to release ingest lock", exc_info=True)
+                logger.debug("Failed to release ingest lock", exc_info=True)
             _ingest_lock_token = None
 
 
@@ -99,14 +103,14 @@ async def lifespan(app: FastAPI):
         r = await get_redis()
         lock_exists = await r.exists("ragmate:ingest:lock")
         if lock_exists:
-            logging.getLogger("ragmate").warning("Found existing ingest lock on startup — another instance may be running, or a previous run crashed. Manual cleanup may be needed.")
+            logger.warning("Found existing ingest lock on startup — another instance may be running, or a previous run crashed. Manual cleanup may be needed.")
     except Exception as e:
-        logging.getLogger("ragmate").warning(f"Failed to check ingest lock on startup: {e}")
+        logger.warning(f"Failed to check ingest lock on startup: {e}")
     try:
         await init_db()
-        logging.getLogger("ragmate").info("Database initialized")
+        logger.info("Database initialized")
     except Exception as e:
-        logging.getLogger("ragmate").error(f"Database initialization failed: {e}")
+        logger.error(f"Database initialization failed: {e}")
         raise  # fail fast — app cannot function without DB
 
     # 后台预热 Reranker 模型
@@ -114,9 +118,9 @@ async def lifespan(app: FastAPI):
         try:
             from retriever import get_reranker
             get_reranker()
-            logging.getLogger("ragmate").info("Reranker model warmed up")
+            logger.info("Reranker model warmed up")
         except Exception as e:
-            logging.getLogger("ragmate").warning(f"Reranker warmup failed: {e}")
+            logger.warning(f"Reranker warmup failed: {e}")
     asyncio.get_running_loop().run_in_executor(None, _warmup_reranker)
 
     try:
@@ -134,15 +138,19 @@ async def lifespan(app: FastAPI):
             r = await get_redis()
             await r.aclose()
         except Exception:
-            logging.getLogger("ragmate").debug("Failed to close Redis on shutdown", exc_info=True)
+            logger.debug("Failed to close async Redis on shutdown", exc_info=True)
+        try:
+            close_sync_redis()
+        except Exception:
+            logger.debug("Failed to close sync Redis on shutdown", exc_info=True)
         try:
             await engine.dispose()
         except Exception:
-            logging.getLogger("ragmate").debug("Failed to dispose async engine on shutdown", exc_info=True)
+            logger.debug("Failed to dispose async engine on shutdown", exc_info=True)
         try:
             await asyncio.to_thread(sync_engine.dispose)
         except Exception:
-            logging.getLogger("ragmate").debug("Failed to dispose sync engine on shutdown", exc_info=True)
+            logger.debug("Failed to dispose sync engine on shutdown", exc_info=True)
 
 
 app = FastAPI(title="RagMate API", lifespan=lifespan)
@@ -177,7 +185,7 @@ async def service_unavailable_handler(request, exc: ServiceUnavailableError):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    logging.getLogger("ragmate").error("Unhandled exception", exc_info=(type(exc), exc, exc.__traceback__))
+    logger.error("Unhandled exception", exc_info=(type(exc), exc, exc.__traceback__))
     return JSONResponse(status_code=500, content={"code": "INTERNAL_ERROR", "detail": "An unexpected error occurred"})
 
 
@@ -212,19 +220,19 @@ async def ready():
         milvus_ok = await asyncio.to_thread(_check_milvus_available)
         status["milvus"] = milvus_ok
     except Exception as e:
-        logging.getLogger("ragmate").warning(f"Milvus health check failed: {e}")
+        logger.warning(f"Milvus health check failed: {e}")
     try:
         async with async_session() as session:
             await session.execute(select(1))
         status["postgresql"] = True
     except Exception as e:
-        logging.getLogger("ragmate").warning(f"PostgreSQL health check failed: {e}")
+        logger.warning(f"PostgreSQL health check failed: {e}")
     try:
         r = await get_redis()
         await r.ping()
         status["redis"] = True
     except Exception as e:
-        logging.getLogger("ragmate").warning(f"Redis health check failed: {e}")
+        logger.warning(f"Redis health check failed: {e}")
     return {"status": "ready" if all(status.values()) else "degraded", "checks": status}
 
 

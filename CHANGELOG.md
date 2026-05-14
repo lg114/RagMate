@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## Prototype 10 — 2026-05-14
+### Added
+- `retriever.py` — Query Rewrite: LLM-based retrieval-oriented query rewriting with dual-query retrieval + RRF fusion
+- `retriever.py` — Rewrite bypass: regex + heuristic detection for exact lookups (error codes, filenames, technical tokens)
+- `retriever.py` — Rewrite cache: LRU cache (256 entries) to avoid repeated LLM calls
+- `config.py` — New `QUERY_REWRITE_ENABLED` setting
+
+### Performance
+- `config.py` — `RERANK_SCORE_THRESHOLD` lowered from 0.15 to 0.06 to reduce false-negative filtering and agent retry loops
+- `agent.py` — Rewrote retrieval strategy prompt: "use results first, only retry if completely empty", max 2 retrievals
+- `agent.py` — Added code-level `MAX_RETRIEVAL_ATTEMPTS = 2` hard limit as safety net when LLM ignores prompt
+- `agent.py` — Added red-line section to system prompt discouraging unnecessary re-retrieval
+- Agent response time reduced from ~2min (3 retry rounds) to ~25-30s (1 round) for typical queries
+
+### Code Quality
+- `agent.py` — Extracted `extract_text_content()` as public function, eliminated duplicate in `chat.py`
+- `agent.py` — Cleaned up code structure with section markers and `_reset_retrieval_counter()` helper
+- `main.py` — Removed unused `force_release_ingest_lock` import
+- `main.py` — Cached `logging.getLogger("ragmate")` as module-level `logger` (was repeated 15+ times)
+- `ingest.py` — Moved `import uuid` from function body to file top
+- `streaming_llm.py` — Removed unused `import sys` from debug logging block
+
+### Reliability
+- `retriever.py` — Replaced `threading.local()` with `contextvars.ContextVar` for rewrite query tracking (fixes cross-thread state loss between main thread and thread pool)
+- `retriever.py` — Added `threading.Lock` double-checked locking to `get_milvus_client()` for thread-safe initialization
+- `redis_client.py` — Added `close_sync_redis()` to properly close synchronous Redis connection on shutdown
+
 ## Prototype 9 — 2026-05-14
 - `streaming_llm.py` — Replaced LiteLLM with LangChain `ChatOpenAI` + custom `ChatOpenAICompatible` subclass for multi-API compatibility
 - `streaming_llm.py` — Auto-detect `tool_calls` support: first attempt with native format, auto-retry with text conversion on failure

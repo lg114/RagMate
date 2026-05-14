@@ -276,6 +276,7 @@ All settings are configured via `.env` file or environment variables, validated 
 | | `RERANK_CANDIDATES` | `20` | Rerank candidate pool size |
 | | `FINAL_CONTEXT_K` | `4` | Chunks passed to the LLM |
 | | `RERANK_SCORE_THRESHOLD` | `0.15` | Results below this score are discarded |
+| | `QUERY_REWRITE_ENABLED` | `true` | LLM query rewrite for better retrieval |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | Enable tracing |
 | | `LANGSMITH_API_KEY` | | LangSmith API key |
 

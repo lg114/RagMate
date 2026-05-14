@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RERANK_CANDIDATES: int = 20       # rerank 候选池大小
     FINAL_CONTEXT_K: int = 4          # 最终给 LLM 的片段数
-    RERANK_SCORE_THRESHOLD: float = 0.15  # 低于此分数的结果丢弃
+    RERANK_SCORE_THRESHOLD: float = 0.06  # 低于此分数的结果丢弃
+    QUERY_REWRITE_ENABLED: bool = True   # LLM 改写查询以提升检索质量
 
     # Documents
     DOCUMENTS_DIR: str = "./documents"
