@@ -13,6 +13,7 @@ All notable changes to this project are documented here.
 - Simplified `errors.py` — merged `ConflictError`/`ServiceUnavailableError`/`RetrievalError` into `ValidationError`, consolidated 4 exception handlers into 1 `AppError` handler
 - `database.py` — Sync engine now lazy-initialized with `pool_size=2` (was 10), idle ingest uses zero sync connections
 - Merged `GET /chat/history/{id}` into `GET /chat/sessions/{id}` — RESTful resource style
+- Extracted agent system prompt from `agent.py` to `prompts/researcher.md` — edit prompt without touching code
 
 
 ## Prototype 10 — 2026-05-14
