@@ -274,8 +274,7 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker 模型 |
 | | `RERANK_CANDIDATES` | `20` | rerank 候选池大小 |
 | | `FINAL_CONTEXT_K` | `4` | 最终给 LLM 的片段数 |
-| | `RERANK_SCORE_THRESHOLD` | `0.15` | 低于此分数的结果丢弃 |
-| | `QUERY_REWRITE_ENABLED` | `true` | LLM 改写查询以提升检索质量 |
+| | `RERANK_SCORE_THRESHOLD` | `0.06` | 低于此分数的结果丢弃 |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
 | | `LANGSMITH_API_KEY` | | LangSmith API Key |
 

@@ -6,10 +6,8 @@ All notable changes to this project are documented here.
 
 ## Prototype 10 — 2026-05-14
 ### Added
-- `retriever.py` — Query Rewrite: LLM-based retrieval-oriented query rewriting with dual-query retrieval + RRF fusion
-- `retriever.py` — Rewrite bypass: regex + heuristic detection for exact lookups (error codes, filenames, technical tokens)
-- `retriever.py` — Rewrite cache: LRU cache (256 entries) to avoid repeated LLM calls
-- `config.py` — New `QUERY_REWRITE_ENABLED` setting
+- `eval/dataset.json` — Expanded from 21 to 78 test cases with difficulty categories (normal/fuzzy/typo/reject/multi)
+- `eval/runner.py` — Per-category metrics breakdown and refusal detection for `should_refuse` cases
 
 ### Performance
 - `config.py` — `RERANK_SCORE_THRESHOLD` lowered from 0.15 to 0.06 to reduce false-negative filtering and agent retry loops
@@ -27,7 +25,6 @@ All notable changes to this project are documented here.
 - `streaming_llm.py` — Removed unused `import sys` from debug logging block
 
 ### Reliability
-- `retriever.py` — Replaced `threading.local()` with `contextvars.ContextVar` for rewrite query tracking (fixes cross-thread state loss between main thread and thread pool)
 - `retriever.py` — Added `threading.Lock` double-checked locking to `get_milvus_client()` for thread-safe initialization
 - `redis_client.py` — Added `close_sync_redis()` to properly close synchronous Redis connection on shutdown
 

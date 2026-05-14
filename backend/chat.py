@@ -8,7 +8,6 @@ from agent import run_agent, run_agent_streaming, extract_text_content
 from database import async_session
 from models import ChatHistory
 from redis_client import load_session, save_session
-from retriever import get_rewrite_queries, clear_rewrite_queries
 
 
 def extract_text(response: dict) -> str:
@@ -74,21 +73,6 @@ def _is_error_response(text: str) -> bool:
     return text.startswith(_ERROR_PREFIXES)
 
 
-def _strip_rewrite_queries(text: str) -> str:
-    """去掉回复开头泄漏的 rewrite query 文本。"""
-    queries = get_rewrite_queries()
-    # 多次迭代处理（rewrite queries 可能连续出现）
-    for _ in range(len(queries) + 1):
-        changed = False
-        for q in queries:
-            if text.startswith(q):
-                text = text[len(q):].lstrip()
-                changed = True
-        if not changed:
-            break
-    return text
-
-
 def _classify_error(e: Exception) -> str:
     """根据异常类型和消息内容返回用户友好的错误提示"""
     msg = str(e).lower()
@@ -113,7 +97,6 @@ async def chat(message: str, session_id: str | None = None) -> dict:
     """处理用户聊天消息，支持多轮对话。返回 {"response": str, "session_id": str}"""
     if not session_id:
         session_id = uuid.uuid4().hex
-    clear_rewrite_queries()
 
     # 1. 加载会话历史
     history = await load_session(session_id)
@@ -127,7 +110,7 @@ async def chat(message: str, session_id: str | None = None) -> dict:
             asyncio.to_thread(run_agent, history, session_id),
             timeout=AGENT_TIMEOUT,
         )
-        response_text = _strip_rewrite_queries(normalize_citations(extract_text(result)))
+        response_text = normalize_citations(extract_text(result))
     except asyncio.TimeoutError:
         response_text = "请求超时，请稍后重试"
     except asyncio.CancelledError:
@@ -156,7 +139,6 @@ async def chat_stream(message: str, session_id: str | None = None):
     """流式聊天，逐 token yield。返回格式: {"token": str} 或 {"done": True, "session_id": str}"""
     if not session_id:
         session_id = uuid.uuid4().hex
-    clear_rewrite_queries()
 
     history = await load_session(session_id)
     history.append({"role": "user", "content": message})
@@ -194,7 +176,7 @@ async def chat_stream(message: str, session_id: str | None = None):
         yield {"error": error_msg}
         return
 
-    response_text = _strip_rewrite_queries(normalize_citations("".join(full_response)))
+    response_text = normalize_citations("".join(full_response))
     is_error = _is_error_response(response_text)
 
     if not is_error:

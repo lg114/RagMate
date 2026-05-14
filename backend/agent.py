@@ -77,9 +77,7 @@ def retrieval_tool(query: str) -> str:
 
     from config import settings
     from errors import RetrievalError
-    from retriever import record_retrieval_query
 
-    record_retrieval_query(query)
     try:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
     except RetrievalError:

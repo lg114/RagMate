@@ -4,146 +4,638 @@
     "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
     "expected_contains": ["api.deepseek.com", "API key"],
     "must_not_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf", "Token 用量计算 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "API 的 base_url 是什么？",
     "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
     "expected_contains": ["https://api.deepseek.com"],
     "must_not_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "DeepSeek 有哪些模型？价格分别是多少？",
     "expected_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["V4-Flash", "V4-Pro"],
     "must_not_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "Token 用量怎么计算？",
     "expected_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["token"],
     "must_not_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "如何实现多轮对话？",
     "expected_sources": ["多轮对话 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["messages"],
     "must_not_sources": ["错误码 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "API 返回错误码 429 是什么意思？",
     "expected_sources": ["错误码 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["429"],
     "must_not_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "限速策略是什么？",
     "expected_sources": ["限速 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["限速"],
     "must_not_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "调用 API 需要什么认证方式？",
     "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
     "expected_contains": ["API key"],
     "must_not_sources": ["错误码 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "deepseek-chat 和 deepseek-reasoner 有什么区别？",
     "expected_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["deepseek-chat", "deepseek-reasoner"],
     "must_not_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "API 调用失败怎么排查？",
     "expected_sources": ["错误码 _ DeepSeek API Docs.pdf"],
     "expected_contains": ["错误"],
     "must_not_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "DeepSeek 支持哪些主要模型？",
     "expected_sources": ["DeepSeek API 介绍.md"],
     "expected_contains": ["deepseek-chat", "deepseek-reasoner"],
     "must_not_sources": ["模型价格表.xlsx"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "DeepSeek API 的流式输出怎么实现？",
     "expected_sources": ["DeepSeek API 介绍.md"],
     "expected_contains": ["stream"],
     "must_not_sources": ["API 错误码说明.txt"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "HTTP 401 错误是什么原因？",
     "expected_sources": ["API 错误码说明.txt"],
     "expected_contains": ["401", "Unauthorized"],
     "must_not_sources": ["DeepSeek API 介绍.md"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "遇到 429 错误应该怎么处理？",
     "expected_sources": ["API 错误码说明.txt"],
     "expected_contains": ["429", "速率"],
     "must_not_sources": ["用户指南.docx"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "错误响应的 JSON 格式是什么？",
     "expected_sources": ["API 错误码说明.txt"],
     "expected_contains": ["error", "message"],
     "must_not_sources": ["模型价格表.xlsx"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "deepseek-v4-pro 的价格是多少？",
     "expected_sources": ["模型价格表.xlsx"],
     "expected_contains": ["v4-pro"],
     "must_not_sources": ["API 错误码说明.txt"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "各模型的上下文长度分别是多少？",
     "expected_sources": ["模型价格表.xlsx"],
     "expected_contains": ["64K", "128K"],
     "must_not_sources": ["DeepSeek API 介绍.md"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "推理增强模型的输出价格是多少？",
     "expected_sources": ["模型价格表.xlsx"],
     "expected_contains": ["16.0"],
     "must_not_sources": ["用户指南.docx"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "使用 DeepSeek API 需要哪些步骤？",
     "expected_sources": ["用户指南.docx"],
     "expected_contains": ["API Key", "pip install"],
     "must_not_sources": ["API 错误码说明.txt"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "如何安装 OpenAI SDK？",
     "expected_sources": ["用户指南.docx"],
     "expected_contains": ["pip install openai"],
     "must_not_sources": ["模型价格表.xlsx"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
   },
   {
     "question": "使用 API 时有哪些注意事项？",
     "expected_sources": ["用户指南.docx"],
     "expected_contains": ["API Key", "速率限制"],
     "must_not_sources": ["DeepSeek API 介绍.md"],
-    "category": "factual"
+    "category": "factual",
+    "difficulty": "normal"
+  },
+  {
+    "question": "API key 在哪里获取？",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["API key"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "normal"
+  },
+  {
+    "question": "deepseek-reasoner 的输入价格是多少？",
+    "expected_sources": ["模型价格表.xlsx", "模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["reasoner"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "normal"
+  },
+  {
+    "question": "API 支持哪些编程语言？",
+    "expected_sources": ["用户指南.docx", "DeepSeek API 介绍.md"],
+    "expected_contains": ["Python"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "normal"
+  },
+  {
+    "question": "多轮对话的消息格式是什么？",
+    "expected_sources": ["多轮对话 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["role", "content"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "normal"
+  },
+  {
+    "question": "怎么判断 token 用完了？",
+    "expected_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["token"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "接口炸了怎么办",
+    "expected_sources": ["API 错误码说明.txt", "错误码 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["错误"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "调不通",
+    "expected_sources": ["API 错误码说明.txt", "首次调用 API _ DeepSeek API Docs.pdf"],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "报错了",
+    "expected_sources": ["API 错误码说明.txt", "错误码 _ DeepSeek API Docs.pdf"],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "太贵了",
+    "expected_sources": ["模型价格表.xlsx", "模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["价格"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "限流了",
+    "expected_sources": ["限速 _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["限速", "429"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "超时了",
+    "expected_sources": ["API 错误码说明.txt"],
+    "expected_contains": ["超时", "timeout"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "key 过期了",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["API key"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "模型选哪个好",
+    "expected_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf", "模型价格表.xlsx"],
+    "expected_contains": ["deepseek-chat"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "流式怎么用",
+    "expected_sources": ["DeepSeek API 介绍.md"],
+    "expected_contains": ["stream"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "怎么收费",
+    "expected_sources": ["模型价格表.xlsx", "模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["价格"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "上下文多长",
+    "expected_sources": ["模型价格表.xlsx", "Token 用量计算 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["上下文"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "返回格式不对",
+    "expected_sources": ["API 错误码说明.txt", "DeepSeek API 介绍.md"],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "对话记不住上下文",
+    "expected_sources": ["多轮对话 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["messages", "历史"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "token 太多了怎么省",
+    "expected_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["token"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "403 是啥意思",
+    "expected_sources": ["API 错误码说明.txt", "错误码 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["403"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "认证老是失败",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["认证", "API key"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "有没有免费额度",
+    "expected_sources": ["模型价格表.xlsx", "模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "fuzzy"
+  },
+  {
+    "question": "tokne 超了咋办",
+    "expected_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["token"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "apikey 失笑了",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["API key"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "deepseek-chat 和 deepseek-resoner 区别",
+    "expected_sources": ["模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["deepseek-chat", "reasoner"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "流式输出 streamming 怎么实现",
+    "expected_sources": ["DeepSeek API 介绍.md"],
+    "expected_contains": ["stream"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "限速策率是什么",
+    "expected_sources": ["限速 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["限速"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "多轮对画怎么实现",
+    "expected_sources": ["多轮对话 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["messages"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "错误码 429 是什意思",
+    "expected_sources": ["错误码 _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["429"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "pip instll openai",
+    "expected_sources": ["用户指南.docx"],
+    "expected_contains": ["pip install openai"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "上下文长渡是多少",
+    "expected_sources": ["模型价格表.xlsx", "Token 用量计算 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["上下文"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "推理曾强模型价格",
+    "expected_sources": ["模型价格表.xlsx"],
+    "expected_contains": ["reasoner"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "typo"
+  },
+  {
+    "question": "谁发明了微积分",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "东京天气怎么样",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "乔布斯是谁",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "今天星期几",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "Python 怎么排序列表",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "地球到月球多远",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "一公斤等于多少磅",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "GPT-4 和 Claude 哪个好",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "怎么做红烧肉",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "中国有多少个省",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "帮我写一首诗",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "1+1 等于几",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "DeepSeek 公司在哪里",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "如何注册 DeepSeek 账号",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "DeepSeek 和 OpenAI 的关系",
+    "expected_sources": [],
+    "expected_contains": [],
+    "must_not_sources": [],
+    "should_refuse": true,
+    "category": "reject",
+    "difficulty": "reject"
+  },
+  {
+    "question": "DeepSeek API 认证失败并且返回 429 怎么办",
+    "expected_sources": ["首次调用 API _ DeepSeek API Docs.pdf", "API 错误码说明.txt", "限速 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["认证", "429"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "token 超限导致 429 错误怎么处理",
+    "expected_sources": ["Token 用量计算 _ DeepSeek API Docs.pdf", "API 错误码说明.txt", "限速 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["token", "429"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "deepseek-chat 模型的流式输出和价格",
+    "expected_sources": ["DeepSeek API 介绍.md", "模型价格表.xlsx"],
+    "expected_contains": ["stream", "deepseek-chat"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "多轮对话时 token 用量怎么计算",
+    "expected_sources": ["多轮对话 _ DeepSeek API Docs.pdf", "Token 用量计算 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["messages", "token"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "401 认证错误和 API key 配置",
+    "expected_sources": ["API 错误码说明.txt", "首次调用 API _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["401", "API key"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "限速策略和 429 错误的关系",
+    "expected_sources": ["限速 _ DeepSeek API Docs.pdf", "API 错误码说明.txt"],
+    "expected_contains": ["限速", "429"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "Python SDK 安装和首次调用步骤",
+    "expected_sources": ["用户指南.docx", "首次调用 API _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["pip install", "API key"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "V4-Pro 模型的上下文长度和价格",
+    "expected_sources": ["模型价格表.xlsx", "模型 & 价格 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["v4-pro", "128K"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "流式输出时遇到超时错误",
+    "expected_sources": ["DeepSeek API 介绍.md", "API 错误码说明.txt"],
+    "expected_contains": ["stream", "超时"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
+  },
+  {
+    "question": "429 错误和 token 用量的关系",
+    "expected_sources": ["API 错误码说明.txt", "限速 _ DeepSeek API Docs.pdf", "Token 用量计算 _ DeepSeek API Docs.pdf"],
+    "expected_contains": ["429", "token"],
+    "must_not_sources": [],
+    "category": "factual",
+    "difficulty": "multi"
   }
 ]
