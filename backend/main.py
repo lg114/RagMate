@@ -41,6 +41,12 @@ _RATE_LIMIT_WINDOW = 60.0
 def _check_rate_limit(session_id: str):
     import time
     now = time.time()
+    # 定期清理过期条目，防止内存泄漏
+    if len(_rate_limit) > 1000:
+        for sid in list(_rate_limit):
+            _rate_limit[sid] = [t for t in _rate_limit[sid] if now - t < _RATE_LIMIT_WINDOW]
+            if not _rate_limit[sid]:
+                del _rate_limit[sid]
     timestamps = _rate_limit.get(session_id, [])
     timestamps = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
     if len(timestamps) >= _RATE_LIMIT_MAX:

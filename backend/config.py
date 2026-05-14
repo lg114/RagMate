@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # Milvus
     MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: str = "19530"
+    MILVUS_PORT: int = 19530
     MILVUS_COLLECTION: str = "ragmate_docs"
     MILVUS_TIMEOUT: float = 10.0
 

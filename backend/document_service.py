@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from errors import ConflictError, NotFoundError, ValidationError
 from models import Document
-from redis_client import get_redis
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
@@ -179,9 +178,3 @@ async def delete_document(
         except Exception:
             logging.getLogger("ragmate").warning(f"Failed to delete Milvus vectors for {name}", exc_info=True)
 
-    # 4. 清理 Redis 会话缓存（不影响主流程，失败忽略）
-    try:
-        r = await get_redis()
-        await r.delete(f"ragmate:session:{name}")
-    except Exception:
-        logging.getLogger("ragmate").warning(f"Failed to delete Redis session for {name}", exc_info=True)

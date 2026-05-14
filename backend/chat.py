@@ -130,11 +130,11 @@ async def chat(message: str, session_id: str | None = None) -> dict:
     except Exception as e:
         response_text = _classify_error(e)
 
-    # 4. 追加 assistant 消息 + 持久化（只有正常回复才写入，错误提示直接丢弃）
+    # 4. 追加 assistant 消息 + 持久化（错误提示不写入历史，但用户消息需要保留）
     is_error = _is_error_response(response_text)
     if not is_error:
         history.append({"role": "assistant", "content": response_text})
-        await save_session(session_id, history)
+    await save_session(session_id, history)
 
     msgs = [("user", message)]
     if not is_error:
@@ -193,7 +193,7 @@ async def chat_stream(message: str, session_id: str | None = None):
 
     if not is_error:
         history.append({"role": "assistant", "content": response_text})
-        await save_session(session_id, history)
+    await save_session(session_id, history)
 
     msgs = [("user", message)]
     if not is_error:

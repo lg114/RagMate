@@ -261,11 +261,10 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
 
     dense_vecs, sparse_vecs = encode_documents(texts)
 
-    import time
-    base_id = int(time.time() * 1000)
+    import uuid
     data = [
-        {"id": base_id + i, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
-        for i, (d_vec, s_vec, text, meta) in enumerate(zip(dense_vecs, sparse_vecs, texts, metadatas))
+        {"id": uuid.uuid4().int >> 64, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
+        for d_vec, s_vec, text, meta in zip(dense_vecs, sparse_vecs, texts, metadatas)
     ]
     client.insert(
         collection_name=settings.MILVUS_COLLECTION,
