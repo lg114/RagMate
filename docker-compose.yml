@@ -89,8 +89,10 @@ services:
       - "19530:19530"
       - "9091:9091"
     depends_on:
-      - "etcd"
-      - "minio"
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   attu:
     container_name: milvus-attu
@@ -101,7 +103,8 @@ services:
     ports:
       - "8080:3000"
     depends_on:
-      - milvus
+      milvus:
+        condition: service_healthy
     networks:
       - default
 

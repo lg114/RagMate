@@ -58,7 +58,20 @@ def retrieve(query: str, k: int = None) -> List[dict]:
             client.load_collection(settings.MILVUS_COLLECTION)
             _collection_loaded = True
         dense_vec, sparse_vec = encode_query(query)
+    except Exception as e:
+        # 如果是集合未加载的错误，重置标记并重试一次
+        if "collection" in str(e).lower() or "not loaded" in str(e).lower():
+            _collection_loaded = False
+            try:
+                client.load_collection(settings.MILVUS_COLLECTION)
+                _collection_loaded = True
+                dense_vec, sparse_vec = encode_query(query)
+            except Exception:
+                raise RetrievalError() from e
+        else:
+            raise RetrievalError() from e
 
+    try:
         # 混合检索：dense + sparse，多取一些给 reranker 和 source 去重
         over_fetch = max(k * 5, 12)
 

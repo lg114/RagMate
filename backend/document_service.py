@@ -170,7 +170,7 @@ async def delete_document(
     if milvus_client and milvus_client.has_collection(settings.MILVUS_COLLECTION):
         try:
             # filter 值经过 validate_filename() 校验，不含特殊字符
-            escaped_name = name.replace('"', '\\"')
+            escaped_name = name.replace('\\', '\\\\').replace('"', '\\"')
             milvus_client.delete(
                 collection_name=settings.MILVUS_COLLECTION,
                 filter=f'metadata["source"] == "{escaped_name}"',

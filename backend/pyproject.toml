@@ -36,6 +36,10 @@ study = [
     "bilibili-api-python>=17.0.0",
 ]
 
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
 [tool.setuptools]
 py-modules = [
     "agent",

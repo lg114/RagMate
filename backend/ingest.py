@@ -244,7 +244,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
 
     for filename in new_files:
         try:
-            escaped = filename.replace('"', '\\"')
+            escaped = filename.replace('\\', '\\\\').replace('"', '\\"')
             client.delete(
                 collection_name=settings.MILVUS_COLLECTION,
                 filter=f'metadata["source"] == "{escaped}"',

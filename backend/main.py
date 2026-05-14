@@ -149,7 +149,7 @@ app = FastAPI(title="RagMate API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS.split(","),
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",")],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -373,4 +373,18 @@ async def ingest_status():
 # ── Static files (frontend) — must be last ──
 frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.exists(frontend_dir):
-    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    from starlette.responses import FileResponse
+
+    @app.exception_handler(404)
+    async def not_found_fallback(request, exc):
+        # API 路径返回 JSON 404，前端路径返回 index.html
+        path = request.url.path
+        if path.startswith(("/chat", "/documents", "/ingest", "/health", "/ready")):
+            return JSONResponse(status_code=404, content={"code": "NOT_FOUND", "detail": "Endpoint not found"})
+        # 前端路由：返回 index.html 支持 SPA 路由
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return JSONResponse(status_code=404, content={"code": "NOT_FOUND", "detail": "Not found"})
+
+    app.mount("/", StaticFiles(directory=frontend_dir), name="frontend")

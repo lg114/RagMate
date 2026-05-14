@@ -18,10 +18,6 @@ const API = {
     return data;
   },
 
-  chat(message, sessionId) {
-    return this.request('POST', '/chat', { message, session_id: sessionId });
-  },
-
   async chatStream(message, sessionId, onToken, onDone, onError) {
     try {
       const res = await fetch('/chat/stream', {
@@ -355,8 +351,15 @@ const ChatPanel = {
 
   appendStreamToken(div, fullText) {
     const content = div.querySelector('.msg-content');
-    content.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    // 节流：用 requestAnimationFrame 合并多次 token 更新，避免每 token 都重新 parse 全文
+    if (!div._rafPending) {
+      div._rafPending = true;
+      requestAnimationFrame(() => {
+        content.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+        div._rafPending = false;
+      });
+    }
   },
 
   finalizeStreamMessage(div, fullText) {
@@ -488,7 +491,7 @@ const HistoryPanel = {
       }
       this.load();
     } catch (err) {
-      alert('删除失败: ' + (err.message || '未知错误'));
+      ChatPanel.showError('删除失败: ' + (err.message || '未知错误'));
     }
   },
 
@@ -628,7 +631,7 @@ const DocumentsPanel = {
       await API.deleteDocument(filename);
       await this.load();
     } catch (err) {
-      alert('删除失败: ' + (err.message || '未知错误'));
+      this.showUploadError('删除失败: ' + (err.message || '未知错误'));
     }
   },
 
