@@ -18,36 +18,9 @@ class NotFoundError(AppError):
 
 
 class ValidationError(AppError):
-    def __init__(self, message: str):
+    def __init__(self, message: str, status_code: int = 400):
         super().__init__(
             message=message,
             code="VALIDATION_ERROR",
-            status_code=400,
-        )
-
-
-class ConflictError(AppError):
-    def __init__(self, message: str):
-        super().__init__(
-            message=message,
-            code="CONFLICT",
-            status_code=409,
-        )
-
-
-class ServiceUnavailableError(AppError):
-    def __init__(self, message: str):
-        super().__init__(
-            message=message,
-            code="SERVICE_UNAVAILABLE",
-            status_code=503,
-        )
-
-
-class RetrievalError(AppError):
-    def __init__(self, message: str = "检索服务异常，请稍后重试"):
-        super().__init__(
-            message=message,
-            code="RETRIEVAL_ERROR",
-            status_code=503,
+            status_code=status_code,
         )

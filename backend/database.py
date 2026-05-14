@@ -14,13 +14,31 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 # 从 async URL 生成 sync URL：替换 driver 从 asyncpg 到 psycopg2
 _sync_url = make_url(settings.DATABASE_URL).set(drivername="postgresql+psycopg2")
-sync_engine = create_engine(
-    _sync_url,
-    echo=False,
-    pool_size=10,
-    pool_pre_ping=True,
-)
-SyncSession = sessionmaker(bind=sync_engine)
+_sync_engine = None
+
+
+def get_sync_engine():
+    global _sync_engine
+    if _sync_engine is None:
+        _sync_engine = create_engine(
+            _sync_url,
+            echo=False,
+            pool_size=2,
+            max_overflow=2,
+            pool_pre_ping=True,
+        )
+    return _sync_engine
+
+
+class SyncSession:
+    """惰性 sync session：首次使用时才创建 engine。"""
+
+    def __enter__(self):
+        self._session = sessionmaker(bind=get_sync_engine())()
+        return self._session
+
+    def __exit__(self, *args):
+        self._session.close()
 
 
 class Base(DeclarativeBase):

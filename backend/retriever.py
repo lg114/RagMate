@@ -8,7 +8,23 @@ from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 from sentence_transformers import CrossEncoder
 
 from config import settings
-from source_utils import canonical_source
+
+
+def canonical_source(source: str) -> str:
+    """归一化来源文件名，用于检索去重。"""
+    if not source:
+        return ""
+    import os
+    base, ext = os.path.splitext(source)
+    for suffix in ["_副本", " (副本)", "_copy", " (copy)"]:
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    if base.endswith(")") and "(" in base:
+        idx = base.rfind("(")
+        if base[idx + 1 : -1].isdigit():
+            base = base[:idx]
+    return (base + ext).lower()
 
 logger = logging.getLogger("ragmate")
 
@@ -48,7 +64,7 @@ def _check_milvus_available() -> bool:
 
 def _init_milvus():
     """确保 Milvus collection 已加载。"""
-    from errors import RetrievalError
+    from errors import ValidationError
 
     global _collection_loaded
     try:
@@ -63,9 +79,9 @@ def _init_milvus():
                 client.load_collection(settings.MILVUS_COLLECTION)
                 _collection_loaded = True
             except Exception:
-                raise RetrievalError() from e
+                raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
         else:
-            raise RetrievalError() from e
+            raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
     return client
 
 
@@ -157,7 +173,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 
 def retrieve(query: str, k: int = None) -> List[dict]:
     """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
-    from errors import RetrievalError
+    from errors import ValidationError
     from ingest import encode_query
 
     if k is None:
@@ -189,11 +205,11 @@ def retrieve(query: str, k: int = None) -> List[dict]:
         )
         return result
 
-    except RetrievalError:
+    except ValidationError:
         raise
     except Exception as e:
         logger.error(f"Retrieval failed: {e}", exc_info=True)
-        raise RetrievalError() from e
+        raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
 
 
 if __name__ == "__main__":

@@ -76,11 +76,11 @@ def retrieval_tool(query: str) -> str:
         return "已达最大检索次数，请直接基于已有信息回答用户问题。"
 
     from config import settings
-    from errors import RetrievalError
+    from errors import ValidationError
 
     try:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
-    except RetrievalError:
+    except ValidationError:
         return "检索服务暂时不可用，请稍后重试"
     if not results:
         return "未找到相关文档"

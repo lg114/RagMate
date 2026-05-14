@@ -21,7 +21,6 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 - **Flexible LLM Integration** — Access any OpenAI-compatible API (OpenAI, Anthropic, DeepSeek, MiMo, etc.) via LangChain ChatOpenAI
 - **Full Observability** — LangSmith tracing for agent execution
 - **Self-Hosted** — All data on-premise, no external dependencies
-- **Retrieval Evaluation** — Built-in evaluation system for quantifying recall and precision
 
 ---
 
@@ -150,29 +149,6 @@ Open http://localhost:8000 in browser.
 - **Chat** — Knowledge-base powered streaming Q&A with multi-turn conversation
 - **Documents** — Upload documents, manage documents, trigger ingestion
 
-### CLI
-
-```bash
-python backend/cli.py
-```
-
-| Option | Function |
-|--------|----------|
-| 1 | Ingest documents |
-| 2 | Retrieve documents |
-| 3 | Chat |
-| 4 | Evaluate (retrieval quality test) |
-| 5 | Exit |
-
-### Evaluation System
-
-```bash
-python backend/cli.py
-# Select 4
-```
-
-Loads `eval/dataset.json` test dataset, runs retrieval for each question, computes recall and precision, outputs formatted report. Expand the dataset by adding more Q&A entries to `eval/dataset.json`.
-
 ---
 
 ## API Reference
@@ -199,7 +175,7 @@ Response: { "sessions": [{ "session_id": "...", "first_message": "...", "created
 ```
 
 ```
-GET /chat/history/{session_id}
+GET /chat/sessions/{session_id}
 Response: { "session_id": "...", "messages": [{ "role": "...", "content": "...", "created_at": "..." }] }
 ```
 
@@ -312,11 +288,6 @@ RagMate/
     ├── models.py              # ORM models (Document, ChatHistory)
     ├── redis_client.py        # Redis session / lock / status
     ├── errors.py              # Typed error hierarchy
-    ├── cli.py                 # CLI
-    ├── eval/                  # Evaluation system
-    │   ├── dataset.json       # Test Q&A dataset
-    │   ├── metrics.py         # Recall / precision metrics
-    │   └── runner.py          # Evaluation runner
     └── documents/             # Document storage directory
 ```
 

@@ -83,7 +83,7 @@ const API = {
   },
 
   getHistory(sessionId) {
-    return this.request('GET', `/chat/history/${encodeURIComponent(sessionId)}`);
+    return this.request('GET', `/chat/sessions/${encodeURIComponent(sessionId)}`);
   },
 
   deleteSession(sessionId) {

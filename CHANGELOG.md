@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 
 ## [Unreleased]
+## Prototype 11 — 2026-05-15
+
+### Code Quality
+- Merged `source_utils.py` into `retriever.py` — eliminated single-function module, reduced import chain
+- `eval/metrics.py` — Updated import to use `retriever.canonical_source`
+- Removed `cli.py` — all functionality covered by FastAPI endpoints and `python -m eval.runner`
+- Removed `eval/` evaluation system — will be replaced by RAGAS in future
+- Simplified `errors.py` — merged `ConflictError`/`ServiceUnavailableError`/`RetrievalError` into `ValidationError`, consolidated 4 exception handlers into 1 `AppError` handler
+- `database.py` — Sync engine now lazy-initialized with `pool_size=2` (was 10), idle ingest uses zero sync connections
+- Merged `GET /chat/history/{id}` into `GET /chat/sessions/{id}` — RESTful resource style
+
 
 ## Prototype 10 — 2026-05-14
 ### Added

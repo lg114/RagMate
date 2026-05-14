@@ -18,9 +18,9 @@ from starlette.responses import StreamingResponse
 
 from chat import chat, chat_stream
 from config import settings
-from database import async_session, engine, init_db, sync_engine
+from database import async_session, engine, get_sync_engine, init_db
 import document_service
-from errors import ConflictError, NotFoundError, ServiceUnavailableError, ValidationError
+from errors import AppError, NotFoundError, ValidationError
 from ingest import ingest_documents
 from models import ChatHistory
 from redis_client import get_redis, acquire_ingest_lock, release_ingest_lock, renew_ingest_lock, get_ingest_status, set_ingest_status, close_sync_redis
@@ -148,7 +148,9 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.debug("Failed to dispose async engine on shutdown", exc_info=True)
         try:
-            await asyncio.to_thread(sync_engine.dispose)
+            from database import _sync_engine
+            if _sync_engine is not None:
+                await asyncio.to_thread(_sync_engine.dispose)
         except Exception:
             logger.debug("Failed to dispose sync engine on shutdown", exc_info=True)
 
@@ -163,23 +165,8 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(ValidationError)
-async def validation_error_handler(request, exc: ValidationError):
-    return JSONResponse(status_code=exc.status_code, content={"code": exc.code, "detail": exc.message})
-
-
-@app.exception_handler(NotFoundError)
-async def not_found_handler(request, exc: NotFoundError):
-    return JSONResponse(status_code=exc.status_code, content={"code": exc.code, "detail": exc.message})
-
-
-@app.exception_handler(ConflictError)
-async def conflict_handler(request, exc: ConflictError):
-    return JSONResponse(status_code=exc.status_code, content={"code": exc.code, "detail": exc.message})
-
-
-@app.exception_handler(ServiceUnavailableError)
-async def service_unavailable_handler(request, exc: ServiceUnavailableError):
+@app.exception_handler(AppError)
+async def app_error_handler(request, exc: AppError):
     return JSONResponse(status_code=exc.status_code, content={"code": exc.code, "detail": exc.message})
 
 
@@ -293,7 +280,7 @@ async def list_sessions():
     return {"sessions": sessions}
 
 
-@app.get("/chat/history/{session_id}")
+@app.get("/chat/sessions/{session_id}")
 async def get_history(session_id: str):
     async with async_session() as session:
         result = await session.execute(

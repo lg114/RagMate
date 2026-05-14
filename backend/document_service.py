@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from errors import ConflictError, NotFoundError, ValidationError
+from errors import NotFoundError, ValidationError
 from models import Document
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
@@ -107,7 +107,7 @@ async def save_document(
     result = await session.execute(select(Document).where(Document.filename == name))
     existing = result.scalar_one_or_none()
     if existing:
-        raise ConflictError(f"File '{name}' already exists")
+        raise ValidationError(f"File '{name}' already exists", status_code=409)
 
     size_bytes = len(content)
     if size_bytes > MAX_FILE_SIZE:

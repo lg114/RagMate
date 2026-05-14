@@ -149,29 +149,6 @@ uvicorn main:app --reload --port 8000
 - **对话** — 基于知识库的流式问答，支持多轮对话
 - **文档** — 上传文档、管理文档、触发入库
 
-### CLI
-
-```bash
-python backend/cli.py
-```
-
-| 选项 | 功能 |
-|------|------|
-| 1 | 摄入文档 |
-| 2 | 检索文档 |
-| 3 | 聊天问答 |
-| 4 | 评估（检索质量测试） |
-| 5 | 退出 |
-
-### 评估系统
-
-```bash
-python backend/cli.py
-# 选择 4
-```
-
-评估流程：加载 `eval/dataset.json` 测试数据集，对每个问题运行检索，计算召回率和精确率，输出格式化报告。扩充测试数据集：编辑 `eval/dataset.json` 添加更多 Q&A 用例。
-
 ---
 
 ## API 参考
@@ -198,7 +175,7 @@ Response: { "sessions": [{ "session_id": "...", "first_message": "...", "created
 ```
 
 ```
-GET /chat/history/{session_id}
+GET /chat/sessions/{session_id}
 Response: { "session_id": "...", "messages": [{ "role": "...", "content": "...", "created_at": "..." }] }
 ```
 
@@ -311,11 +288,6 @@ RagMate/
     ├── models.py              # ORM 模型（Document, ChatHistory）
     ├── redis_client.py        # Redis 会话 / 锁 / 状态
     ├── errors.py              # 类型化错误层级
-    ├── cli.py                 # CLI
-    ├── eval/                  # 评估系统
-    │   ├── dataset.json       # 测试 Q&A 数据集
-    │   ├── metrics.py         # 召回率 / 精确率
-    │   └── runner.py          # 评估运行器
     └── documents/             # 文档存储目录
 ```
 
