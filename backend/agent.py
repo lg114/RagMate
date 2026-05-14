@@ -1,3 +1,5 @@
+import contextvars
+
 from langchain_core.tools import tool
 
 from deepagents import create_deep_agent
@@ -7,7 +9,7 @@ from retriever import retrieve
 
 # ── 检索限制 ────────────────────────────────────────────────────────────────
 MAX_RETRIEVAL_ATTEMPTS = 2
-_retrieval_count = 0
+_retrieval_count_var: contextvars.ContextVar[list[int]] = contextvars.ContextVar("_retrieval_count", default=[0])
 
 # ── System Prompt ───────────────────────────────────────────────────────────
 AGENT_SYSTEM_PROMPT = """你是 RagMate 的知识库问答助手，代号 Researcher。你的职责是基于用户上传的知识库资料，给出准确、简洁、可追溯的回答。
@@ -68,9 +70,9 @@ AGENT_SYSTEM_PROMPT = """你是 RagMate 的知识库问答助手，代号 Resear
 @tool
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
-    global _retrieval_count
-    _retrieval_count += 1
-    if _retrieval_count > MAX_RETRIEVAL_ATTEMPTS:
+    counter = _retrieval_count_var.get()
+    counter[0] += 1
+    if counter[0] > MAX_RETRIEVAL_ATTEMPTS:
         return "已达最大检索次数，请直接基于已有信息回答用户问题。"
 
     from config import settings
@@ -127,8 +129,7 @@ def extract_text_content(content) -> str:
 
 
 def _reset_retrieval_counter():
-    global _retrieval_count
-    _retrieval_count = 0
+    _retrieval_count_var.set([0])
 
 
 # ── 公开 API ────────────────────────────────────────────────────────────────
