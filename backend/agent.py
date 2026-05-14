@@ -13,7 +13,8 @@ AGENT_SYSTEM_PROMPT = """你是 RagMate 的知识库问答助手，代号 Resear
 - 只有普通寒暄、与知识库无关的闲聊，才可以不检索直接回答。
 - 只回答用户当前提出的问题，不主动扩展无关背景，不把检索到但用户没问的信息塞进答案。
 - 不确定时明确说"我不确定"或"根据现有资料无法确认"，禁止编造。
-- 检索结果为空时，直接说明"没有找到相关资料"，不要凭常识补答案。
+- 检索结果为空或相关性很低时，直接说明"没有找到相关资料"，不要凭常识补答案。
+- 宁可拒答，不要低质量上下文生成看似合理但错误的答案。
 - 检索服务不可用时，直接说明"检索服务暂时不可用，请稍后重试"。
 
 ## 事实与证据
@@ -60,7 +61,7 @@ def retrieval_tool(query: str) -> str:
     from config import settings
     from errors import RetrievalError
     try:
-        results = retrieve(query, k=settings.RETRIEVAL_TOP_K)
+        results = retrieve(query, k=settings.FINAL_CONTEXT_K)
     except RetrievalError:
         return "检索服务暂时不可用，请稍后重试"
     if not results:

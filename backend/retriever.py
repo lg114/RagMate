@@ -1,3 +1,4 @@
+import logging
 import socket
 from functools import lru_cache
 from typing import List
@@ -7,6 +8,8 @@ from sentence_transformers import CrossEncoder
 
 from config import settings
 from source_utils import canonical_source
+
+logger = logging.getLogger("ragmate")
 
 _milvus_client: MilvusClient | None = None
 _collection_loaded: bool = False
@@ -43,13 +46,12 @@ def get_reranker() -> CrossEncoder:
 
 
 def retrieve(query: str, k: int = None) -> List[dict]:
-    """混合检索 + Reranking。返回 [{text, source, page}, ...]。空列表表示无匹配。"""
-    import logging
+    """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。空列表表示无匹配。"""
     from errors import RetrievalError
     from ingest import encode_query
 
     if k is None:
-        k = settings.RERANKER_TOP_K
+        k = settings.FINAL_CONTEXT_K
 
     global _collection_loaded
     try:
@@ -59,7 +61,6 @@ def retrieve(query: str, k: int = None) -> List[dict]:
             _collection_loaded = True
         dense_vec, sparse_vec = encode_query(query)
     except Exception as e:
-        # 如果是集合未加载的错误，重置标记并重试一次
         if "collection" in str(e).lower() or "not loaded" in str(e).lower():
             _collection_loaded = False
             try:
@@ -72,31 +73,40 @@ def retrieve(query: str, k: int = None) -> List[dict]:
             raise RetrievalError() from e
 
     try:
-        # 混合检索：dense + sparse，多取一些给 reranker 和 source 去重
-        over_fetch = max(k * 5, 12)
+        over_fetch = settings.RERANK_CANDIDATES
 
-        dense_req = AnnSearchRequest(
-            data=[dense_vec],
-            anns_field="dense",
-            param={"metric_type": "IP", "params": {}},
-            limit=over_fetch,
-        )
-        sparse_req = AnnSearchRequest(
-            data=[sparse_vec],
-            anns_field="sparse",
-            param={"metric_type": "IP", "params": {"drop_ratio_search": 0.2}},
-            limit=over_fetch,
-        )
-
-        results = client.hybrid_search(
-            collection_name=settings.MILVUS_COLLECTION,
-            reqs=[dense_req, sparse_req],
-            ranker=RRFRanker(),
-            limit=over_fetch,
-            output_fields=["text", "metadata"],
-        )
+        if settings.HYBRID_SEARCH_ENABLED:
+            dense_req = AnnSearchRequest(
+                data=[dense_vec],
+                anns_field="dense",
+                param={"metric_type": "IP", "params": {}},
+                limit=over_fetch,
+            )
+            sparse_req = AnnSearchRequest(
+                data=[sparse_vec],
+                anns_field="sparse",
+                param={"metric_type": "IP", "params": {"drop_ratio_search": 0.2}},
+                limit=over_fetch,
+            )
+            results = client.hybrid_search(
+                collection_name=settings.MILVUS_COLLECTION,
+                reqs=[dense_req, sparse_req],
+                ranker=RRFRanker(),
+                limit=over_fetch,
+                output_fields=["text", "metadata"],
+            )
+        else:
+            results = client.search(
+                collection_name=settings.MILVUS_COLLECTION,
+                data=[dense_vec],
+                anns_field="dense",
+                param={"metric_type": "IP", "params": {}},
+                limit=over_fetch,
+                output_fields=["text", "metadata"],
+            )
 
         if not results or not results[0]:
+            logger.info(f"Retrieval: query='{query[:50]}' → 0 candidates from Milvus")
             return []
 
         # 提取候选
@@ -121,7 +131,16 @@ def retrieve(query: str, k: int = None) -> List[dict]:
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
 
-        # Source 去重：同一 canonical source 最多保留 2 个 chunk
+        top_score = candidates[0]["score"] if candidates else 0
+
+        # 过滤低分结果
+        threshold = settings.RERANK_SCORE_THRESHOLD
+        candidates = [c for c in candidates if c["score"] >= threshold]
+        if not candidates:
+            logger.info(f"Retrieval: query='{query[:50]}' → top_score={top_score:.3f} < threshold={threshold}, returning empty")
+            return []
+
+        # Source 去重
         source_count: dict[str, int] = {}
         filtered = []
         for c in candidates:
@@ -129,12 +148,19 @@ def retrieve(query: str, k: int = None) -> List[dict]:
             if source_count.get(canonical, 0) < 2:
                 filtered.append(c)
                 source_count[canonical] = source_count.get(canonical, 0) + 1
-        return filtered[:k]
+        result = filtered[:k]
+
+        logger.info(
+            f"Retrieval: query='{query[:50]}' → "
+            f"candidates={len(candidates)}, top_score={top_score:.3f}, "
+            f"after_dedup={len(filtered)}, returned={len(result)}"
+        )
+        return result
 
     except RetrievalError:
         raise
     except Exception as e:
-        logging.getLogger("ragmate").error(f"Retrieval failed: {e}", exc_info=True)
+        logger.error(f"Retrieval failed: {e}", exc_info=True)
         raise RetrievalError() from e
 
 

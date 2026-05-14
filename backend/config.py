@@ -41,8 +41,9 @@ class Settings(BaseSettings):
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    RERANKER_TOP_K: int = 3
-    RETRIEVAL_TOP_K: int = 2
+    RERANK_CANDIDATES: int = 20       # rerank 候选池大小
+    FINAL_CONTEXT_K: int = 4          # 最终给 LLM 的片段数
+    RERANK_SCORE_THRESHOLD: float = 0.15  # 低于此分数的结果丢弃
 
     # Documents
     DOCUMENTS_DIR: str = "./documents"

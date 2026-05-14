@@ -25,7 +25,7 @@ def load_dataset(path: str = None) -> list[dict]:
 def run_eval(dataset_path: str = None, k: int | None = None) -> dict:
     """运行评估，返回结果和报告。"""
     if k is None:
-        k = settings.RERANKER_TOP_K
+        k = settings.FINAL_CONTEXT_K
     dataset = load_dataset(dataset_path)
     results = []
 

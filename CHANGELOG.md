@@ -4,14 +4,44 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-### Changed
-- `streaming_llm.py` — Replaced custom LiteLLM wrapper with LangChain `ChatOpenAI`, fixing tool_calls streaming, reasoning_content, and multi-model compatibility issues
-- `model_factory.py` — Simplified LLM factory to use `create_llm()` from `streaming_llm.py`
+## Prototype 9 — 2026-05-14
+- `streaming_llm.py` — Replaced LiteLLM with LangChain `ChatOpenAI` + custom `ChatOpenAICompatible` subclass for multi-API compatibility
+- `streaming_llm.py` — Auto-detect `tool_calls` support: first attempt with native format, auto-retry with text conversion on failure
+- `streaming_llm.py` — Auto-capture and replay `reasoning_content` for DeepSeek thinking mode
+- `model_factory.py` — Simplified LLM factory to use `create_llm()`
+- `config.py` — Removed `LLM_PROVIDER`, added `RERANK_CANDIDATES`, `FINAL_CONTEXT_K`, `RERANK_SCORE_THRESHOLD`
+- `retriever.py` — `HYBRID_SEARCH_ENABLED` now actually controls hybrid vs dense-only search
+- `retriever.py` — Added rerank score threshold filtering (default 0.15)
+- `retriever.py` — Added retrieval logging (query, top_score, filtered_count, returned)
+- `retriever.py` — `_collection_loaded` flag now auto-resets on Milvus connection errors
+- `source_utils.py` — Fixed `canonical_source` bug: `data_1.xlsx` and `data_2.xlsx` no longer treated as same file
+- `agent.py` — Strengthened refusal prompt: "宁可拒答，不要低质量上下文"
+- `app.js` — Stream rendering throttled via `requestAnimationFrame` (no longer re-parses on every token)
+- `app.js` — Error display now includes retry button
+- `app.js` — Removed dead `API.chat()` method
+- `app.js` — Replaced `alert()` with inline error messages
+- `docker-compose.yml` — `depends_on` now uses `condition: service_healthy`
+- `pyproject.toml` — Added `[build-system]` section
 - `pyproject.toml` — Removed `langchain-litellm` dependency
-- `config.py` — Removed `LLM_PROVIDER` (no longer needed, model name passed directly to ChatOpenAI)
+- `main.py` — CORS origins now strip whitespace after split
+- `main.py` — Static file mount no longer swallows API 404s
+- `main.py` — Rate limit dict now auto-cleans when exceeding 1000 entries
+- `ingest.py` — Milvus IDs use UUID instead of timestamp (no collision risk)
+- `ingest.py` — Milvus filter escaping now handles backslashes
+- `document_service.py` — Removed dead Redis cleanup code, fixed Milvus filter escaping
+- `chat.py` — User messages now persist to Redis even on error (context preserved)
+- `config.py` — `MILVUS_PORT` type fixed: `str` → `int`
+
+### Added
+- `frontend/app.js` — Retry button on error messages
+- `backend/documents/` — Test documents: `.md`, `.txt`, `.xlsx`, `.docx`
+- `backend/eval/dataset.json` — 12 new eval questions for multi-format documents
 
 ### Fixed
 - `app.js` — Regenerate button no longer creates duplicate user messages
+- `retriever.py` — Milvus collection reload on restart (was stuck with stale `_collection_loaded` flag)
+- `source_utils.py` — Source dedup no longer treats `data_1.xlsx` and `data_2.xlsx` as the same file
+- `config.py` — `MILVUS_PORT` was `str`, caused `TypeError` in `socket.create_connection`
 
 ## Prototype 8 — 2026-05-11
 

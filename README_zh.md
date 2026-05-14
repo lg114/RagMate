@@ -272,8 +272,9 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | | `CHUNK_OVERLAP` | `50` | 分块重叠 |
 | **检索** | `HYBRID_SEARCH_ENABLED` | `true` | 启用混合检索 |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker 模型 |
-| | `RERANKER_TOP_K` | `3` | 默认检索/评估返回数量 |
-| | `RETRIEVAL_TOP_K` | `2` | 传给聊天 Agent 的片段数量 |
+| | `RERANK_CANDIDATES` | `20` | rerank 候选池大小 |
+| | `FINAL_CONTEXT_K` | `4` | 最终给 LLM 的片段数 |
+| | `RERANK_SCORE_THRESHOLD` | `0.15` | 低于此分数的结果丢弃 |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
 | | `LANGSMITH_API_KEY` | | LangSmith API Key |
 
