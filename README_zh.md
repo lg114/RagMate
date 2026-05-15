@@ -13,7 +13,7 @@
 ## 核心特性
 
 - **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking，召回率和准确率显著优于纯向量检索
-- **深度 Agent** — 基于 LangGraph 的多轮推理 Agent，支持工具调用、子 Agent 派生和任务规划
+- **Deepagents** — 基于 LangGraph 的多轮推理 Agent，支持工具调用、子 Agent 派生和任务规划
 - **流式输出** — SSE 实时流式返回，用户可逐 token 看到生成过程
 - **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown
 - **智能 Chunk** — Markdown 按标题层级切分，PDF 保留页码，所有 chunk 带序号元数据

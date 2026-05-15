@@ -13,7 +13,7 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 ## Key Features
 
 - **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking, significantly outperforming pure vector retrieval
-- **Deep Agent** — LangGraph-based multi-turn reasoning agent with tool calling, sub-agent delegation, and task planning
+- **Deepagents** — LangGraph-based multi-turn reasoning agent with tool calling, sub-agent delegation, and task planning
 - **Streaming Output** — SSE real-time token-by-token streaming
 - **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support
 - **Smart Chunking** — Markdown split by heading hierarchy, PDF page numbers preserved, all chunks carry sequential metadata
