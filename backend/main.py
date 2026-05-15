@@ -113,15 +113,21 @@ async def lifespan(app: FastAPI):
         logger.error(f"Database initialization failed: {e}")
         raise  # fail fast — app cannot function without DB
 
-    # 后台预热 Reranker 模型
-    def _warmup_reranker():
+    # 后台预热 Reranker 和 BGE-M3 模型
+    def _warmup_models():
         try:
             from retriever import get_reranker
             get_reranker()
             logger.info("Reranker model warmed up")
         except Exception as e:
             logger.warning(f"Reranker warmup failed: {e}")
-    asyncio.get_running_loop().run_in_executor(None, _warmup_reranker)
+        try:
+            from ingest import get_bge_m3
+            get_bge_m3()
+            logger.info("BGE-M3 model warmed up")
+        except Exception as e:
+            logger.warning(f"BGE-M3 warmup failed: {e}")
+    asyncio.get_running_loop().run_in_executor(None, _warmup_models)
 
     try:
         yield

@@ -1,4 +1,3 @@
-import contextvars
 from pathlib import Path
 
 from langchain_core.tools import tool
@@ -7,10 +6,6 @@ from deepagents import create_deep_agent
 
 from model_factory import get_llm
 from retriever import retrieve
-
-# ── 检索限制 ────────────────────────────────────────────────────────────────
-MAX_RETRIEVAL_ATTEMPTS = 2
-_retrieval_count_var: contextvars.ContextVar[list[int]] = contextvars.ContextVar("_retrieval_count", default=[0])
 
 # ── System Prompt ───────────────────────────────────────────────────────────
 def _load_system_prompt() -> str:
@@ -21,11 +16,6 @@ def _load_system_prompt() -> str:
 @tool
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
-    counter = _retrieval_count_var.get()
-    counter[0] += 1
-    if counter[0] > MAX_RETRIEVAL_ATTEMPTS:
-        return "已达最大检索次数，请直接基于已有信息回答用户问题。"
-
     from config import settings
     from errors import ValidationError
 
@@ -77,30 +67,30 @@ def extract_text_content(content) -> str:
     return ""
 
 
-def _reset_retrieval_counter():
-    _retrieval_count_var.set([0])
-
-
 # ── 公开 API ────────────────────────────────────────────────────────────────
 def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
     """运行 agent，支持多轮对话。messages 格式: [{"role": "user", "content": "..."}, ...]"""
-    _reset_retrieval_counter()
     return get_agent().invoke(
         {"messages": messages},
-        config={"configurable": {"thread_id": thread_id}},
+        config={
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 25,
+        },
     )
 
 
 def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
     """流式运行 agent，只返回最终回复。过滤掉 agent thinking 和 tool_call 参数。"""
-    _reset_retrieval_counter()
     from langchain_core.messages import AIMessageChunk, ToolMessage
 
     can_yield = False
 
     for msg_chunk, _ in get_agent().stream(
         {"messages": messages},
-        config={"configurable": {"thread_id": thread_id}},
+        config={
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 25,
+        },
         stream_mode="messages",
     ):
         if isinstance(msg_chunk, ToolMessage):

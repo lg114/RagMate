@@ -14,6 +14,10 @@ All notable changes to this project are documented here.
 - `database.py` — Sync engine now lazy-initialized with `pool_size=2` (was 10), idle ingest uses zero sync connections
 - Merged `GET /chat/history/{id}` into `GET /chat/sessions/{id}` — RESTful resource style
 - Extracted agent system prompt from `agent.py` to `prompts/researcher.md` — edit prompt without touching code
+- `agent.py` — Removed hard retrieval limit (`MAX_RETRIEVAL_ATTEMPTS` / `contextvars`), enabled deepagents `write_todos` multi-step planning
+- `agent.py` — Added `recursion_limit: 15` to support deeper agent workflows (plan → retrieve → summarize)
+- `main.py` — Pre-warm BGE-M3 model at startup alongside reranker, preventing concurrent meta-tensor errors during retrieval
+- `agent.py` — Increased `recursion_limit` from 15 to 25 to support deeper multi-step agent workflows
 
 
 ## Prototype 10 — 2026-05-14
