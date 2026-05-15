@@ -26,59 +26,44 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 
 ## Architecture
 
-```
-User Query
-    │
-    ▼
-┌─────────────────────┐
-│   FastAPI Server     │
-│   POST /chat/stream  │
-└──────────┬──────────┘
-           ▼
-┌─────────────────────┐
-│   Deep Agent         │
-│   (LangGraph +       │
-│    ChatOpenAI)       │
-└──────────┬──────────┘
-           │ tool_call: retrieval_tool
-           ▼
-┌─────────────────────┐
-│   Hybrid Retrieval   │
-│   Dense + Sparse     │
-│   + RRF + Reranking  │
-└──────────┬──────────┘
-           │
-    ┌──────┴──────┐
-    ▼             ▼
-┌────────┐  ┌─────────┐
-│ Milvus │  │ Redis   │
-│ Vector │  │ Session │
-│ Store  │  │ Cache   │
-└────┬───┘  └────┬────┘
-     │           │
-     ▼           ▼
-┌────────┐  ┌─────────────┐
-│ Doc    │  │ PostgreSQL  │
-│ Ingest │  │ Chat History│
-└────────┘  └─────────────┘
+### Indexing Pipeline
+
+```mermaid
+flowchart LR
+    A[Document\nPDF/DOCX/XLSX/TXT/MD] --> B[Chunk Splitting]
+    B --> C[Embedding\nBGE-M3]
+    C --> D[(Milvus\nDense + Sparse)]
+
+    style A fill:#e1f5fe
+    style D fill:#c8e6c9
 ```
 
-### Retrieval Flow
+- Chunk Splitting: Markdown按标题切分，其他格式 `RecursiveCharacterTextSplitter(500,50)`
+- BGE-M3 同时生成 dense（1024维）+ sparse 向量
+- Milvus 存储双向量 + 元数据（source, page, chunk_index）
 
-1. User query encoded to dense + sparse dual vectors via BGE-M3
-2. Milvus parallel search: dense (AUTOINDEX, IP) + sparse (SPARSE_INVERTED_INDEX, IP)
-3. RRF (Reciprocal Rank Fusion) merges both result sets
-4. Cross-encoder (BAAI/bge-reranker-v2-m3) reranks candidates
-5. Returns top-k results with text, source, page, chunk_index, and relevance score
+### Query Pipeline
 
-### Ingestion Flow
+```mermaid
+flowchart TD
+    Q[User Query] --> E[BGE-M3\nEncode]
+    E --> S[Dense + Sparse\nHybrid Search]
+    S --> RRF[RRF Fusion\nRRFRanker k=60]
+    RRF --> RC[CrossEncoder\nReranking\nbge-reranker-v2-m3]
+    RC --> TH{Score >= 0.06?}
+    TH -- No --> EMPTY[Return Empty]
+    TH -- Yes --> DD[Dedup\nMax 2 per source]
+    DD --> LLM[Deep Agent\nLangGraph + LLM]
+    LLM --> ANS[Answer\nwith Citations]
 
-1. Scans document directory, incremental processing of new files
-2. Selects loader by format (PyPDF / Docx2txt / UnstructuredExcel / TextLoader)
-3. Markdown uses `MarkdownHeaderTextSplitter` (preserves H1/H2/H3 hierarchy), others use `RecursiveCharacterTextSplitter`
-4. BGE-M3 encodes to dense + sparse dual vectors
-5. Stores in Milvus with metadata (source, page, chunk_index)
-6. Syncs PostgreSQL document status
+    style Q fill:#e1f5fe
+    style ANS fill:#c8e6c9
+    style TH fill:#fff9c4
+```
+
+- Dense 捕获语义，Sparse 捕获关键词，互补检索
+- RRF 融合两路排序，CrossEncoder 精排
+- Deep Agent 支持 `write_todos` 多步规划 + `task` 子智能体委派
 
 ---
 

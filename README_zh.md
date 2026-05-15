@@ -27,58 +27,44 @@
 
 ## 架构
 
+### 索引流程
+
+```mermaid
+flowchart LR
+    A[文档\nPDF/DOCX/XLSX/TXT/MD] --> B[文本切分]
+    B --> C[向量编码\nBGE-M3]
+    C --> D[(Milvus\nDense + Sparse)]
+
+    style A fill:#e1f5fe
+    style D fill:#c8e6c9
 ```
-用户提问
-    │
-    ▼
-┌─────────────────────┐
-│   FastAPI 服务       │
-│   POST /chat/stream  │
-└──────────┬──────────┘
-           ▼
-┌─────────────────────┐
-│   Deep Agent         │
-│   (LangGraph +       │
-│    ChatOpenAI)       │
-└──────────┬──────────┘
-           │ tool_call: retrieval_tool
-           ▼
-┌─────────────────────┐
-│   混合检索           │
-│   Dense + Sparse     │
-│   + RRF + Reranking  │
-└──────────┬──────────┘
-           │
-    ┌──────┴──────┐
-    ▼             ▼
-┌────────┐  ┌─────────┐
-│ Milvus │  │ Redis   │
-│ 向量库 │  │ 会话缓存│
-└────┬───┘  └────┬────┘
-     │           │
-     ▼           ▼
-┌────────┐  ┌─────────────┐
-│ 文档   │  │ PostgreSQL  │
-│ 入库   │  │ 对话历史    │
-└────────┘  └─────────────┘
-```
+
+- 文本切分：Markdown 按标题切分，其他格式 `RecursiveCharacterTextSplitter(500,50)`
+- BGE-M3 同时生成 dense（1024维）+ sparse 向量
+- Milvus 存储双向量 + 元数据（来源、页码、片段序号）
 
 ### 检索流程
 
-1. 用户查询通过 BGE-M3 编码为 dense + sparse 双向量
-2. Milvus 并行执行 dense（AUTOINDEX, IP）+ sparse（SPARSE_INVERTED_INDEX, IP）搜索
-3. RRF（Reciprocal Rank Fusion）融合两路结果
-4. 交叉编码器（BAAI/bge-reranker-v2-m3）对候选重排序
-5. 返回 top-k 结果，包含文本、来源、页码、片段序号、相关性分数
+```mermaid
+graph TD
+    Q[用户查询] --> E[BGE-M3\n编码]
+    E --> S[Dense + Sparse\n混合检索]
+    S --> RRF[RRF 融合\nRRFRanker k=60]
+    RRF --> RC[CrossEncoder\n重排序\nbge-reranker-v2-m3]
+    RC --> TH{分数 >= 0.06?}
+    TH -- 否 --> EMPTY[返回空]
+    TH -- 是 --> DD[去重\n每来源最多2条]
+    DD --> LLM[Deep Agent\nLangGraph + LLM]
+    LLM --> ANS[回答\n带引用标注]
 
-### 入库流程
+    style Q fill:#e1f5fe
+    style ANS fill:#c8e6c9
+    style TH fill:#fff9c4
+```
 
-1. 扫描文档目录，增量处理新文件
-2. 按格式选择加载器（PyPDF / Docx2txt / UnstructuredExcel / TextLoader）
-3. Markdown 用 `MarkdownHeaderTextSplitter`（保留 H1/H2/H3 层级），其他用 `RecursiveCharacterTextSplitter`
-4. BGE-M3 编码为 dense + sparse 双向量
-5. 存入 Milvus（含 source、page、chunk_index 元数据）
-6. 同步 PostgreSQL 文档状态
+- Dense 捕获语义，Sparse 捕获关键词，互补检索
+- RRF 融合两路排序，CrossEncoder 精排
+- Deep Agent 支持 `write_todos` 多步规划 + `task` 子智能体委派
 
 ---
 

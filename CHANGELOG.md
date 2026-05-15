@@ -18,6 +18,7 @@ All notable changes to this project are documented here.
 - `agent.py` — Added `recursion_limit: 15` to support deeper agent workflows (plan → retrieve → summarize)
 - `main.py` — Pre-warm BGE-M3 model at startup alongside reranker, preventing concurrent meta-tensor errors during retrieval
 - `agent.py` — Increased `recursion_limit` from 15 to 25 to support deeper multi-step agent workflows
+- `README.md` / `README_zh.md` — Replaced ASCII architecture diagram with Mermaid flowcharts for indexing and query pipelines
 
 
 ## Prototype 10 — 2026-05-14
