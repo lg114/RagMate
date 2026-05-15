@@ -30,40 +30,33 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 
 ```mermaid
 flowchart LR
-    A[Document\nPDF/DOCX/XLSX/TXT/MD] --> B[Chunk Splitting]
-    B --> C[Embedding\nBGE-M3]
-    C --> D[(Milvus\nDense + Sparse)]
-
-    style A fill:#e1f5fe
-    style D fill:#c8e6c9
+    A[Document] --> B[Chunk Splitting]
+    B --> C[Embedding\nDense + Sparse]
+    C --> D[(Vector DB)]
 ```
 
-- Chunk Splitting: Markdown按标题切分，其他格式 `RecursiveCharacterTextSplitter(500,50)`
-- BGE-M3 同时生成 dense（1024维）+ sparse 向量
-- Milvus 存储双向量 + 元数据（source, page, chunk_index）
+- Chunk Splitting: Markdown split by heading, others use `RecursiveCharacterTextSplitter`
+- Embedding: dense (semantic) + sparse (keyword) dual vectors
+- Vector DB stores dual vectors + metadata (source, page, chunk_index)
 
 ### Query Pipeline
 
 ```mermaid
 flowchart TD
-    Q[User Query] --> E[BGE-M3\nEncode]
+    Q[User Query] --> E[Encode]
     E --> S[Dense + Sparse\nHybrid Search]
-    S --> RRF[RRF Fusion\nRRFRanker k=60]
-    RRF --> RC[CrossEncoder\nReranking\nbge-reranker-v2-m3]
-    RC --> TH{Score >= 0.06?}
+    S --> RRF[RRF Fusion]
+    RRF --> RC[Reranker]
+    RC --> TH{Threshold}
     TH -- No --> EMPTY[Return Empty]
-    TH -- Yes --> DD[Dedup\nMax 2 per source]
-    DD --> LLM[Deep Agent\nLangGraph + LLM]
-    LLM --> ANS[Answer\nwith Citations]
-
-    style Q fill:#e1f5fe
-    style ANS fill:#c8e6c9
-    style TH fill:#fff9c4
+    TH -- Yes --> DD[Dedup]
+    DD --> LLM[Deep Agent]
+    LLM --> ANS[Answer]
 ```
 
-- Dense 捕获语义，Sparse 捕获关键词，互补检索
-- RRF 融合两路排序，CrossEncoder 精排
-- Deep Agent 支持 `write_todos` 多步规划 + `task` 子智能体委派
+- Embedding: dense captures semantics, sparse captures keywords
+- RRF fuses two ranking paths, Reranker refines
+- Deepagents supports multi-step planning + sub-agent delegation
 
 ---
 

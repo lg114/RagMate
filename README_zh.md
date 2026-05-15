@@ -31,31 +31,31 @@
 
 ```mermaid
 flowchart LR
-    A[文档\nPDF/DOCX/XLSX/TXT/MD] --> B[文本切分]
-    B --> C[向量编码\nBGE-M3]
-    C --> D[(Milvus\nDense + Sparse)]
+    A[文档] --> B[文本切分]
+    B --> C[向量编码\nDense + Sparse]
+    C --> D[(向量数据库)]
 
     style A fill:#e1f5fe
     style D fill:#c8e6c9
 ```
 
-- 文本切分：Markdown 按标题切分，其他格式 `RecursiveCharacterTextSplitter(500,50)`
-- BGE-M3 同时生成 dense（1024维）+ sparse 向量
-- Milvus 存储双向量 + 元数据（来源、页码、片段序号）
+- 文本切分：Markdown 按标题切分，其他格式 `RecursiveCharacterTextSplitter`
+- 向量编码：dense（语义）+ sparse（关键词）双向量
+- 向量数据库存储双向量 + 元数据（来源、页码、片段序号）
 
 ### 检索流程
 
 ```mermaid
 graph TD
-    Q[用户查询] --> E[BGE-M3\n编码]
+    Q[用户查询] --> E[编码]
     E --> S[Dense + Sparse\n混合检索]
-    S --> RRF[RRF 融合\nRRFRanker k=60]
-    RRF --> RC[CrossEncoder\n重排序\nbge-reranker-v2-m3]
-    RC --> TH{分数 >= 0.06?}
+    S --> RRF[RRF 融合]
+    RRF --> RC[重排序]
+    RC --> TH{阈值过滤}
     TH -- 否 --> EMPTY[返回空]
-    TH -- 是 --> DD[去重\n每来源最多2条]
-    DD --> LLM[Deep Agent\nLangGraph + LLM]
-    LLM --> ANS[回答\n带引用标注]
+    TH -- 是 --> DD[去重]
+    DD --> LLM[Deep Agent]
+    LLM --> ANS[回答]
 
     style Q fill:#e1f5fe
     style ANS fill:#c8e6c9
@@ -63,8 +63,8 @@ graph TD
 ```
 
 - Dense 捕获语义，Sparse 捕获关键词，互补检索
-- RRF 融合两路排序，CrossEncoder 精排
-- Deep Agent 支持 `write_todos` 多步规划 + `task` 子智能体委派
+- RRF 融合两路排序，Reranker 精排
+- Deep Agent 支持多步规划 + 子智能体委派
 
 ---
 
