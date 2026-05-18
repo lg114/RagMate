@@ -3,6 +3,30 @@
 All notable changes to this project are documented here.
 
 ## [Unreleased]
+
+## Prototype 12 — 2026-05-18
+
+### Added
+- `eval_cli.py` — RAGAS evaluation CLI for assessing RAG pipeline quality
+  - `ragmate-eval generate` — Auto-generate test sets from documents using RAGAS TestsetGenerator
+  - `ragmate-eval evaluate` — Run RAG pipeline and compute 5 metrics: Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall, FactualCorrectness
+  - JSON reports with per-question scores, summary statistics, and retriever config snapshot
+  - `--threshold` flag for CI/CD gating (exit non-zero if score below threshold)
+  - `--judge-model` flag to switch evaluation LLM
+  - `--top-k` flag to adjust retrieval count during evaluation
+  - Interactive menu mode — run `ragmate-eval` without arguments for guided operation
+  - `EvalLLM` subclass — strips `n` parameter from API requests for compatibility (MiMo etc.)
+  - `_clean_score()` — converts NaN/Inf to null for valid JSON reports
+  - `resolve_path()` — all paths resolve relative to project root, prevents duplicate eval/ directories
+- `pyproject.toml` — Added `[project.scripts]` entry point: `ragmate-eval` command
+- `pyproject.toml` — Added `eval` optional dependency group: `ragas>=0.2.0`, `tqdm>=4.65.0`
+- `.gitignore` — Added `eval/testsets/*.json` and `eval/reports/*.json`
+- `README.md` / `README_zh.md` — Added RAGAS evaluation section with interactive + CLI usage
+
+### Fixed
+- `pyproject.toml` — Fixed `build-backend` from `setuptools.backends._legacy:_Backend` to `setuptools.build_meta`
+- `pyproject.toml` — Removed stale `cli` from `py-modules`, added `eval_cli`
+
 ## Prototype 11 — 2026-05-15
 
 ### Code Quality

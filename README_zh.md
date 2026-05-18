@@ -96,6 +96,12 @@ cd backend
 pip install -e .
 ```
 
+安装 RAGAS 评估工具（可选）：
+
+```bash
+pip install -e ".[eval]"
+```
+
 ### 3. 配置
 
 ```bash
@@ -134,6 +140,40 @@ uvicorn main:app --reload --port 8000
 
 - **对话** — 基于知识库的流式问答，支持多轮对话
 - **文档** — 上传文档、管理文档、触发入库
+
+### RAGAS 评估
+
+使用 RAGAS 指标评估 RAG 管道质量。需要先安装评估依赖并启动基础设施：
+
+```bash
+# 安装评估依赖
+cd backend
+pip install -e ".[eval]"
+
+# 确保 Milvus、PostgreSQL、Redis 已启动
+docker-compose up -d
+```
+
+交互模式（推荐）：
+
+```bash
+ragmate-eval
+```
+
+命令行模式（CI/CD 场景）：
+
+```bash
+# 生成测试集
+ragmate-eval generate --size 50 --output eval/testsets/testset_v1.json
+
+# 运行评估
+ragmate-eval evaluate --testset eval/testsets/testset_v1.json --report eval/reports/report.json
+
+# CI/CD 门禁 — 整体分数低于阈值时 exit code 非 0
+ragmate-eval evaluate --testset eval/testsets/testset_v1.json --threshold 0.75
+```
+
+评估指标：Faithfulness（忠实度）、Answer Relevancy（答案相关性）、Context Precision（上下文精确率）、Context Recall（上下文召回率）、Factual Correctness（事实正确性）。
 
 ---
 
@@ -254,6 +294,9 @@ RagMate/
 ├── CHANGELOG.md
 ├── .python-version
 ├── .gitignore
+├── eval/                      # RAGAS 评估数据
+│   ├── testsets/              # 生成的测试集
+│   └── reports/               # 评估报告
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -274,6 +317,7 @@ RagMate/
     ├── models.py              # ORM 模型（Document, ChatHistory）
     ├── redis_client.py        # Redis 会话 / 锁 / 状态
     ├── errors.py              # 类型化错误层级
+    ├── eval_cli.py            # RAGAS 评估 CLI
     └── documents/             # 文档存储目录
 ```
 

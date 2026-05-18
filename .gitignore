@@ -36,6 +36,8 @@ Thumbs.db
 backend/ingest_status.json
 backend/documents/
 volumes/
+eval/testsets/*.json
+eval/reports/*.json
 *.log
 
 # Node (if any future frontend deps)

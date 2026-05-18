@@ -88,6 +88,12 @@ cd backend
 pip install -e .
 ```
 
+For RAGAS evaluation (optional):
+
+```bash
+pip install -e ".[eval]"
+```
+
 ### 3. Configure
 
 ```bash
@@ -126,6 +132,39 @@ Open http://localhost:8000 in browser.
 
 - **Chat** — Knowledge-base powered streaming Q&A with multi-turn conversation
 - **Documents** — Upload documents, manage documents, trigger ingestion
+
+### RAGAS Evaluation
+
+Evaluate your RAG pipeline quality with RAGAS metrics. Install eval dependencies and ensure infrastructure is running:
+
+```bash
+cd backend
+pip install -e ".[eval]"
+
+# Make sure Milvus, PostgreSQL, Redis are running
+docker-compose up -d
+```
+
+Interactive mode (recommended):
+
+```bash
+ragmate-eval
+```
+
+CLI mode (for CI/CD):
+
+```bash
+# Generate test set
+ragmate-eval generate --size 50 --output eval/testsets/testset_v1.json
+
+# Run evaluation
+ragmate-eval evaluate --testset eval/testsets/testset_v1.json --report eval/reports/report.json
+
+# CI/CD gate — exit non-zero if overall score below threshold
+ragmate-eval evaluate --testset eval/testsets/testset_v1.json --threshold 0.75
+```
+
+Metrics: Faithfulness, Answer Relevancy, Context Precision, Context Recall, Factual Correctness.
 
 ---
 
@@ -246,6 +285,9 @@ RagMate/
 ├── CHANGELOG.md
 ├── .python-version
 ├── .gitignore
+├── eval/                      # RAGAS evaluation data
+│   ├── testsets/              # Generated test sets
+│   └── reports/               # Evaluation reports
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -266,6 +308,7 @@ RagMate/
     ├── models.py              # ORM models (Document, ChatHistory)
     ├── redis_client.py        # Redis session / lock / status
     ├── errors.py              # Typed error hierarchy
+    ├── eval_cli.py            # RAGAS evaluation CLI
     └── documents/             # Document storage directory
 ```
 
