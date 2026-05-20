@@ -24,6 +24,17 @@ from models import Document
 from redis_client import set_ingest_status_sync
 from retriever import _check_milvus_available, get_milvus_client
 
+
+def build_source_filter(filename: str) -> str:
+    """构建安全的 Milvus metadata source 过滤表达式。
+
+    拒绝包含反斜杠或双引号的文件名（不可能是合法文件名），
+    从根本上杜绝过滤器注入。
+    """
+    if '\\' in filename or '"' in filename:
+        raise ValidationError(f"Filename contains invalid characters: {filename}")
+    return f'metadata["source"] == "{filename}"'
+
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt", ".md"}
 
 
@@ -246,10 +257,9 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
 
     for filename in new_files:
         try:
-            escaped = filename.replace('\\', '\\\\').replace('"', '\\"')
             client.delete(
                 collection_name=settings.MILVUS_COLLECTION,
-                filter=f'metadata["source"] == "{escaped}"',
+                filter=build_source_filter(filename),
             )
         except Exception:
             logging.getLogger("ragmate").debug(f"Failed to delete old chunks for {filename}", exc_info=True)

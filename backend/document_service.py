@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from errors import NotFoundError, ValidationError
 from models import Document
+from ingest import build_source_filter
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
@@ -169,11 +170,9 @@ async def delete_document(
 
     if milvus_client and milvus_client.has_collection(settings.MILVUS_COLLECTION):
         try:
-            # filter 值经过 validate_filename() 校验，不含特殊字符
-            escaped_name = name.replace('\\', '\\\\').replace('"', '\\"')
             milvus_client.delete(
                 collection_name=settings.MILVUS_COLLECTION,
-                filter=f'metadata["source"] == "{escaped_name}"',
+                filter=build_source_filter(name),
             )
         except Exception:
             logging.getLogger("ragmate").warning(f"Failed to delete Milvus vectors for {name}", exc_info=True)
