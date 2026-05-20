@@ -182,15 +182,17 @@ async def chat_stream(message: str, session_id: str | None = None):
     except asyncio.CancelledError:
         task.cancel()
         raise
-    await task  # 确保线程异常被捕获
+    try:
+        await task
+    except Exception:
+        pass  # 线程异常已通过 error_msg 捕获
 
     # 错误单独处理，不混入 token 队列
     if error_msg:
         elapsed = time.monotonic() - t0
         logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(error_msg)}")
-        # 保存用户消息，避免重试时 LLM 丢失上下文
+        # 保存用户消息到 Redis，避免重试时 LLM 丢失上下文
         await save_session(session_id, history)
-        await _persist_messages(session_id, [("user", message)])
         yield {"error": _strip_error_sentinel(error_msg)}
         return
 
