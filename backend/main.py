@@ -1,12 +1,29 @@
 import asyncio
+import contextvars
 import json
 import logging
 import os
 import re
+import uuid
 
-# 配置 ragmate logger
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# 请求级上下文：每个请求生成唯一 request_id，贯穿整个调用链
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        return True
+
+
+# 配置 ragmate logger（独立 handler，不污染根 logger，避免 httpx 等第三方库报错）
 logger = logging.getLogger("ragmate")
+logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] [%(request_id)s] %(message)s"))
+_handler.addFilter(_RequestIdFilter())
+logger.addHandler(_handler)
+logger.propagate = False  # 不传播到根 logger，避免 httpx/uvicorn 等日志格式冲突
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -170,6 +187,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _set_request_id(request, call_next):
+    token = request_id_var.set(request.headers.get("x-request-id", uuid.uuid4().hex[:12]))
+    try:
+        return await call_next(request)
+    finally:
+        request_id_var.reset(token)
 
 
 @app.exception_handler(AppError)

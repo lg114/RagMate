@@ -427,7 +427,7 @@ body {
 .ingest-status.running { background: #f4f3ff; color: var(--accent); }
 .ingest-status.failed { background: #fff0f0; color: var(--danger); }
 
-.doc-table-wrap { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
+.doc-table-wrap { flex: 1; overflow: auto; padding: 0 20px 20px; }
 .doc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .doc-table thead { position: sticky; top: 0; background: var(--bg); }
 .doc-table th {
@@ -459,7 +459,7 @@ body {
 .btn-delete:hover { color: var(--danger); border-color: var(--danger); background: #fff0f0; }
 
 /* ── Hidden ── */
-.hidden { display: none !important; }
+[hidden], .hidden { display: none; }
 
 /* ── Modal ── */
 .modal-overlay {

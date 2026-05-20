@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,7 +26,7 @@ class Settings(BaseSettings):
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate"
+    DATABASE_URL: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Milvus
@@ -49,7 +50,18 @@ class Settings(BaseSettings):
     DOCUMENTS_DIR: str = "./documents"
 
     # CORS
-    CORS_ORIGINS: str = "*"
+    CORS_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
+
+    @model_validator(mode="after")
+    def _check_required(self):
+        missing = []
+        if not self.DATABASE_URL:
+            missing.append("DATABASE_URL")
+        if not self.LLM_API_KEY:
+            missing.append("LLM_API_KEY")
+        if missing:
+            raise ValueError(f"Required env vars not set: {', '.join(missing)}. Check your .env file.")
+        return self
 
 
 settings = Settings()
