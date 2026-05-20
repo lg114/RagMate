@@ -96,7 +96,7 @@ def _classify_error(e: Exception) -> str:
 async def chat(message: str, session_id: str | None = None) -> dict:
     """处理用户聊天消息，支持多轮对话。返回 {"response": str, "session_id": str}"""
     if not session_id:
-        session_id = uuid.uuid4().hex
+        session_id = str(uuid.uuid4())
 
     # 1. 加载会话历史
     history = await load_session(session_id)
@@ -138,7 +138,7 @@ _SENTINEL = object()
 async def chat_stream(message: str, session_id: str | None = None):
     """流式聊天，逐 token yield。返回格式: {"token": str} 或 {"done": True, "session_id": str}"""
     if not session_id:
-        session_id = uuid.uuid4().hex
+        session_id = str(uuid.uuid4())
 
     history = await load_session(session_id)
     history.append({"role": "user", "content": message})

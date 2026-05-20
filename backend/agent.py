@@ -74,7 +74,7 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
         {"messages": messages},
         config={
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 25,
+            "recursion_limit": 50,
         },
     )
 
@@ -89,7 +89,7 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
         {"messages": messages},
         config={
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 25,
+            "recursion_limit": 50,
         },
         stream_mode="messages",
     ):
