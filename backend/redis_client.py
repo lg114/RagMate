@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -11,6 +12,7 @@ from config import settings
 _redis: aioredis.Redis | None = None
 _sync_redis: redis.Redis | None = None
 _redis_lock = asyncio.Lock()
+_sync_redis_lock = threading.Lock()
 
 MAX_SESSION_MESSAGES = 200  # 单 session 最大消息数，超出则截断旧消息
 
@@ -26,8 +28,11 @@ async def get_redis() -> aioredis.Redis:
 
 def get_sync_redis() -> redis.Redis:
     global _sync_redis
-    if _sync_redis is None:
-        _sync_redis = redis.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=5)
+    if _sync_redis is not None:
+        return _sync_redis
+    with _sync_redis_lock:
+        if _sync_redis is None:
+            _sync_redis = redis.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=5)
     return _sync_redis
 
 

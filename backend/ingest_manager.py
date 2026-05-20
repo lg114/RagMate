@@ -44,6 +44,7 @@ async def _run_ingest():
         await set_ingest_status({"status": "failed", "error": str(e)})
     finally:
         renew_task.cancel()
+        await asyncio.gather(renew_task, return_exceptions=True)
         global _ingest_task
         _ingest_task = None
         if _ingest_lock_token:

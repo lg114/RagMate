@@ -29,15 +29,15 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select
 from starlette.responses import StreamingResponse
 
 from chat import chat, chat_stream
 from config import settings
-from database import async_session, engine, get_sync_engine, init_db
+from database import async_session, engine, init_db
 import document_service
-from errors import AppError, NotFoundError, ValidationError
+from errors import AppError, ValidationError
 from ingest_manager import start_ingest, cancel_ingest
 from models import ChatHistory
 from redis_client import get_redis, get_ingest_status, close_sync_redis
@@ -139,8 +139,8 @@ app = FastAPI(title="RagMate API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",")],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -164,15 +164,24 @@ async def global_exception_handler(request, exc):
     return JSONResponse(status_code=500, content={"code": "INTERNAL_ERROR", "detail": "An unexpected error occurred"})
 
 
+_UUID_RE = re.compile(r'^[a-f0-9-]{36}$')
+
+
+def _validate_session_id(v: str) -> str:
+    if not _UUID_RE.match(v):
+        raise ValidationError("Invalid session_id format")
+    return v
+
+
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., max_length=10000)
     session_id: str | None = None
 
     @field_validator("session_id")
     @classmethod
     def validate_session_id(cls, v):
-        if v is not None and not re.match(r'^[a-f0-9-]{36}$', v):
-            raise ValueError("Invalid session_id format")
+        if v is not None:
+            _validate_session_id(v)
         return v
 
 
@@ -270,6 +279,7 @@ async def list_sessions():
 
 @app.get("/chat/sessions/{session_id}")
 async def get_history(session_id: str):
+    _validate_session_id(session_id)
     async with async_session() as session:
         result = await session.execute(
             select(ChatHistory)
@@ -286,12 +296,13 @@ async def get_history(session_id: str):
 @app.delete("/chat/sessions/{session_id}")
 async def delete_session(session_id: str):
     """删除指定 session 的 Redis 会话缓存 + PostgreSQL 历史记录"""
+    _validate_session_id(session_id)
     # 删除 Redis 会话缓存（Redis 挂了不影响主流程）
     try:
         r = await get_redis()
         await r.delete(f"ragmate:session:{session_id}")
     except Exception:
-        pass
+        logger.debug("Failed to delete Redis session cache", exc_info=True)
 
     # 删除 PostgreSQL 历史记录
     async with async_session() as session:

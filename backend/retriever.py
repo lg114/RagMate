@@ -2,7 +2,6 @@ import logging
 import socket
 import threading
 from functools import lru_cache
-from typing import List
 
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 from sentence_transformers import CrossEncoder
@@ -52,12 +51,11 @@ def get_milvus_client() -> MilvusClient:
 def _check_milvus_available() -> bool:
     """快速检查 Milvus 服务是否可达"""
     try:
-        sock = socket.create_connection(
+        with socket.create_connection(
             (settings.MILVUS_HOST, settings.MILVUS_PORT),
             timeout=3,
-        )
-        sock.close()
-        return True
+        ):
+            return True
     except (socket.timeout, ConnectionRefusedError, OSError):
         return False
 
@@ -75,14 +73,7 @@ def _init_milvus():
             client.load_collection(settings.MILVUS_COLLECTION)
             _collection_loaded = True
         except Exception as e:
-            if "collection" in str(e).lower() or "not loaded" in str(e).lower():
-                try:
-                    client.load_collection(settings.MILVUS_COLLECTION)
-                    _collection_loaded = True
-                except Exception:
-                    raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
-            else:
-                raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
+            raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
     return client
 
 
@@ -172,9 +163,9 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
-def retrieve(query: str, k: int = None) -> List[dict]:
+def retrieve(query: str, k: int = None) -> list[dict]:
     """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
-    from errors import AppError, ValidationError
+    from errors import AppError, ServiceUnavailableError, ValidationError
     from ingest import encode_query
 
     if k is None:

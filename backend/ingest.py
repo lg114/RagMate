@@ -19,7 +19,6 @@ from sqlalchemy import select
 from config import settings
 from database import SyncSession
 from errors import ServiceUnavailableError, ValidationError
-from model_factory import get_embeddings
 from models import Document
 from redis_client import set_ingest_status_sync
 from retriever import _check_milvus_available, get_milvus_client
@@ -37,7 +36,7 @@ def build_source_filter(filename: str) -> str:
         raise ValidationError(f"Filename contains invalid characters: {filename}")
     return f'metadata["source"] == "{filename}"'
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt", ".md"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".txt", ".md"}
 
 
 @lru_cache(maxsize=1)
@@ -80,7 +79,7 @@ def load_document(filepath: str):
 
     if ext == ".pdf":
         return PyPDFLoader(filepath).load()
-    elif ext in (".docx", ".doc"):
+    elif ext == ".docx":
         return Docx2txtLoader(filepath).load()
     elif ext in (".xlsx", ".xls"):
         return UnstructuredExcelLoader(filepath).load()
@@ -103,8 +102,11 @@ def _sync_documents_table(directory: str, filenames: list[str], chunk_counts: di
         for filename in filenames:
             doc = existing.get(filename)
             filepath = os.path.join(directory, filename)
-            size_bytes = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-            mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else None
+            try:
+                st = os.stat(filepath)
+                size_bytes, mtime = st.st_size, st.st_mtime
+            except OSError:
+                size_bytes, mtime = 0, None
             if doc:
                 doc.status = "ingested"
                 doc.chunk_count = chunk_counts.get(filename, 0)
@@ -132,7 +134,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     if not os.path.exists(docs_dir):
         return {"status": "failed", "error": f"Documents directory not found: {docs_dir}"}
 
-    all_files = [f for f in os.listdir(docs_dir) if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS]
+    all_files = sorted(f for f in os.listdir(docs_dir) if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS)
     if not all_files:
         return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
 
@@ -238,7 +240,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             logger.debug("Failed to check/drop collection schema", exc_info=True)
 
     if not collection_exists:
-        dim = len(get_bge_m3().encode(["dim"])["dense_vecs"][0])
+        dim = 1024  # BGE-M3 固定输出维度
         schema = CollectionSchema(fields=[
             FieldSchema("id", DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema("dense", DataType.FLOAT_VECTOR, dim=dim),
@@ -275,7 +277,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     dense_vecs, sparse_vecs = encode_documents(texts)
 
     data = [
-        {"id": uuid.uuid4().int >> 64, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
+        {"id": uuid.uuid4().int & ((1 << 63) - 1), "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
         for d_vec, s_vec, text, meta in zip(dense_vecs, sparse_vecs, texts, metadatas)
     ]
     client.insert(

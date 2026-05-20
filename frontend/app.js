@@ -50,6 +50,18 @@ const API = {
           }
         }
       }
+      // 处理 buffer 中残留的数据
+      if (buffer.trim()) {
+        for (const line of buffer.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.done) { onDone(data.session_id); return; }
+            if (data.error) { onError(data.error); return; }
+            if (data.token) onToken(data.token);
+          } catch (e) { /* ignore */ }
+        }
+      }
       onError('连接意外断开');
     } catch (err) {
       onError(err.message || '请求失败，请重试');
@@ -172,7 +184,10 @@ function renderAssistantMarkdown(text) {
 // ── Session ID ──
 function getSessionId() {
   let sid = sessionStorage.getItem('ragmate_session_id');
-  if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem('ragmate_session_id', sid); }
+  if (!sid) {
+    sid = crypto.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    sessionStorage.setItem('ragmate_session_id', sid);
+  }
   return sid;
 }
 

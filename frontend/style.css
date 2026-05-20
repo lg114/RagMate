@@ -116,7 +116,8 @@ body {
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity var(--transition), color var(--transition);
 }
-.history-item:hover .history-item-delete { opacity: 1; }
+.history-item:hover .history-item-delete,
+.history-item:focus-within .history-item-delete { opacity: 1; }
 .history-item-delete:hover { color: var(--danger); }
 
 /* ── Content ── */
@@ -285,7 +286,8 @@ body {
   opacity: 0;
   transition: opacity 150ms ease;
 }
-.msg:hover .msg-actions { opacity: 1; }
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions { opacity: 1; }
 .msg-action-btn {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 8px;
@@ -467,6 +469,7 @@ body {
   background: rgba(0,0,0,.35);
   display: flex; align-items: center; justify-content: center;
 }
+.modal-overlay.hidden { display: none; }
 .modal-box {
   background: var(--surface); border-radius: var(--radius);
   padding: 24px; min-width: 300px; max-width: 400px;

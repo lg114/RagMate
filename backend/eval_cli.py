@@ -493,7 +493,11 @@ def _menu_generate():
 
     print("\n--- 生成测试集 ---")
     size = input("测试用例数量 [50]: ").strip()
-    size = int(size) if size else 50
+    try:
+        size = int(size) if size else 50
+    except ValueError:
+        print("Error: 请输入数字")
+        return
 
     default_output = str(DEFAULT_TESTSETS_DIR / "testset.json")
     output = input(f"输出路径 [{default_output}]: ").strip()
@@ -540,7 +544,11 @@ def _menu_evaluate():
     print()
 
     choice = input("选择测试集 [1]: ").strip()
-    choice = int(choice) if choice else 1
+    try:
+        choice = int(choice) if choice else 1
+    except ValueError:
+        print("Error: 请输入数字")
+        return
     if choice < 1 or choice > len(testsets):
         print("Error: Invalid choice")
         return
@@ -548,7 +556,11 @@ def _menu_evaluate():
     testset_path = testsets[choice - 1]
 
     threshold_input = input("最低分数线（回车跳过）: ").strip()
-    threshold = float(threshold_input) if threshold_input else None
+    try:
+        threshold = float(threshold_input) if threshold_input else None
+    except ValueError:
+        print("Error: 请输入数字")
+        return
 
     # Build a mock args object
     class Args:
@@ -581,7 +593,11 @@ def _menu_reports():
     if not choice:
         return
 
-    choice = int(choice)
+    try:
+        choice = int(choice)
+    except ValueError:
+        print("Error: 请输入数字")
+        return
     if choice < 1 or choice > len(reports):
         print("Error: Invalid choice")
         return
