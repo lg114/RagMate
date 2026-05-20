@@ -63,25 +63,26 @@ def _check_milvus_available() -> bool:
 
 
 def _init_milvus():
-    """确保 Milvus collection 已加载。"""
+    """确保 Milvus collection 已加载（线程安全）。"""
     from errors import ValidationError
 
     global _collection_loaded
-    try:
-        client = get_milvus_client()
-        if not _collection_loaded:
+    client = get_milvus_client()
+    with _milvus_lock:
+        if _collection_loaded:
+            return client
+        try:
             client.load_collection(settings.MILVUS_COLLECTION)
             _collection_loaded = True
-    except Exception as e:
-        if "collection" in str(e).lower() or "not loaded" in str(e).lower():
-            _collection_loaded = False
-            try:
-                client.load_collection(settings.MILVUS_COLLECTION)
-                _collection_loaded = True
-            except Exception:
+        except Exception as e:
+            if "collection" in str(e).lower() or "not loaded" in str(e).lower():
+                try:
+                    client.load_collection(settings.MILVUS_COLLECTION)
+                    _collection_loaded = True
+                except Exception:
+                    raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
+            else:
                 raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
-        else:
-            raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
     return client
 
 
