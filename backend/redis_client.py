@@ -65,9 +65,9 @@ async def save_session(session_id: str, messages: list[dict], ttl: int = 86400):
 
 INGEST_LOCK_KEY = "ragmate:ingest:lock"
 INGEST_STATUS_KEY = "ragmate:ingest:status"
-INGEST_LOCK_TTL = 600  # 10 minutes max, auto-release on crash
+INGEST_LOCK_TTL = 600  # 10 分钟自动过期，崩溃时自动释放
 
-# Lua script: only delete key if value matches token
+# Lua 脚本：仅当 value 匹配 token 时才删除 key（防止误删他人锁）
 _RELEASE_LOCK_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])

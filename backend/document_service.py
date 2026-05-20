@@ -13,7 +13,9 @@ from errors import NotFoundError, ValidationError
 from models import Document
 from ingest import build_source_filter
 
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+logger = logging.getLogger("ragmate")
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 文件大小上限
 
 _PATH_SEPARATORS = {os.sep}
 if os.altsep:
@@ -22,10 +24,10 @@ if os.altsep:
 # 文件头 magic bytes 映射
 _MAGIC_BYTES = {
     ".pdf": b"%PDF",
-    ".docx": b"PK\x03\x04",  # ZIP format
-    ".doc": b"\xd0\xcf\x11\xe0",  # OLE2
-    ".xlsx": b"PK\x03\x04",  # ZIP format
-    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2
+    ".docx": b"PK\x03\x04",  # ZIP 格式
+    ".doc": b"\xd0\xcf\x11\xe0",  # OLE2 格式
+    ".xlsx": b"PK\x03\x04",  # ZIP 格式
+    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2 格式
 }
 
 
@@ -166,7 +168,7 @@ async def delete_document(
         try:
             os.remove(filepath)
         except Exception:
-            logging.getLogger("ragmate").warning(f"Failed to delete file {filepath}", exc_info=True)
+            logger.warning(f"Failed to delete file {filepath}", exc_info=True)
 
     if milvus_client and milvus_client.has_collection(settings.MILVUS_COLLECTION):
         try:
@@ -175,5 +177,5 @@ async def delete_document(
                 filter=build_source_filter(name),
             )
         except Exception:
-            logging.getLogger("ragmate").warning(f"Failed to delete Milvus vectors for {name}", exc_info=True)
+            logger.warning(f"Failed to delete Milvus vectors for {name}", exc_info=True)
 

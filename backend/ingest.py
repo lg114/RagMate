@@ -24,6 +24,8 @@ from models import Document
 from redis_client import set_ingest_status_sync
 from retriever import _check_milvus_available, get_milvus_client
 
+logger = logging.getLogger("ragmate")
+
 
 def build_source_filter(filename: str) -> str:
     """构建安全的 Milvus metadata source 过滤表达式。
@@ -85,7 +87,7 @@ def load_document(filepath: str):
     elif ext in (".txt", ".md"):
         return TextLoader(filepath, encoding="utf-8").load()
     else:
-        logging.getLogger("ragmate").warning(f"Unsupported file type: {ext}")
+        logger.warning(f"Unsupported file type: {ext}")
         return []
 
 
@@ -161,9 +163,9 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
                 # 旧记录没有 mtime，重新入库以补上
                 new_files.append(f)
             elif abs(current_mtime - stored_mtime) > 1:
-                logging.getLogger("ragmate").info(f"File modified: {f}, will re-ingest")
+                logger.info(f"File modified: {f}, will re-ingest")
                 new_files.append(f)
-    logging.getLogger("ragmate").info(f"Found {len(all_files)} files, {len(ingested_info)} already ingested, {len(new_files)} new")
+    logger.info(f"Found {len(all_files)} files, {len(ingested_info)} already ingested, {len(new_files)} new")
     if not new_files:
         return {
             "status": "success",
@@ -179,7 +181,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     for filename in new_files:
         filepath = os.path.join(docs_dir, filename)
         pages = load_document(filepath)
-        logging.getLogger("ragmate").info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
+        logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
         documents.extend(pages)
 
     if not documents:
@@ -214,7 +216,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         chunk.metadata["chunk_index"] = file_chunk_index[filename]
         file_chunk_index[filename] += 1
 
-    logging.getLogger("ragmate").info(f"Split {len(documents)} pages into {len(chunks)} chunks")
+    logger.info(f"Split {len(documents)} pages into {len(chunks)} chunks")
 
     client = get_milvus_client()
 
@@ -229,11 +231,11 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             has_sparse_field = "sparse" in field_names
             has_sparse_index = any(idx.get("field") == "sparse" for idx in indexes)
             if not has_sparse_field or not has_sparse_index:
-                logging.getLogger("ragmate").info("Schema/index mismatch, dropping old collection...")
+                logger.info("Schema/index mismatch, dropping old collection...")
                 client.drop_collection(settings.MILVUS_COLLECTION)
                 collection_exists = False
         except Exception:
-            logging.getLogger("ragmate").debug("Failed to check/drop collection schema", exc_info=True)
+            logger.debug("Failed to check/drop collection schema", exc_info=True)
 
     if not collection_exists:
         dim = len(get_bge_m3().encode(["dim"])["dense_vecs"][0])
@@ -261,7 +263,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
                 filter=build_source_filter(filename),
             )
         except Exception:
-            logging.getLogger("ragmate").debug(f"Failed to delete old chunks for {filename}", exc_info=True)
+            logger.debug(f"Failed to delete old chunks for {filename}", exc_info=True)
 
     texts = [chunk.page_content for chunk in chunks]
     metadatas = [{
@@ -285,7 +287,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     try:
         _sync_documents_table(docs_dir, new_files, dict(chunk_counter))
     except Exception as e:
-        logging.getLogger("ragmate").warning(f"Failed to sync documents table: {e}")
+        logger.warning(f"Failed to sync documents table: {e}")
 
     result = {
         "status": "success",
@@ -301,4 +303,4 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
 
 if __name__ == "__main__":
     result = ingest_documents(verbose=True)
-    logging.getLogger("ragmate").info(result)
+    logger.info(result)

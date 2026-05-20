@@ -38,9 +38,9 @@ from config import settings
 from database import async_session, engine, get_sync_engine, init_db
 import document_service
 from errors import AppError, NotFoundError, ValidationError
-from ingest import ingest_documents
+from ingest_manager import start_ingest, cancel_ingest
 from models import ChatHistory
-from redis_client import get_redis, acquire_ingest_lock, release_ingest_lock, renew_ingest_lock, get_ingest_status, set_ingest_status, close_sync_redis
+from redis_client import get_redis, get_ingest_status, close_sync_redis
 from retriever import _check_milvus_available, get_milvus_client
 
 # LangSmith Tracing
@@ -49,9 +49,6 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
     os.environ["LANGSMITH_TRACING"] = "true"
     os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
     os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
-
-_ingest_task: asyncio.Task | None = None
-_ingest_lock_token: str | None = None
 
 # 简单的内存频率限制：每 session 每分钟最多 10 次
 _rate_limit: dict[str, list[float]] = {}
@@ -77,41 +74,6 @@ def _check_rate_limit(session_id: str):
     timestamps.append(now)
     _rate_limit[session_id] = timestamps
 
-
-async def _run_ingest():
-    """在后台线程中执行入库，通过 Redis 管理状态与锁"""
-    global _ingest_lock_token
-
-    # 后台续期任务：每 5 分钟延长锁 TTL
-    async def _renew_loop():
-        while True:
-            await asyncio.sleep(300)
-            if _ingest_lock_token:
-                try:
-                    await renew_ingest_lock(_ingest_lock_token)
-                except Exception:
-                    logger.debug("Failed to renew ingest lock", exc_info=True)
-
-    renew_task = asyncio.create_task(_renew_loop())
-    try:
-        await set_ingest_status({"status": "running"})
-        result = await asyncio.to_thread(ingest_documents, None, True)
-        await set_ingest_status(result)
-    except asyncio.CancelledError:
-        await set_ingest_status({"status": "idle"})
-        raise
-    except Exception as e:
-        await set_ingest_status({"status": "failed", "error": str(e)})
-    finally:
-        renew_task.cancel()
-        global _ingest_task
-        _ingest_task = None
-        if _ingest_lock_token:
-            try:
-                await release_ingest_lock(_ingest_lock_token)
-            except Exception:
-                logger.debug("Failed to release ingest lock", exc_info=True)
-            _ingest_lock_token = None
 
 
 @asynccontextmanager
@@ -150,14 +112,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # 取消正在运行的 ingest 任务
-        global _ingest_task
-        if _ingest_task and not _ingest_task.done():
-            _ingest_task.cancel()
-            try:
-                await _ingest_task
-            except asyncio.CancelledError:
-                pass
+        await cancel_ingest()
         try:
             r = await get_redis()
             await r.aclose()
@@ -376,21 +331,9 @@ async def delete_document(filename: str):
     return {"success": True}
 
 
-_ingest_start_lock = asyncio.Lock()
-
-
 @app.post("/ingest")
-async def start_ingest():
-    global _ingest_task, _ingest_lock_token
-    async with _ingest_start_lock:
-        if _ingest_task and not _ingest_task.done():
-            return {"status": "already_running"}
-        token = await acquire_ingest_lock()
-        if not token:
-            return {"status": "already_running"}
-        _ingest_lock_token = token
-        _ingest_task = asyncio.create_task(_run_ingest())
-    return {"status": "started"}
+async def trigger_ingest():
+    return await start_ingest()
 
 
 @app.get("/ingest/status")

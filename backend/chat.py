@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import re
+import time
 import uuid
 
 from langchain_core.messages import AIMessage
@@ -8,6 +10,8 @@ from agent import run_agent, run_agent_streaming, extract_text_content
 from database import async_session
 from models import ChatHistory
 from redis_client import load_session, save_session
+
+logger = logging.getLogger("ragmate")
 
 
 def extract_text(response: dict) -> str:
@@ -107,6 +111,7 @@ async def chat(message: str, session_id: str | None = None) -> dict:
     history.append({"role": "user", "content": message})
 
     # 3. 调用 Agent（同步，放到线程中执行，带超时）
+    t0 = time.monotonic()
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(run_agent, history, session_id),
@@ -119,11 +124,15 @@ async def chat(message: str, session_id: str | None = None) -> dict:
         raise  # 上层取消，不吞掉
     except Exception as e:
         response_text = _classify_error(e)
+    elapsed = time.monotonic() - t0
 
     # 4. 追加 assistant 消息 + 持久化（错误提示不写入历史，但用户消息需要保留）
     is_error = _is_error_response(response_text)
-    if not is_error:
+    if is_error:
+        logger.warning(f"chat error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
+    else:
         history.append({"role": "assistant", "content": response_text})
+        logger.info(f"chat ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
     await save_session(session_id, history)
 
     msgs = [("user", message)]
@@ -142,6 +151,7 @@ async def chat_stream(message: str, session_id: str | None = None):
     if not session_id:
         session_id = str(uuid.uuid4())
 
+    t0 = time.monotonic()
     history = await load_session(session_id)
     history.append({"role": "user", "content": message})
 
@@ -175,14 +185,20 @@ async def chat_stream(message: str, session_id: str | None = None):
 
     # 错误单独处理，不混入 token 队列
     if error_msg:
+        elapsed = time.monotonic() - t0
+        logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(error_msg)}")
         yield {"error": _strip_error_sentinel(error_msg)}
         return
 
     response_text = normalize_citations("".join(full_response))
     is_error = _is_error_response(response_text)
+    elapsed = time.monotonic() - t0
 
-    if not is_error:
+    if is_error:
+        logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
+    else:
         history.append({"role": "assistant", "content": response_text})
+        logger.info(f"chat_stream ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
     await save_session(session_id, history)
 
     msgs = [("user", message)]
