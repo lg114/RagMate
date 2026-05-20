@@ -53,6 +53,7 @@ def _check_rate_limit(session_id: str):
                 del _rate_limit[sid]
     timestamps = _rate_limit.get(session_id, [])
     timestamps = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
+    _rate_limit[session_id] = timestamps
     if len(timestamps) >= _RATE_LIMIT_MAX:
         from errors import ValidationError
         raise ValidationError("请求过于频繁，请稍后重试")
