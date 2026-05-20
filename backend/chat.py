@@ -37,14 +37,9 @@ async def _persist_messages(session_id: str, messages: list[tuple[str, str]]):
 AGENT_TIMEOUT = 120  # Agent 调用超时（秒）
 
 
-# 错误提示前缀集合，用于判断 response_text 是否为错误而非正常回复
-_ERROR_PREFIXES = (
-    "请求超时",
-    "请求被取消",
-    "API 认证失败",
-    "连接超时",
-    "处理请求时出错",
-)
+# 错误哨兵前缀，用于判断 response_text 是否为错误而非正常回复
+# 使用不太可能出现在 LLM 自然回复中的标记，避免误判
+_ERROR_SENTINEL = "[ERROR] "
 
 
 _CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))】", re.IGNORECASE)
@@ -70,27 +65,34 @@ def normalize_citations(text: str) -> str:
 
 
 def _is_error_response(text: str) -> bool:
-    return text.startswith(_ERROR_PREFIXES)
+    return text.startswith(_ERROR_SENTINEL)
+
+
+def _strip_error_sentinel(text: str) -> str:
+    """移除错误哨兵前缀，返回用户友好的错误消息。"""
+    if text.startswith(_ERROR_SENTINEL):
+        return text[len(_ERROR_SENTINEL):]
+    return text
 
 
 def _classify_error(e: Exception) -> str:
-    """根据异常类型和消息内容返回用户友好的错误提示"""
+    """根据异常类型和消息内容返回用户友好的错误提示（带哨兵前缀）"""
     msg = str(e).lower()
 
     if isinstance(e, asyncio.TimeoutError):
-        return "请求超时，请稍后重试"
+        return f"{_ERROR_SENTINEL}请求超时，请稍后重试"
     if isinstance(e, asyncio.CancelledError):
-        return "请求被取消"
+        return f"{_ERROR_SENTINEL}请求被取消"
     if any(k in msg for k in ("rate_limit", "429", "rate limit")):
-        return "请求频率超限，请稍后重试"
+        return f"{_ERROR_SENTINEL}请求频率超限，请稍后重试"
     if any(k in msg for k in ("auth", "401", "api key", "unauthorized")):
-        return "API 认证失败，请检查 API Key 配置"
+        return f"{_ERROR_SENTINEL}API 认证失败，请检查 API Key 配置"
     if any(k in msg for k in ("timeout", "timed out", "connection")):
-        return "连接超时，请检查网络或 LLM 服务状态"
+        return f"{_ERROR_SENTINEL}连接超时，请检查网络或 LLM 服务状态"
     if any(k in msg for k in ("insufficient_quota", "quota")):
-        return "API 配额不足，请检查账户余额"
+        return f"{_ERROR_SENTINEL}API 配额不足，请检查账户余额"
 
-    return f"处理请求时出错: {msg}"
+    return f"{_ERROR_SENTINEL}处理请求时出错: {msg}"
 
 
 async def chat(message: str, session_id: str | None = None) -> dict:
@@ -112,7 +114,7 @@ async def chat(message: str, session_id: str | None = None) -> dict:
         )
         response_text = normalize_citations(extract_text(result))
     except asyncio.TimeoutError:
-        response_text = "请求超时，请稍后重试"
+        response_text = f"{_ERROR_SENTINEL}请求超时，请稍后重试"
     except asyncio.CancelledError:
         raise  # 上层取消，不吞掉
     except Exception as e:
@@ -129,7 +131,7 @@ async def chat(message: str, session_id: str | None = None) -> dict:
         msgs.append(("assistant", response_text))
     await _persist_messages(session_id, msgs)
 
-    return {"response": response_text, "session_id": session_id}
+    return {"response": _strip_error_sentinel(response_text), "session_id": session_id}
 
 
 _SENTINEL = object()
@@ -173,7 +175,7 @@ async def chat_stream(message: str, session_id: str | None = None):
 
     # 错误单独处理，不混入 token 队列
     if error_msg:
-        yield {"error": error_msg}
+        yield {"error": _strip_error_sentinel(error_msg)}
         return
 
     response_text = normalize_citations("".join(full_response))
