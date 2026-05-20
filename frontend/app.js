@@ -439,7 +439,30 @@ const ChatPanel = {
 
   clear() {
     newSession();
-    this.messagesEl.innerHTML = '<div class="empty-state"><div class="empty-label">提出问题，从知识库中检索答案</div></div>';
+    this.messagesEl.innerHTML = `
+      <div id="hero-empty" class="hero-empty">
+        <canvas id="hero-canvas" class="hero-canvas"></canvas>
+        <div class="hero-content">
+          <h1 class="hero-title">你的<span class="accent">知识库</span> AI 助手</h1>
+          <p class="hero-subtitle">上传文档，建立专属知识库。提问即检索，精准溯源，拒绝幻觉。</p>
+          <div class="hero-suggestions">
+            <button class="hero-suggestion" data-q="这个知识库包含哪些文档？">这个知识库包含哪些文档？</button>
+            <button class="hero-suggestion" data-q="帮我总结一下核心要点">帮我总结核心要点</button>
+            <button class="hero-suggestion" data-q="有哪些常见问题和解决方案？">常见问题和解决方案</button>
+          </div>
+        </div>
+      </div>`;
+    initHeroCanvas();
+    document.querySelectorAll('.hero-suggestion').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const q = btn.dataset.q;
+        if (q) {
+          this.textareaEl.value = q;
+          this.textareaEl.dispatchEvent(new Event('input'));
+          this.formEl.requestSubmit();
+        }
+      });
+    });
     this.hideError();
   },
 
@@ -774,4 +797,113 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('beforeunload', () => DocumentsPanel.stopPolling());
+
+  // Hero empty state
+  initHeroCanvas();
+  document.querySelectorAll('.hero-suggestion').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const q = btn.dataset.q;
+      if (q) {
+        ChatPanel.textareaEl.value = q;
+        ChatPanel.textareaEl.dispatchEvent(new Event('input'));
+        ChatPanel.formEl.requestSubmit();
+      }
+    });
+  });
 });
+
+// ═══════════════════════ Hero Canvas: 知识节点网络 ═══════════════════════
+
+function initHeroCanvas() {
+  const canvas = document.getElementById('hero-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const hero = canvas.parentElement;
+  let w, h, nodes = [], animId;
+
+  function resize() {
+    w = canvas.width = hero.offsetWidth;
+    h = canvas.height = hero.offsetHeight;
+  }
+
+  function createNodes() {
+    nodes = [];
+    const count = Math.floor((w * h) / 12000);
+    for (let i = 0; i < count; i++) {
+      nodes.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.8,
+        pulse: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    const t = Date.now() * 0.001;
+
+    // Draw connections
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          const alpha = (1 - dist / 120) * 0.12;
+          ctx.strokeStyle = `rgba(240,180,41,${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(nodes[i].x, nodes[i].y);
+          ctx.lineTo(nodes[j].x, nodes[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw nodes
+    for (const node of nodes) {
+      node.x += node.vx;
+      node.y += node.vy;
+      if (node.x < 0 || node.x > w) node.vx *= -1;
+      if (node.y < 0 || node.y > h) node.vy *= -1;
+
+      const glow = Math.sin(t * 2 + node.pulse) * 0.3 + 0.7;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(240,180,41,${glow * 0.5})`;
+      ctx.fill();
+
+      // Glow halo
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r * 3, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(240,180,41,${glow * 0.06})`;
+      ctx.fill();
+    }
+
+    animId = requestAnimationFrame(draw);
+  }
+
+  resize();
+  createNodes();
+  draw();
+
+  window.addEventListener('resize', () => {
+    resize();
+    createNodes();
+  });
+
+  // Hide hero when first message is sent
+  const observer = new MutationObserver(() => {
+    const heroEl = document.getElementById('hero-empty');
+    const msgs = document.querySelectorAll('.msg');
+    if (heroEl && msgs.length > 0) {
+      heroEl.style.display = 'none';
+      cancelAnimationFrame(animId);
+    }
+  });
+  const msgContainer = document.getElementById('chat-messages');
+  if (msgContainer) observer.observe(msgContainer, { childList: true });
+}
