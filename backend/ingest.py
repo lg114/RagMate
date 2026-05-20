@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from config import settings
 from database import SyncSession
-from errors import ValidationError
+from errors import ServiceUnavailableError, ValidationError
 from model_factory import get_embeddings
 from models import Document
 from redis_client import set_ingest_status_sync
@@ -135,9 +135,8 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
 
     if not _check_milvus_available():
-        raise ValidationError(
+        raise ServiceUnavailableError(
             f"Milvus 服务不可达 ({settings.MILVUS_HOST}:{settings.MILVUS_PORT})",
-            status_code=503,
         )
 
     with SyncSession() as session:

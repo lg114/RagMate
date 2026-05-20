@@ -18,11 +18,11 @@ def _load_system_prompt() -> str:
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
     from config import settings
-    from errors import ValidationError
+    from errors import AppError
 
     try:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
-    except ValidationError:
+    except AppError:
         return "检索服务暂时不可用，请稍后重试"
     if not results:
         return "未找到相关文档"

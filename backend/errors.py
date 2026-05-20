@@ -24,3 +24,12 @@ class ValidationError(AppError):
             code="VALIDATION_ERROR",
             status_code=status_code,
         )
+
+
+class ServiceUnavailableError(AppError):
+    def __init__(self, message: str = "服务暂时不可用，请稍后重试"):
+        super().__init__(
+            message=message,
+            code="SERVICE_UNAVAILABLE",
+            status_code=503,
+        )

@@ -64,7 +64,7 @@ def _check_milvus_available() -> bool:
 
 def _init_milvus():
     """确保 Milvus collection 已加载（线程安全）。"""
-    from errors import ValidationError
+    from errors import ServiceUnavailableError
 
     global _collection_loaded
     client = get_milvus_client()
@@ -80,9 +80,9 @@ def _init_milvus():
                     client.load_collection(settings.MILVUS_COLLECTION)
                     _collection_loaded = True
                 except Exception:
-                    raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
+                    raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
             else:
-                raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
+                raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
     return client
 
 
@@ -174,7 +174,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 
 def retrieve(query: str, k: int = None) -> List[dict]:
     """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
-    from errors import ValidationError
+    from errors import AppError, ValidationError
     from ingest import encode_query
 
     if k is None:
@@ -206,11 +206,11 @@ def retrieve(query: str, k: int = None) -> List[dict]:
         )
         return result
 
-    except ValidationError:
+    except AppError:
         raise
     except Exception as e:
         logger.error(f"Retrieval failed: {e}", exc_info=True)
-        raise ValidationError("检索服务异常，请稍后重试", status_code=503) from e
+        raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
 
 
 if __name__ == "__main__":
