@@ -85,10 +85,12 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
 
 
 def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
-    """流式运行 agent，只返回最终回复。过滤掉 agent thinking 和 tool_call 参数。"""
-    from langchain_core.messages import AIMessageChunk, ToolMessage
+    """流式运行 agent，只返回最终回复。过滤掉 agent thinking 和 tool_call 参数。
 
-    can_yield = False
+    - 直接回答（无工具调用）：正常流式输出
+    - 工具调用后回答：丢弃中间过程，只输出工具调用后的最终回复
+    """
+    from langchain_core.messages import AIMessageChunk, ToolMessage
 
     for msg_chunk, _ in get_agent().stream(
         {"messages": messages},
@@ -99,13 +101,11 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
         stream_mode="messages",
     ):
         if isinstance(msg_chunk, ToolMessage):
-            can_yield = True
             continue
         if isinstance(msg_chunk, AIMessageChunk):
             if getattr(msg_chunk, "tool_calls", None):
-                can_yield = False
                 continue
-            if can_yield:
-                text = extract_text_content(getattr(msg_chunk, "content", ""))
-                if text:
-                    yield text
+            text = extract_text_content(getattr(msg_chunk, "content", ""))
+            if text:
+                yield text
+
