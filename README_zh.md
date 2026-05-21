@@ -12,16 +12,16 @@
 
 ## 核心特性
 
-- **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking，召回率和准确率显著优于纯向量检索
-- **Deepagents** — 基于 LangGraph 的多轮推理 Agent，支持工具调用、子 Agent 派生和任务规划
-- **流式输出** — SSE 实时流式返回，用户可逐 token 看到生成过程
-- **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown
+- **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking + 动态评分筛选（sigmoid 概率阈值、分数断崖检测、同源自适应去重）
+- **Deep Agents** — 基于 LangGraph 的多轮推理 Agent，支持子 Agent 委派和复杂问题分解
+- **流式输出** — SSE 实时逐 token 流式返回
+- **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown，内容 hash 自动去重
 - **智能 Chunk** — Markdown 按标题层级切分，PDF 保留页码，所有 chunk 带序号元数据
-- **多语言 Embedding** — BAAI/bge-m3（1024 维），原生支持 dense + sparse 双向量
-- **灵活的 LLM 接入** — 通过 LangChain ChatOpenAI 接入任意兼容 OpenAI 格式的 API（OpenAI、Anthropic、DeepSeek、MiMo 等）
-- **全链路可观测** — LangSmith 追踪 Agent 执行过程
+- **多语言 Embedding** — BAAI/bge-m3（1024 维），本地部署，原生支持 dense + sparse 双向量
+- **批量操作** — 多选文档批量入库或批量删除，带进度弹窗
+- **灵活的 LLM 接入** — 通过 LangChain ChatOpenAI 接入任意兼容 OpenAI 格式的 API
+- **评估 CLI** — 内置 RAGAS 评估，支持 CI/CD 质量门禁
 - **本地部署** — 所有数据自托管，无外部依赖
-- **检索评估** — 内置评估系统，可量化检索召回率和精确率
 
 ---
 
@@ -47,24 +47,23 @@ flowchart LR
 
 ```mermaid
 graph TD
-    Q[用户查询] --> E[编码]
-    E --> S[Dense + Sparse\n混合检索]
-    S --> RRF[RRF 融合]
-    RRF --> RC[重排序]
-    RC --> TH{阈值过滤}
-    TH -- 否 --> EMPTY[返回空]
-    TH -- 是 --> DD[去重]
-    DD --> LLM[Deep Agent]
-    LLM --> ANS[回答]
+    Q[用户查询] --> E[BGE-M3 编码\nDense + Sparse]
+    E --> S[Milvus 混合检索\nDense ANN + Sparse ANN]
+    S --> RRF[RRF 融合\n30 候选]
+    RRF --> RC[Cross-Encoder 精排]
+    RC --> DF[动态评分筛选\nSigmoid 阈值 + 断崖检测 + 源文件去重]
+    DF --> LLM[Deep Agent]
+    LLM --> ANS[带引用的回答]
 
     style Q fill:#e1f5fe
     style ANS fill:#c8e6c9
-    style TH fill:#fff9c4
+    style DF fill:#fff9c4
 ```
 
-- Dense 捕获语义，Sparse 捕获关键词，互补检索
-- RRF 融合两路排序，Reranker 精排
-- Deep Agent 支持多步规划 + 子智能体委派
+- BGE-M3 一次编码同时输出 dense（语义）+ sparse（关键词）向量
+- Milvus 并行 ANN 检索，RRF 融合排序，召回 30 候选
+- Cross-encoder 精排后，动态评分筛选 4-15 个最优片段
+- Deep Agent 支持多步推理 + 子代理委派
 
 ---
 
@@ -232,6 +231,7 @@ Response: { "success": true }
 
 ```
 POST /ingest
+Body: { "filenames": ["file1.pdf", "file2.docx"] } （可选，不传则入库所有新文件）
 Response: { "status": "started" | "already_running" }
 ```
 
@@ -271,13 +271,13 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | **Milvus** | `MILVUS_HOST` | `localhost` | 主机 |
 | | `MILVUS_PORT` | `19530` | 端口 |
 | | `MILVUS_COLLECTION` | `ragmate_docs` | Collection 名称 |
-| **入库** | `CHUNK_SIZE` | `500` | 文本分块大小 |
-| | `CHUNK_OVERLAP` | `50` | 分块重叠 |
+| **入库** | `CHUNK_SIZE` | `1000` | 文本分块大小 |
+| | `CHUNK_OVERLAP` | `200` | 分块重叠 |
 | **检索** | `HYBRID_SEARCH_ENABLED` | `true` | 启用混合检索 |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker 模型 |
-| | `RERANK_CANDIDATES` | `20` | rerank 候选池大小 |
-| | `FINAL_CONTEXT_K` | `4` | 最终给 LLM 的片段数 |
-| | `RERANK_SCORE_THRESHOLD` | `0.06` | 低于此分数的结果丢弃 |
+| | `RERANK_CANDIDATES` | `30` | rerank 候选池大小 |
+| | `FINAL_CONTEXT_K` | `15` | 最终给 LLM 的最大片段数（硬上限） |
+| | `RERANK_SCORE_THRESHOLD` | `0.3` | sigmoid 概率阈值（0-1） |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
 | | `LANGSMITH_API_KEY` | | LangSmith API Key |
 

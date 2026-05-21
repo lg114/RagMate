@@ -12,14 +12,15 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 
 ## Key Features
 
-- **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking, significantly outperforming pure vector retrieval
-- **Deepagents** — LangGraph-based multi-turn reasoning agent with tool calling, sub-agent delegation, and task planning
+- **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking + dynamic score filtering (sigmoid threshold, score-gap detection, adaptive source dedup)
+- **Deep Agents** — LangGraph-based multi-turn reasoning agent with sub-agent delegation and complex query decomposition
 - **Streaming Output** — SSE real-time token-by-token streaming
-- **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support
+- **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support with content-hash deduplication
 - **Smart Chunking** — Markdown split by heading hierarchy, PDF page numbers preserved, all chunks carry sequential metadata
-- **Multilingual Embedding** — BAAI/bge-m3 (1024-dim), native dense + sparse dual vectors
+- **Multilingual Embedding** — BAAI/bge-m3 (1024-dim), native dense + sparse dual vectors, locally deployed
+- **Batch Operations** — Select multiple documents for batch ingest or batch delete with progress modal
 - **Flexible LLM Integration** — Access any OpenAI-compatible API (OpenAI, Anthropic, DeepSeek, MiMo, etc.) via LangChain ChatOpenAI
-- **Full Observability** — LangSmith tracing for agent execution
+- **Evaluation CLI** — Built-in RAGAS evaluation with CI/CD quality gating
 - **Self-Hosted** — All data on-premise, no external dependencies
 
 ---
@@ -43,20 +44,19 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Q[User Query] --> E[Encode]
-    E --> S[Dense + Sparse\nHybrid Search]
-    S --> RRF[RRF Fusion]
-    RRF --> RC[Reranker]
-    RC --> TH{Threshold}
-    TH -- No --> EMPTY[Return Empty]
-    TH -- Yes --> DD[Dedup]
-    DD --> LLM[Deep Agent]
-    LLM --> ANS[Answer]
+    Q[User Query] --> E[BGE-M3 Encode\nDense + Sparse]
+    E --> S[Milvus Hybrid Search\nDense ANN + Sparse ANN]
+    S --> RRF[RRF Fusion\n30 Candidates]
+    RRF --> RC[Cross-Encoder Rerank]
+    RC --> DF[Dynamic Filtering\nSigmoid Threshold + Score Gap + Source Dedup]
+    DF --> LLM[Deep Agent]
+    LLM --> ANS[Answer with Citations]
 ```
 
-- Embedding: dense captures semantics, sparse captures keywords
-- RRF fuses two ranking paths, Reranker refines
-- Deepagents supports multi-step planning + sub-agent delegation
+- BGE-M3 encodes query into dense (semantic) + sparse (keyword) vectors in one pass
+- Milvus runs parallel ANN searches, fused via Reciprocal Rank Fusion
+- Cross-encoder reranks 30 candidates, dynamic scoring selects 4-15 optimal chunks
+- Deep Agents supports multi-step reasoning + sub-agent delegation
 
 ---
 
@@ -223,6 +223,7 @@ Response: { "success": true }
 
 ```
 POST /ingest
+Body: { "filenames": ["file1.pdf", "file2.docx"] } (optional, omit to ingest all new files)
 Response: { "status": "started" | "already_running" }
 ```
 
@@ -262,13 +263,13 @@ All settings are configured via `.env` file or environment variables, validated 
 | **Milvus** | `MILVUS_HOST` | `localhost` | Host |
 | | `MILVUS_PORT` | `19530` | Port |
 | | `MILVUS_COLLECTION` | `ragmate_docs` | Collection name |
-| **Ingestion** | `CHUNK_SIZE` | `500` | Text chunk size |
-| | `CHUNK_OVERLAP` | `50` | Chunk overlap |
+| **Ingestion** | `CHUNK_SIZE` | `1000` | Text chunk size |
+| | `CHUNK_OVERLAP` | `200` | Chunk overlap |
 | **Retrieval** | `HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model |
-| | `RERANK_CANDIDATES` | `20` | Rerank candidate pool size |
-| | `FINAL_CONTEXT_K` | `4` | Chunks passed to the LLM |
-| | `RERANK_SCORE_THRESHOLD` | `0.06` | Results below this score are discarded |
+| | `RERANK_CANDIDATES` | `30` | Rerank candidate pool size |
+| | `FINAL_CONTEXT_K` | `15` | Max chunks passed to the LLM (hard cap) |
+| | `RERANK_SCORE_THRESHOLD` | `0.3` | Sigmoid probability threshold (0-1) |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | Enable tracing |
 | | `LANGSMITH_API_KEY` | | LangSmith API key |
 
