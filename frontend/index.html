@@ -84,18 +84,21 @@
               </label>
               <span id="upload-error" class="upload-error hidden"></span>
             </div>
-            <button id="btn-ingest" class="btn-primary">
-              <span id="btn-ingest-text">入库</span>
-              <span id="btn-ingest-spinner" class="spinner hidden"></span>
-            </button>
-          </div>
-          <div id="ingest-status-bar" class="ingest-status hidden">
-            <span id="ingest-status-text"></span>
+            <div class="doc-actions">
+              <button id="btn-ingest" class="btn-primary" disabled>
+                <span id="btn-ingest-text">入库</span>
+                <span id="btn-ingest-spinner" class="spinner hidden"></span>
+              </button>
+              <button id="btn-batch-delete" class="btn-batch-delete" disabled>
+                <span id="btn-batch-delete-text">删除</span>
+              </button>
+            </div>
           </div>
           <div class="doc-table-wrap">
             <table class="doc-table">
               <thead>
                 <tr>
+                  <th class="col-check"><input type="checkbox" id="doc-select-all"></th>
                   <th>文件名</th>
                   <th>大小</th>
                   <th>状态</th>

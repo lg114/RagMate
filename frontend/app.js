@@ -82,8 +82,8 @@ const API = {
     return this.request('DELETE', `/documents/${encodeURIComponent(filename)}`);
   },
 
-  startIngest() {
-    return this.request('POST', '/ingest');
+  startIngest(filenames) {
+    return filenames ? this.request('POST', '/ingest', { filenames }) : this.request('POST', '/ingest');
   },
 
   getIngestStatus() {
@@ -113,6 +113,65 @@ function showConfirm(message) {
     document.getElementById('modal-confirm').onclick = () => cleanup(true);
     document.getElementById('modal-cancel').onclick = () => cleanup(false);
   });
+}
+
+function showProgressModal(title, total) {
+  const overlay = document.getElementById('modal-overlay');
+  const box = overlay.querySelector('.modal-box');
+  const origHTML = box.innerHTML;
+
+  box.innerHTML = `
+    <p class="modal-progress-text">${escapeHtml(title)} <span id="prog-count">0/${total}</span></p>
+    <div class="modal-progress-bar-wrap"><div class="modal-progress-bar" id="prog-bar"></div></div>
+    <div class="modal-progress-current" id="prog-current"></div>
+    <div class="modal-actions"><button class="btn-modal btn-modal-cancel" id="prog-cancel">取消</button></div>
+  `;
+  overlay.classList.remove('hidden');
+
+  let cancelled = false;
+  document.getElementById('prog-cancel').onclick = () => { cancelled = true; };
+
+  return {
+    get cancelled() { return cancelled; },
+    update(index, filename) {
+      document.getElementById('prog-count').textContent = `${index + 1}/${total}`;
+      document.getElementById('prog-bar').style.width = `${((index + 1) / total) * 100}%`;
+      document.getElementById('prog-current').textContent = filename;
+    },
+    done(title, items, detail) {
+      // items: { ok: [{name}], skipped: [{name, reason}], fail: [{name, error}] }
+      let html = `<p style="margin-bottom:16px;font-size:14px;font-weight:600;">${escapeHtml(title)}</p>`;
+      if (items.ok && items.ok.length > 0) {
+        html += `<p class="modal-result-item modal-result-ok">✓ 已入库：${items.ok.length} 个</p>`;
+        items.ok.forEach(f => {
+          if (f.name) html += `<p class="modal-result-detail">- ${escapeHtml(f.name)}</p>`;
+        });
+      }
+      if (items.skipped && items.skipped.length > 0) {
+        html += `<p class="modal-result-item modal-result-skip">⊘ 跳过：${items.skipped.length} 个</p>`;
+        items.skipped.forEach(f => {
+          html += `<p class="modal-result-detail">- ${escapeHtml(f.name)}（${escapeHtml(f.reason || '内容重复')}）</p>`;
+        });
+      }
+      if (items.fail && items.fail.length > 0) {
+        html += `<p class="modal-result-item modal-result-fail">✗ 失败：${items.fail.length} 个</p>`;
+        items.fail.forEach(f => {
+          html += `<p class="modal-result-detail">- ${escapeHtml(f.name)}（${escapeHtml(f.error)}）</p>`;
+        });
+      }
+      if (detail) html += `<p class="modal-result-detail" style="margin-top:8px;color:var(--text-muted);">${escapeHtml(detail)}</p>`;
+      html += `<div class="modal-actions" style="margin-top:20px"><button class="btn-modal btn-modal-confirm" id="prog-close">关闭</button></div>`;
+      box.innerHTML = html;
+      document.getElementById('prog-close').onclick = () => {
+        overlay.classList.add('hidden');
+        box.innerHTML = origHTML;
+      };
+    },
+    close() {
+      overlay.classList.add('hidden');
+      box.innerHTML = origHTML;
+    }
+  };
 }
 
 function formatFileSize(bytes) {
@@ -575,8 +634,11 @@ const DocumentsPanel = {
   ingestBtn: document.getElementById('btn-ingest'),
   ingestBtnText: document.getElementById('btn-ingest-text'),
   ingestSpinner: document.getElementById('btn-ingest-spinner'),
-  statusBar: document.getElementById('ingest-status-bar'),
-  statusText: document.getElementById('ingest-status-text'),
+  _ingestStateTimer: null,
+  _ingestHandled: false,
+  selectAllEl: document.getElementById('doc-select-all'),
+  batchDeleteBtn: document.getElementById('btn-batch-delete'),
+  batchDeleteText: document.getElementById('btn-batch-delete-text'),
   pollTimer: null,
 
   init() {
@@ -595,8 +657,66 @@ const DocumentsPanel = {
     });
 
     this.ingestBtn.addEventListener('click', () => this.startIngest());
-    this.resetIngestBtn();
+
+    this.selectAllEl.addEventListener('change', () => {
+      const checked = this.selectAllEl.checked;
+      this.tbodyEl.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
+      this._updateBatchBar();
+    });
+
+    this.batchDeleteBtn.addEventListener('click', () => this.batchDelete());
+
+    this._updateBatchBar();
     this.load();
+  },
+
+  _getSelectedFiles() {
+    return Array.from(this.tbodyEl.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(cb => cb.dataset.filename);
+  },
+
+  _updateBatchBar() {
+    const selectedCbs = Array.from(this.tbodyEl.querySelectorAll('input[type="checkbox"]:checked'));
+    const count = selectedCbs.length;
+    const hasSelection = count > 0;
+    const hasUnIngested = selectedCbs.some(cb => cb.dataset.status !== 'ingested');
+    this.ingestBtn.classList.remove('btn-ingest-running', 'btn-ingest-done', 'btn-ingest-failed');
+    this.ingestBtn.disabled = !hasUnIngested;
+    this.batchDeleteBtn.disabled = !hasSelection;
+    this.batchDeleteText.textContent = hasSelection ? `删除 (${count})` : '删除';
+    this.ingestBtnText.textContent = hasUnIngested ? `入库 (${selectedCbs.filter(cb => cb.dataset.status !== 'ingested').length})` : '入库';
+    // 更新全选 checkbox 状态
+    const allCbs = this.tbodyEl.querySelectorAll('input[type="checkbox"]');
+    this.selectAllEl.checked = allCbs.length > 0 && count === allCbs.length;
+    this.selectAllEl.indeterminate = count > 0 && count < allCbs.length;
+  },
+
+  async batchDelete() {
+    const files = this._getSelectedFiles();
+    if (files.length === 0) return;
+    if (!await showConfirm(`确定删除 ${files.length} 个文档？`)) return;
+
+    const modal = showProgressModal('正在删除文档…', files.length);
+    const items = { ok: [], fail: [] };
+
+    for (let i = 0; i < files.length; i++) {
+      if (modal.cancelled) break;
+      modal.update(i, files[i]);
+      try {
+        await API.deleteDocument(files[i]);
+        items.ok.push(files[i]);
+      } catch (err) {
+        items.fail.push({ name: files[i], error: err.message || '未知错误' });
+      }
+    }
+
+    modal.done('删除完成', {
+      ok: items.ok.map(f => ({ name: f })),
+      fail: items.fail,
+    });
+    this.selectAllEl.checked = false;
+    this._updateBatchBar();
+    await this.load();
   },
 
   async load() {
@@ -620,6 +740,10 @@ const DocumentsPanel = {
 
   render(docs) {
     this.tbodyEl.innerHTML = '';
+    this.selectAllEl.checked = false;
+    this.selectAllEl.indeterminate = false;
+    this._updateBatchBar();
+
     if (docs.length === 0) {
       this.emptyEl.classList.remove('hidden');
       return;
@@ -630,12 +754,14 @@ const DocumentsPanel = {
     docs.forEach(doc => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
+        <td class="col-check"><input type="checkbox" data-filename="${escapeHtml(doc.filename)}" data-status="${doc.status}"></td>
         <td title="${escapeHtml(doc.filename)}">${escapeHtml(truncate(doc.filename, 40))}</td>
         <td>${formatFileSize(doc.size_bytes)}</td>
         <td><span class="badge badge-${doc.status}">${statusLabel(doc.status)}${doc.chunk_count ? ' · ' + doc.chunk_count + ' 个片段' : ''}</span></td>
         <td>${formatDate(doc.uploaded_at)}</td>
         <td><button class="btn-delete" data-filename="${escapeHtml(doc.filename)}">删除</button></td>
       `;
+      tr.querySelector('input[type="checkbox"]').addEventListener('change', () => this._updateBatchBar());
       tr.querySelector('.btn-delete').addEventListener('click', () => this.deleteDoc(doc.filename));
       this.tbodyEl.appendChild(tr);
     });
@@ -660,7 +786,20 @@ const DocumentsPanel = {
       await API.uploadDocument(file);
       await this.load();
     } catch (err) {
-      this.showUploadError(err.message || '上传失败');
+      // 409 文件已存在 → 确认替换
+      if (err.message && err.message.includes('already exists')) {
+        if (await showConfirm(`"${file.name}" 已存在，是否替换？`)) {
+          try {
+            await API.deleteDocument(file.name);
+            await API.uploadDocument(file);
+            await this.load();
+          } catch (retryErr) {
+            this.showUploadError(retryErr.message || '替换失败');
+          }
+        }
+      } else {
+        this.showUploadError(err.message || '上传失败');
+      }
     } finally {
       this.uploadZone.classList.remove('uploading');
     }
@@ -677,21 +816,26 @@ const DocumentsPanel = {
   },
 
   async startIngest() {
-    this.ingestBtn.disabled = true;
-    this.ingestSpinner.classList.remove('hidden');
-    this.ingestBtnText.textContent = '入库中…';
+    const files = this._getSelectedFiles();
+    this._ingestHandled = false;
+    this.setIngestBtnState('running');
+    this.batchDeleteBtn.disabled = true;
 
     try {
-      const result = await API.startIngest();
+      const result = await API.startIngest(files.length > 0 ? files : null);
       if (result.status === 'already_running') {
-        this.showStatus('入库已在运行中…', 'running');
+        this.pollIngest();
       } else {
-        this.showStatus('入库已启动…', 'running');
+        // 打开进度弹窗，取消只是关闭弹窗，入库继续后台运行
+        this._ingestModal = showProgressModal('正在入库…', files.length || 1);
+        document.getElementById('prog-cancel').onclick = () => {
+          this._ingestModal.close();
+          this._ingestModal = null;
+        };
+        this.pollIngest();
       }
-      this.pollIngest();
     } catch (err) {
-      this.showStatus('入库启动失败: ' + (err.message || ''), 'failed');
-      this.resetIngestBtn();
+      this.setIngestBtnState('failed');
     }
   },
 
@@ -706,30 +850,56 @@ const DocumentsPanel = {
     try {
       const status = await API.getIngestStatus();
       if (!status || status.status === 'idle') {
+        this._ingestHandled = false;
         this.stopPolling();
-        this.hideStatus();
-        this.resetIngestBtn();
+        if (this._ingestModal) { this._ingestModal.close(); this._ingestModal = null; }
+        this.setIngestBtnState('default');
         return;
       }
+      // 已处理过的终态，不再重复触发按钮状态
+      if (this._ingestHandled && status.status !== 'running') return;
       if (status.status === 'running') {
-        this.showStatus('入库中…', 'running');
-        this.ingestBtn.disabled = true;
+        const stage = status.stage || '';
+        const stageLabels = {loading: '加载中', splitting: '切分中', encoding: '编码中', storing: '写入中'};
+        const stageLabel = stageLabels[stage] || '处理中';
+        const file = status.current_file || '';
+        const progress = status.total || 0;
+        const current = status.progress || 0;
+        // 更新弹窗
+        if (this._ingestModal && progress > 0) {
+          this._ingestModal.update(current, `${stageLabel} — ${file}`);
+        }
+        this.setIngestBtnState('running');
       } else if (status.status === 'success') {
         this.stopPolling();
-        this.showStatus(
-          `入库完成 — ${status.document_count} 个文档，${status.chunk_count} 个片段`,
-          'success'
-        );
-        this.resetIngestBtn();
+        if (this._ingestModal) {
+          const docCount = status.document_count || 0;
+          const chunkCount = status.chunk_count || 0;
+          const skipped = (status.skipped || []).map(s => ({ name: s.filename, reason: s.reason }));
+          const okItems = docCount > 0 ? Array.from({length: docCount}, (_, i) => ({ name: (status.filenames || [])[i] || `文档${i+1}` })) : [];
+          this._ingestModal.done('入库完成', { ok: okItems, skipped, fail: [] },
+            skipped.length === 0 ? `${docCount} 个文档，${chunkCount} 个片段` : '');
+          this._ingestModal = null;
+        }
+        this._ingestHandled = true;
+        this.setIngestBtnState('done');
         await this.refreshList();
       } else if (status.status === 'failed') {
         this.stopPolling();
-        this.showStatus('入库失败: ' + (status.error || '未知错误'), 'failed');
-        this.resetIngestBtn();
+        if (this._ingestModal) {
+          this._ingestModal.done('入库失败', {
+            ok: [],
+            fail: [{ name: '入库任务', error: status.error || '未知错误' }],
+          });
+          this._ingestModal = null;
+        }
+        this._ingestHandled = true;
+        this.setIngestBtnState('failed');
       }
     } catch (err) {
       this.stopPolling();
-      this.resetIngestBtn();
+      if (this._ingestModal) { this._ingestModal.close(); this._ingestModal = null; }
+      this.setIngestBtnState('default');
     }
   },
 
@@ -737,20 +907,30 @@ const DocumentsPanel = {
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
   },
 
-  showStatus(msg, type) {
-    this.statusBar.classList.remove('hidden', 'running', 'failed');
-    if (type) this.statusBar.classList.add(type);
-    this.statusText.textContent = msg;
-  },
-
-  hideStatus() {
-    this.statusBar.classList.add('hidden');
-  },
-
-  resetIngestBtn() {
-    this.ingestBtn.disabled = false;
-    this.ingestSpinner.classList.add('hidden');
-    this.ingestBtnText.textContent = '入库';
+  setIngestBtnState(state) {
+    if (this._ingestStateTimer) { clearTimeout(this._ingestStateTimer); this._ingestStateTimer = null; }
+    this.ingestBtn.classList.remove('btn-ingest-running', 'btn-ingest-done', 'btn-ingest-failed');
+    if (state === 'running') {
+      this.ingestBtn.disabled = true;
+      this.ingestBtn.classList.add('btn-ingest-running');
+      this.ingestSpinner.classList.remove('hidden');
+      this.ingestBtnText.textContent = '入库中';
+    } else if (state === 'done') {
+      this.ingestBtn.disabled = true;
+      this.ingestBtn.classList.add('btn-ingest-done');
+      this.ingestSpinner.classList.add('hidden');
+      this.ingestBtnText.textContent = '完成';
+      this._ingestStateTimer = setTimeout(() => this.setIngestBtnState('default'), 2000);
+    } else if (state === 'failed') {
+      this.ingestBtn.disabled = true;
+      this.ingestBtn.classList.add('btn-ingest-failed');
+      this.ingestSpinner.classList.add('hidden');
+      this.ingestBtnText.textContent = '失败';
+      this._ingestStateTimer = setTimeout(() => this.setIngestBtnState('default'), 2000);
+    } else {
+      this.ingestSpinner.classList.add('hidden');
+      this._updateBatchBar();
+    }
   },
 
   showUploadError(msg) {

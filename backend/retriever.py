@@ -1,4 +1,5 @@
 import logging
+import math
 import socket
 import threading
 from functools import lru_cache
@@ -135,30 +136,64 @@ def _extract_candidates(results) -> list[dict]:
 
 # ── Reranking + Filtering ──────────────────────────────────────────────────
 
+def _sigmoid(x: float) -> float:
+    """将 raw logit 转换为 [0, 1] 概率。"""
+    return 1.0 / (1.0 + math.exp(-x))
+
+
 def _rerank_and_score(query: str, candidates: list[dict]) -> tuple[list[dict], float]:
-    """Rerank 候选并返回 (scored_list, top_score)。"""
+    """Rerank 候选，logits 经 sigmoid 转为概率后返回 (scored_list, top_score)。"""
     if not candidates:
         return [], 0.0
     reranker = get_reranker()
     pairs = [(query, c["text"]) for c in candidates]
-    scores = reranker.predict(pairs)
-    for c, s in zip(candidates, scores):
-        c["score"] = float(s)
+    logits = reranker.predict(pairs)
+    for c, logit in zip(candidates, logits):
+        c["score"] = _sigmoid(float(logit))
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates, candidates[0]["score"]
 
 
 def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[dict]:
-    """过滤低分 + source 去重 + 截取 top-k。"""
-    filtered_by_score = [c for c in candidates if c["score"] >= threshold]
-    source_count: dict[str, int] = {}
-    deduped = []
-    for c in filtered_by_score:
+    """基于 sigmoid 概率的动态过滤、去重、截断。"""
+    if not candidates:
+        return []
+
+    top_score = candidates[0]["score"]  # 已是 sigmoid 概率
+
+    # 1. 动态阈值：top_score 的 50%，最低保底 threshold
+    effective_threshold = max(top_score * 0.5, threshold)
+    scored = [c for c in candidates if c["score"] >= effective_threshold]
+
+    if not scored:
+        return []
+
+    # 2. 动态源文件去重：同源高分 chunk 多则放宽
+    source_groups: dict[str, list] = {}
+    for c in scored:
         canonical = canonical_source(c["source"])
-        if source_count.get(canonical, 0) < 2:
-            deduped.append(c)
-            source_count[canonical] = source_count.get(canonical, 0) + 1
-    return deduped[:k]
+        source_groups.setdefault(canonical, []).append(c)
+
+    deduped = []
+    for canonical, chunks in source_groups.items():
+        chunks.sort(key=lambda x: x["score"], reverse=True)
+        high_count = sum(1 for c in chunks if c["score"] >= top_score * 0.6)
+        limit = min(max(high_count, 2), 4)
+        deduped.extend(chunks[:limit])
+
+    deduped.sort(key=lambda x: x["score"], reverse=True)
+
+    # 3. 动态 top-k：分数断崖检测
+    result = [deduped[0]]
+    for i in range(1, len(deduped)):
+        gap = deduped[i - 1]["score"] - deduped[i]["score"]
+        if gap > 0.15:
+            break
+        if len(result) >= k:
+            break
+        result.append(deduped[i])
+
+    return result
 
 
 # ── Public API ─────────────────────────────────────────────────────────────

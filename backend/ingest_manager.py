@@ -18,7 +18,7 @@ _ingest_lock_token: str | None = None
 _start_lock = asyncio.Lock()
 
 
-async def _run_ingest():
+async def _run_ingest(filenames: list[str] | None = None):
     """在后台线程中执行入库，通过 Redis 管理状态与锁。"""
     global _ingest_lock_token
 
@@ -34,7 +34,7 @@ async def _run_ingest():
     renew_task = asyncio.create_task(_renew_loop())
     try:
         await set_ingest_status({"status": "running"})
-        result = await asyncio.to_thread(ingest_documents, None, True)
+        result = await asyncio.to_thread(ingest_documents, None, filenames, True)
         await set_ingest_status(result)
     except asyncio.CancelledError:
         await set_ingest_status({"status": "idle"})
@@ -55,7 +55,7 @@ async def _run_ingest():
             _ingest_lock_token = None
 
 
-async def start_ingest() -> dict:
+async def start_ingest(filenames: list[str] | None = None) -> dict:
     """启动入库任务（如果未在运行）。返回状态。"""
     global _ingest_task, _ingest_lock_token
     async with _start_lock:
@@ -65,7 +65,7 @@ async def start_ingest() -> dict:
         if not token:
             return {"status": "already_running"}
         _ingest_lock_token = token
-        _ingest_task = asyncio.create_task(_run_ingest())
+        _ingest_task = asyncio.create_task(_run_ingest(filenames))
     return {"status": "started"}
 
 

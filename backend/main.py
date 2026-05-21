@@ -343,8 +343,9 @@ async def delete_document(filename: str):
 
 
 @app.post("/ingest")
-async def trigger_ingest():
-    return await start_ingest()
+async def trigger_ingest(body: dict | None = None):
+    filenames = body.get("filenames") if body else None
+    return await start_ingest(filenames)
 
 
 @app.get("/ingest/status")

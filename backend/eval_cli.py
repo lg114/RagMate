@@ -147,12 +147,27 @@ def retrieve_contexts(question: str, top_k: int = None) -> list[str]:
 
 # ── Response Generation ─────────────────────────────────────────────────────
 
-RAG_SYSTEM_PROMPT = """你是一个知识库问答助手。根据提供的上下文回答用户的问题。
+def _load_eval_system_prompt() -> str:
+    """从 prompts/researcher.md 加载评估用 system prompt，剥离工具调用相关段落。"""
+    import re
+    prompt_path = Path(__file__).parent / "prompts" / "researcher.md"
+    if not prompt_path.exists():
+        return "你是一个知识库问答助手。根据提供的上下文回答用户的问题。只基于提供的上下文回答，不要编造信息。"
+    text = prompt_path.read_text(encoding="utf-8")
+    # 剥离工具调用相关段落（评估时无工具）
+    sections_to_remove = [
+        r"## 工具调用边界.*?(?=## |\Z)",
+        r"## 检索与信息收集策略.*?(?=## |\Z)",
+        r"## 核心工作流.*?(?=## |\Z)",
+    ]
+    for pattern in sections_to_remove:
+        text = re.sub(pattern, "", text, flags=re.DOTALL)
+    # 清理多余空行
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
 
-规则：
-1. 只基于提供的上下文回答，不要编造信息
-2. 如果上下文中没有相关信息，明确说明
-3. 回答要简洁准确"""
+
+RAG_SYSTEM_PROMPT = _load_eval_system_prompt()
 
 RAG_USER_PROMPT = """上下文：
 {contexts}

@@ -36,15 +36,15 @@ class Settings(BaseSettings):
     MILVUS_TIMEOUT: float = 10.0
 
     # Ingestion
-    CHUNK_SIZE: int = 500
-    CHUNK_OVERLAP: int = 50
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 200
 
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    RERANK_CANDIDATES: int = 20       # rerank 候选池大小
-    FINAL_CONTEXT_K: int = 4          # 最终给 LLM 的片段数
-    RERANK_SCORE_THRESHOLD: float = 0.06  # 低于此分数的结果丢弃
+    RERANK_CANDIDATES: int = 30       # rerank 候选池大小
+    FINAL_CONTEXT_K: int = 15         # 最终给 LLM 的片段数（动态策略的硬上限）
+    RERANK_SCORE_THRESHOLD: float = 0.3  # sigmoid 概率阈值，低于此分数的结果丢弃
 
     # Documents
     DOCUMENTS_DIR: str = "./documents"

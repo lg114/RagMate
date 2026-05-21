@@ -438,15 +438,14 @@ body {
 }
 .upload-zone {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 18px; border: 1px dashed rgba(255,255,255,0.1); border-radius: var(--radius);
+  padding: 8px 18px; border: 1px solid var(--border); border-radius: var(--radius-sm);
   cursor: pointer; font-size: 13px; color: var(--text-muted);
   font-family: var(--font); font-weight: 500;
   transition: all var(--transition);
-  background: rgba(255,255,255,0.02);
+  background: transparent;
 }
 .upload-zone:hover, .upload-zone.drag-over {
-  border-color: var(--accent); color: var(--accent); background: var(--accent-subtle);
-  box-shadow: 0 0 20px rgba(240,180,41,0.08);
+  border-color: var(--border-hover); color: var(--text); background: rgba(255,255,255,0.03);
 }
 .upload-zone.uploading { opacity: .5; pointer-events: none; }
 .upload-error { color: var(--danger); font-size: 12px; }
@@ -469,17 +468,18 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.ingest-status {
-  margin: 0 24px; padding: 8px 16px; border-radius: var(--radius);
-  font-size: 13px; border: 1px solid;
+/* ── Ingest Button States ── */
+.btn-ingest-running {
+  background: rgba(255,255,255,0.06) !important; color: var(--text-muted) !important;
+  box-shadow: none !important; cursor: not-allowed !important;
 }
-.ingest-status.running {
-  background: rgba(99,102,241,0.08); color: var(--indigo);
-  border-color: rgba(99,102,241,0.15);
+.btn-ingest-done {
+  background: rgba(34,197,94,0.15) !important; color: var(--success) !important;
+  box-shadow: none !important;
 }
-.ingest-status.failed {
-  background: rgba(239,68,68,0.08); color: var(--danger);
-  border-color: rgba(239,68,68,0.15);
+.btn-ingest-failed {
+  background: rgba(239,68,68,0.15) !important; color: var(--danger) !important;
+  box-shadow: none !important;
 }
 
 .doc-table-wrap { flex: 1; overflow: auto; padding: 0 24px 24px; }
@@ -512,6 +512,43 @@ body {
   transition: all var(--transition);
 }
 .btn-delete:hover { color: var(--danger); border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.08); }
+
+/* ── Checkbox ── */
+.col-check { width: 36px; text-align: center; }
+.col-check input[type="checkbox"],
+.doc-table td:first-child input[type="checkbox"] {
+  width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent);
+}
+
+/* ── Doc Actions ── */
+.doc-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ── Batch Delete ── */
+.btn-batch-delete {
+  padding: 8px 18px; border: 1px solid rgba(239,68,68,0.15); border-radius: var(--radius-sm);
+  background: rgba(239,68,68,0.08); color: var(--danger);
+  font-family: var(--font); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all var(--transition);
+}
+.btn-batch-delete:hover:not(:disabled) { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); }
+.btn-batch-delete:disabled { background: transparent; border-color: var(--border); color: var(--text-muted); cursor: default; }
+
+/* ── Progress Modal ── */
+.modal-progress-text { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+.modal-progress-bar-wrap {
+  width: 100%; height: 6px; background: rgba(255,255,255,0.06);
+  border-radius: 3px; overflow: hidden; margin-bottom: 12px;
+}
+.modal-progress-bar {
+  height: 100%; background: var(--accent); border-radius: 3px;
+  transition: width 200ms ease; width: 0%;
+}
+.modal-progress-current { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; word-break: break-all; }
+.modal-result-item { font-size: 13px; margin-bottom: 4px; }
+.modal-result-ok { color: var(--success); }
+.modal-result-skip { color: var(--text-muted); }
+.modal-result-fail { color: var(--danger); }
+.modal-result-detail { font-size: 12px; color: var(--text-muted); padding-left: 16px; margin-bottom: 2px; }
 
 /* ── Hidden ── */
 [hidden], .hidden { display: none; }

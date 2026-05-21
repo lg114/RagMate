@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import logging
 import os
 import uuid
@@ -127,8 +128,12 @@ def _sync_documents_table(directory: str, filenames: list[str], chunk_counts: di
         session.commit()
 
 
-def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
-    """读取文档，切分，向量入库到 Milvus。增量模式：只处理新文件。返回结构化结果 dict。"""
+def ingest_documents(directory: str = None, filenames: list[str] = None, verbose: bool = False) -> dict:
+    """读取文档，切分，向量入库到 Milvus。增量模式：只处理新文件。返回结构化结果 dict。
+
+    Args:
+        filenames: 指定要入库的文件列表。为 None 时处理目录下所有新文件。
+    """
     docs_dir = directory or settings.DOCUMENTS_DIR
 
     if not os.path.exists(docs_dir):
@@ -137,6 +142,12 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     all_files = sorted(f for f in os.listdir(docs_dir) if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS)
     if not all_files:
         return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
+
+    # 如果指定了文件列表，只处理指定的文件
+    if filenames is not None:
+        all_files = [f for f in all_files if f in filenames]
+        if not all_files:
+            return {"status": "failed", "error": "None of the specified files found in documents directory"}
 
     if not _check_milvus_available():
         raise ServiceUnavailableError(
@@ -179,17 +190,7 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
             "message": "All documents already ingested",
         }
 
-    documents = []
-    for filename in new_files:
-        filepath = os.path.join(docs_dir, filename)
-        pages = load_document(filepath)
-        logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
-        documents.extend(pages)
-
-    if not documents:
-        return {"status": "failed", "error": "No text extracted from any file"}
-
-    # 按文件类型分组切分
+    # 逐文件加载 + 切分，实时更新进度
     chunks = []
     md_headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
     md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=md_headers)
@@ -197,15 +198,36 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
     )
 
-    for doc in documents:
-        ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
-        if ext in (".md", ".markdown"):
-            md_chunks = md_splitter.split_text(doc.page_content)
-            for c in md_chunks:
-                c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
-            chunks.extend(md_chunks)
-        else:
-            chunks.extend(text_splitter.split_documents([doc]))
+    for i, filename in enumerate(new_files):
+        # 阶段 1：加载
+        set_ingest_status_sync({
+            "status": "running", "stage": "loading",
+            "current_file": filename, "progress": i, "total": len(new_files),
+        })
+        filepath = os.path.join(docs_dir, filename)
+        pages = load_document(filepath)
+        logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
+
+        if not pages:
+            continue
+
+        # 阶段 2：切分
+        set_ingest_status_sync({
+            "status": "running", "stage": "splitting",
+            "current_file": filename, "progress": i, "total": len(new_files),
+        })
+        for doc in pages:
+            ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
+            if ext in (".md", ".markdown"):
+                md_chunks = md_splitter.split_text(doc.page_content)
+                for c in md_chunks:
+                    c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
+                chunks.extend(text_splitter.split_documents(md_chunks))
+            else:
+                chunks.extend(text_splitter.split_documents([doc]))
+
+    if not chunks:
+        return {"status": "failed", "error": "No text extracted from any file"}
 
     # 添加 chunk_index 元数据
     chunk_counter = Counter()
@@ -218,11 +240,62 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         chunk.metadata["chunk_index"] = file_chunk_index[filename]
         file_chunk_index[filename] += 1
 
-    logger.info(f"Split {len(documents)} pages into {len(chunks)} chunks")
+    # 计算 chunk 内容 hash，用于去重
+    for chunk in chunks:
+        chunk.metadata["content_hash"] = hashlib.md5(chunk.page_content.encode("utf-8")).hexdigest()
 
+    logger.info(f"Split {len(new_files)} files into {len(chunks)} chunks")
+
+    # 内容去重：查询 Milvus 中已存在的 hash，跳过重复 chunk
+    skipped_files = {}  # filename -> reason
     client = get_milvus_client()
-
     collection_exists = client.has_collection(settings.MILVUS_COLLECTION)
+
+    if collection_exists and chunks:
+        new_hashes = list({c.metadata["content_hash"] for c in chunks})
+        try:
+            # 分批查询（Milvus filter 表达式长度限制）
+            existing_hashes = set()
+            batch_size = 100
+            for i in range(0, len(new_hashes), batch_size):
+                batch = new_hashes[i:i + batch_size]
+                hash_list = ", ".join(f'"{h}"' for h in batch)
+                expr = f'metadata["content_hash"] in [{hash_list}]'
+                result = client.query(
+                    collection_name=settings.MILVUS_COLLECTION,
+                    filter=expr,
+                    output_fields=["metadata"],
+                )
+                for r in result:
+                    h = r.get("metadata", {}).get("content_hash")
+                    if h:
+                        existing_hashes.add(h)
+
+            if existing_hashes:
+                original_count = len(chunks)
+                # 按文件统计跳过情况
+                file_skip_count = Counter()
+                filtered_chunks = []
+                for chunk in chunks:
+                    if chunk.metadata["content_hash"] in existing_hashes:
+                        src = os.path.basename(chunk.metadata.get("source", ""))
+                        file_skip_count[src] += 1
+                    else:
+                        filtered_chunks.append(chunk)
+
+                # 如果某个文件的全部 chunk 都被跳过，记录为 skipped
+                for src, skip_cnt in file_skip_count.items():
+                    total_in_file = chunk_counter.get(src, 0)
+                    if skip_cnt >= total_in_file:
+                        skipped_files[src] = f"内容与其他文档完全重复"
+                        logger.info(f"Skip {src}: all {skip_cnt} chunks already exist")
+                    else:
+                        logger.info(f"Dedup {src}: {skip_cnt}/{total_in_file} chunks already exist")
+
+                chunks = filtered_chunks
+                logger.info(f"Content dedup: {original_count} -> {len(chunks)} chunks ({original_count - len(chunks)} skipped)")
+        except Exception as e:
+            logger.warning(f"Content dedup query failed, proceeding without dedup: {e}")
 
     # 检查旧 collection 是否有 sparse 字段和索引，没有则重建
     if collection_exists:
@@ -267,14 +340,41 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
         except Exception:
             logger.debug(f"Failed to delete old chunks for {filename}", exc_info=True)
 
+    # 如果所有 chunk 都被去重跳过
+    if not chunks:
+        skipped_list = [{"filename": f, "reason": r} for f, r in skipped_files.items()]
+        result = {
+            "status": "success",
+            "document_count": 0,
+            "chunk_count": 0,
+            "skipped": skipped_list,
+            "message": "All chunks already exist",
+        }
+        set_ingest_status_sync(result)
+        return result
+
     texts = [chunk.page_content for chunk in chunks]
     metadatas = [{
         "source": os.path.basename(chunk.metadata.get("source", "unknown")),
         "page": chunk.metadata.get("page"),
         "chunk_index": chunk.metadata.get("chunk_index", 0),
+        "content_hash": chunk.metadata.get("content_hash", ""),
     } for chunk in chunks]
 
+    # 阶段 3：编码
+    set_ingest_status_sync({
+        "status": "running", "stage": "encoding",
+        "current_file": "", "progress": len(new_files), "total": len(new_files),
+        "chunk_count": len(chunks),
+    })
     dense_vecs, sparse_vecs = encode_documents(texts)
+
+    # 阶段 4：写入向量库
+    set_ingest_status_sync({
+        "status": "running", "stage": "storing",
+        "current_file": "", "progress": len(new_files), "total": len(new_files),
+        "chunk_count": len(chunks),
+    })
 
     data = [
         {"id": uuid.uuid4().int & ((1 << 63) - 1), "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
@@ -286,17 +386,22 @@ def ingest_documents(directory: str = None, verbose: bool = False) -> dict:
     )
     client.load_collection(settings.MILVUS_COLLECTION)
 
+    # 从 new_files 中移除被跳过的文件
+    ingested_files = [f for f in new_files if f not in skipped_files]
+
     try:
-        _sync_documents_table(docs_dir, new_files, dict(chunk_counter))
+        _sync_documents_table(docs_dir, ingested_files, dict(chunk_counter))
     except Exception as e:
         logger.warning(f"Failed to sync documents table: {e}")
 
+    skipped_list = [{"filename": f, "reason": r} for f, r in skipped_files.items()]
     result = {
         "status": "success",
-        "document_count": len(new_files),
+        "document_count": len(ingested_files),
         "chunk_count": len(chunks),
-        "filenames": new_files,
+        "filenames": ingested_files,
         "chunk_counts": dict(chunk_counter),
+        "skipped": skipped_list,
         "collection": settings.MILVUS_COLLECTION,
     }
     set_ingest_status_sync(result)
