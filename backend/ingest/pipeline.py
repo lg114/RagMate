@@ -75,31 +75,36 @@ def _load_and_split(docs_dir, new_files):
         chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
     )
 
+    failed_files = []
     for i, filename in enumerate(new_files):
-        set_ingest_status_sync({
-            "status": "running", "stage": "loading",
-            "current_file": filename, "progress": i, "total": len(new_files),
-        })
-        filepath = os.path.join(docs_dir, filename)
-        pages = load_document(filepath)
-        logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
+        try:
+            set_ingest_status_sync({
+                "status": "running", "stage": "loading",
+                "current_file": filename, "progress": i, "total": len(new_files),
+            })
+            filepath = os.path.join(docs_dir, filename)
+            pages = load_document(filepath)
+            logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
 
-        if not pages:
-            continue
+            if not pages:
+                continue
 
-        set_ingest_status_sync({
-            "status": "running", "stage": "splitting",
-            "current_file": filename, "progress": i, "total": len(new_files),
-        })
-        for doc in pages:
-            ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
-            if ext in (".md", ".markdown"):
-                md_chunks = md_splitter.split_text(doc.page_content)
-                for c in md_chunks:
-                    c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
-                chunks.extend(text_splitter.split_documents(md_chunks))
-            else:
-                chunks.extend(text_splitter.split_documents([doc]))
+            set_ingest_status_sync({
+                "status": "running", "stage": "splitting",
+                "current_file": filename, "progress": i, "total": len(new_files),
+            })
+            for doc in pages:
+                ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
+                if ext in (".md", ".markdown"):
+                    md_chunks = md_splitter.split_text(doc.page_content)
+                    for c in md_chunks:
+                        c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
+                    chunks.extend(text_splitter.split_documents(md_chunks))
+                else:
+                    chunks.extend(text_splitter.split_documents([doc]))
+        except Exception as e:
+            logger.error(f"Failed to process {filename}: {e}")
+            failed_files.append({"filename": filename, "error": str(e)})
 
     # 添加 chunk_index 和 content_hash 元数据
     chunk_counter = Counter()
@@ -200,6 +205,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
         "filenames": ingested_files,
         "chunk_counts": dict(chunk_counter),
         "skipped": skipped_list,
+        "failed": failed_files,
         "collection": settings.MILVUS_COLLECTION,
     }
     set_ingest_status_sync(result)

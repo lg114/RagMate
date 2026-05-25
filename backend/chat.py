@@ -99,7 +99,14 @@ def _classify_error(e: Exception) -> str:
     return f"{_ERROR_SENTINEL}处理请求时出错: {msg}"
 
 
-async def chat(message: str, session_id: str | None = None) -> dict:
+def _strip_last_user_message(history: list[dict]) -> list[dict]:
+    """移除历史中最后一条用户消息（用于重试/重新生成）。"""
+    if history and history[-1].get("role") == "user":
+        return history[:-1]
+    return history
+
+
+async def chat(message: str, session_id: str | None = None, replace_last: bool = False) -> dict:
     """处理用户聊天消息，支持多轮对话。返回 {"response": str, "session_id": str}"""
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -107,7 +114,11 @@ async def chat(message: str, session_id: str | None = None) -> dict:
     # 1. 加载会话历史
     history = await load_session(session_id)
 
-    # 2. 追加用户消息
+    # 2. 重试/重新生成时，移除旧的用户消息
+    if replace_last:
+        history = _strip_last_user_message(history)
+
+    # 3. 追加用户消息
     history.append({"role": "user", "content": message})
 
     # 3. 调用 Agent（同步，放到线程中执行，带超时）
@@ -146,13 +157,17 @@ async def chat(message: str, session_id: str | None = None) -> dict:
 _SENTINEL = object()
 
 
-async def chat_stream(message: str, session_id: str | None = None):
+async def chat_stream(message: str, session_id: str | None = None, replace_last: bool = False):
     """流式聊天，逐 token yield。返回格式: {"token": str} 或 {"done": True, "session_id": str}"""
     if not session_id:
         session_id = str(uuid.uuid4())
 
     t0 = time.monotonic()
     history = await load_session(session_id)
+
+    if replace_last:
+        history = _strip_last_user_message(history)
+
     history.append({"role": "user", "content": message})
 
     queue: asyncio.Queue = asyncio.Queue()

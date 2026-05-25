@@ -17,6 +17,7 @@ def validate_session_id(v: str) -> str:
 class ChatRequest(BaseModel):
     message: str = Field(..., max_length=10000)
     session_id: str | None = None
+    replace_last: bool = False  # 重试/重新生成时，替换 Redis 中的最后一条用户消息
 
     @field_validator("session_id")
     @classmethod
@@ -29,3 +30,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+
+
+class IngestRequest(BaseModel):
+    filenames: list[str] = Field(default_factory=list, max_length=200)

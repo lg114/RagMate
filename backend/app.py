@@ -117,6 +117,20 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization"],
     )
 
+    # 上传大小限制中间件（在读取 body 前拦截）
+    MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+
+    @app.middleware("http")
+    async def _limit_upload_size(request, call_next):
+        if request.url.path == "/documents/upload":
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > MAX_UPLOAD_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={"code": "PAYLOAD_TOO_LARGE", "detail": "File exceeds 50MB limit"},
+                )
+        return await call_next(request)
+
     # Request ID 中间件
     @app.middleware("http")
     async def _set_request_id(request, call_next):

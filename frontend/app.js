@@ -18,12 +18,12 @@ const API = {
     return data;
   },
 
-  async chatStream(message, sessionId, onToken, onDone, onError) {
+  async chatStream(message, sessionId, onToken, onDone, onError, replaceLast) {
     try {
       const res = await fetch('/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, session_id: sessionId }),
+        body: JSON.stringify({ message, session_id: sessionId, replace_last: !!replaceLast }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -351,7 +351,7 @@ const ChatPanel = {
           userMsg.remove();
         }
         this.textareaEl.value = this._lastUserText;
-        this.send();
+        this.send(true);
       }
     });
     this.errorEl.appendChild(retryBtn);
@@ -368,7 +368,7 @@ const ChatPanel = {
     this.textareaEl.disabled = disabled;
   },
 
-  async send() {
+  async send(replaceLast) {
     const text = this.textareaEl.value.trim();
     if (!text || this.loading) return;
 
@@ -401,6 +401,7 @@ const ChatPanel = {
         this.textareaEl.focus();
         HistoryPanel.load();
       },
+      replaceLast,
     );
   },
 
@@ -490,7 +491,7 @@ const ChatPanel = {
             userMsg.remove();
           }
           this.textareaEl.value = lastText;
-          this.send();
+          this.send(true);
         }
       });
     }

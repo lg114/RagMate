@@ -2,7 +2,7 @@
 import json
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import delete, func, select
 from starlette.responses import StreamingResponse
 
@@ -17,19 +17,27 @@ logger = logging.getLogger("ragmate")
 router = APIRouter()
 
 
+def _get_client_ip(request: Request) -> str:
+    """获取客户端 IP，支持反向代理。"""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
-    check_rate_limit(request.session_id or "anonymous")
-    result = await chat(request.message, request.session_id)
+async def chat_endpoint(body: ChatRequest, request: Request):
+    check_rate_limit(_get_client_ip(request))
+    result = await chat(body.message, body.session_id, replace_last=body.replace_last)
     return ChatResponse(response=result["response"], session_id=result["session_id"])
 
 
 @router.post("/chat/stream")
-async def chat_stream_endpoint(request: ChatRequest):
-    check_rate_limit(request.session_id or "anonymous")
+async def chat_stream_endpoint(body: ChatRequest, request: Request):
+    check_rate_limit(_get_client_ip(request))
 
     async def event_generator():
-        async for chunk in chat_stream(request.message, request.session_id):
+        async for chunk in chat_stream(body.message, body.session_id, replace_last=body.replace_last):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

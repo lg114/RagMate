@@ -3,13 +3,14 @@ from fastapi import APIRouter
 
 from ingest_manager import start_ingest
 from redis_client import get_ingest_status
+from schemas import IngestRequest
 
 router = APIRouter()
 
 
 @router.post("/ingest")
-async def trigger_ingest(body: dict | None = None):
-    filenames = body.get("filenames") if body else None
+async def trigger_ingest(body: IngestRequest | None = None):
+    filenames = body.filenames if body and body.filenames else None
     return await start_ingest(filenames)
 
 
