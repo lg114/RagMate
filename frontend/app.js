@@ -429,10 +429,11 @@ const ChatPanel = {
 
   appendStreamToken(div, fullText) {
     const content = div.querySelector('.msg-content');
-    // 节流：用 requestAnimationFrame 合并多次 token 更新，避免每 token 都重新 parse 全文
+    if (div._streamDone) return;
     if (!div._rafPending) {
       div._rafPending = true;
       requestAnimationFrame(() => {
+        if (div._streamDone) return;
         content.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
         this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
         div._rafPending = false;
@@ -441,6 +442,7 @@ const ChatPanel = {
   },
 
   finalizeStreamMessage(div, fullText) {
+    div._streamDone = true;
     const content = div.querySelector('.msg-content');
     content.innerHTML = renderAssistantMarkdown(fullText || '没有收到回复');
 
