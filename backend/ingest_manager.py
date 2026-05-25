@@ -34,7 +34,7 @@ async def _run_ingest(filenames: list[str] | None = None):
     renew_task = asyncio.create_task(_renew_loop())
     try:
         await set_ingest_status({"status": "running"})
-        result = await asyncio.to_thread(ingest_documents, None, filenames, True)
+        result = await asyncio.to_thread(ingest_documents, None, filenames)
         await set_ingest_status(result)
     except asyncio.CancelledError:
         await set_ingest_status({"status": "idle"})

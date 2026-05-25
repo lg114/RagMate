@@ -1,4 +1,4 @@
-import threading
+from functools import lru_cache
 from pathlib import Path
 
 from langchain_core.tools import tool
@@ -42,23 +42,16 @@ def retrieval_tool(query: str) -> str:
 
 
 # ── Agent 实例 ──────────────────────────────────────────────────────────────
-_agent = None
-_agent_lock = threading.Lock()
 
 
+@lru_cache(maxsize=1)
 def get_agent():
-    """延迟创建 Deep Agent 实例（线程安全，首次调用时才初始化 LLM 连接）"""
-    global _agent
-    if _agent is not None:
-        return _agent
-    with _agent_lock:
-        if _agent is None:
-            _agent = create_deep_agent(
-                model=get_llm(),
-                tools=[retrieval_tool],
-                system_prompt=_load_system_prompt(),
-            )
-    return _agent
+    """延迟创建 Deep Agent 实例（单例，首次调用时才初始化 LLM 连接）"""
+    return create_deep_agent(
+        model=get_llm(),
+        tools=[retrieval_tool],
+        system_prompt=_load_system_prompt(),
+    )
 
 
 # ── 内部工具函数 ────────────────────────────────────────────────────────────

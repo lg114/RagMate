@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from sqlalchemy import create_engine, make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -14,20 +16,17 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 # 从 async URL 生成 sync URL：替换 driver 从 asyncpg 到 psycopg2
 _sync_url = make_url(settings.DATABASE_URL).set(drivername="postgresql+psycopg2")
-_sync_engine = None
 
 
+@lru_cache(maxsize=1)
 def get_sync_engine():
-    global _sync_engine
-    if _sync_engine is None:
-        _sync_engine = create_engine(
-            _sync_url,
-            echo=False,
-            pool_size=2,
-            max_overflow=2,
-            pool_pre_ping=True,
-        )
-    return _sync_engine
+    return create_engine(
+        _sync_url,
+        echo=False,
+        pool_size=2,
+        max_overflow=2,
+        pool_pre_ping=True,
+    )
 
 
 class SyncSession:

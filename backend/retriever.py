@@ -201,7 +201,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 def retrieve(query: str, k: int = None) -> list[dict]:
     """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
     from errors import AppError, ServiceUnavailableError, ValidationError
-    from ingest import encode_query
+    from ingest.encoding import encode_query
 
     if k is None:
         k = settings.FINAL_CONTEXT_K

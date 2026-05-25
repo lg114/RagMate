@@ -660,7 +660,9 @@ const DocumentsPanel = {
 
     this.selectAllEl.addEventListener('change', () => {
       const checked = this.selectAllEl.checked;
+      this._suppressCheckboxEvent = true;
       this.tbodyEl.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
+      this._suppressCheckboxEvent = false;
       this._updateBatchBar();
     });
 
@@ -761,7 +763,9 @@ const DocumentsPanel = {
         <td>${formatDate(doc.uploaded_at)}</td>
         <td><button class="btn-delete" data-filename="${escapeHtml(doc.filename)}">删除</button></td>
       `;
-      tr.querySelector('input[type="checkbox"]').addEventListener('change', () => this._updateBatchBar());
+      tr.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+        if (!this._suppressCheckboxEvent) this._updateBatchBar();
+      });
       tr.querySelector('.btn-delete').addEventListener('click', () => this.deleteDoc(doc.filename));
       this.tbodyEl.appendChild(tr);
     });
