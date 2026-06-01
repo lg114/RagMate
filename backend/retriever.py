@@ -214,7 +214,7 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
 
         if not candidates:
-            logger.info(f"Retrieval: query='{query[:50]}' → 0 candidates")
+            logger.info(f"Retrieval: len={len(query)} → 0 candidates")
             return []
 
         candidates, top_score = _rerank_and_score(query, candidates)
@@ -223,11 +223,11 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         result = _filter_and_dedup(candidates, threshold, k)
 
         if not result:
-            logger.info(f"Retrieval: query='{query[:50]}' → top_score={top_score:.3f} < {threshold}")
+            logger.info(f"Retrieval: len={len(query)} → top_score={top_score:.3f} < {threshold}")
             return []
 
         logger.info(
-            f"Retrieval: query='{query[:50]}' → top_score={top_score:.3f}, "
+            f"Retrieval: len={len(query)} → top_score={top_score:.3f}, "
             f"candidates={len(candidates)}, returned={len(result)}"
         )
         return result
