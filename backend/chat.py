@@ -96,7 +96,8 @@ def _classify_error(e: Exception) -> str:
     if any(k in msg for k in ("insufficient_quota", "quota")):
         return f"{_ERROR_SENTINEL}API 配额不足，请检查账户余额"
 
-    return f"{_ERROR_SENTINEL}处理请求时出错: {msg}"
+    logger.error("Unhandled error in chat", exc_info=True)
+    return f"{_ERROR_SENTINEL}处理请求时出错，请稍后重试"
 
 
 def _strip_last_user_message(history: list[dict]) -> list[dict]:

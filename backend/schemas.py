@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from errors import ValidationError
 
-_UUID_RE = re.compile(r'^[a-f0-9-]{36}$')
+# 标准 UUID 格式：8-4-4-4-12，版本位(第13位)为 1-5，变体位(第17位)为 89ab
+_UUID_RE = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$')
 
 
 def validate_session_id(v: str) -> str:

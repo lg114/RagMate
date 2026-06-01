@@ -24,7 +24,7 @@ def build_source_filter(filename: str) -> str:
 
 
 def ensure_collection(client):
-    """确保 Milvus collection 存在且 schema 正确，否则重建。"""
+    """确保 Milvus collection 存在。不存在则创建；schema 不匹配则报错要求手动处理。"""
     collection_exists = client.has_collection(settings.MILVUS_COLLECTION)
 
     if collection_exists:
@@ -35,11 +35,21 @@ def ensure_collection(client):
             has_sparse_field = "sparse" in field_names
             has_sparse_index = any(idx.get("field") == "sparse" for idx in indexes)
             if not has_sparse_field or not has_sparse_index:
-                logger.info("Schema/index mismatch, dropping old collection...")
-                client.drop_collection(settings.MILVUS_COLLECTION)
-                collection_exists = False
+                missing = []
+                if not has_sparse_field:
+                    missing.append("sparse field")
+                if not has_sparse_index:
+                    missing.append("sparse index")
+                raise ValidationError(
+                    f"Milvus collection '{settings.MILVUS_COLLECTION}' schema 不匹配"
+                    f"（缺少: {', '.join(missing)}）。"
+                    f"请手动确认后删除旧集合重建："
+                    f"  from pymilvus import utility; utility.drop_collection('{settings.MILVUS_COLLECTION}')"
+                )
+        except ValidationError:
+            raise
         except Exception:
-            logger.debug("Failed to check/drop collection schema", exc_info=True)
+            logger.warning("Failed to describe collection schema, will attempt to use as-is", exc_info=True)
 
     if not collection_exists:
         dim = 1024  # BGE-M3 固定输出维度

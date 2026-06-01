@@ -22,6 +22,11 @@ def get_llm():
     )
 
 
+def clear_llm_cache():
+    """清除 LLM 单例缓存，下次调用时重新创建。"""
+    get_llm.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def get_embeddings():
     """根据 EMBEDDING_PROVIDER 创建 Embeddings 实例（单例，只加载一次）"""

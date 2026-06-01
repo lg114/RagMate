@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from sqlalchemy import create_engine, make_url, text
+from sqlalchemy import create_engine, inspect, make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -44,10 +44,32 @@ class Base(DeclarativeBase):
     pass
 
 
+_MIGRATIONS = [
+    # (table, column, type) — 每条是一次增量迁移
+    ("documents", "file_mtime", "DOUBLE PRECISION"),
+]
+
+
 async def init_db():
+    """初始化数据库：create_all 建表 + 增量迁移补列。"""
     async with engine.begin() as conn:
+        # 1. create_all：已存在的表自动跳过，只建新表
         await conn.run_sync(Base.metadata.create_all)
-        # 增量迁移：补 file_mtime 列（旧数据库没有这列）
-        await conn.execute(text(
-            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_mtime DOUBLE PRECISION"
-        ))
+
+        # 2. 增量迁移：用 inspect 检查列是否存在，不存在则添加
+        def _run_migrations(sync_conn):
+            existing = {}
+            insp = inspect(sync_conn)
+            for table, _, _ in _MIGRATIONS:
+                if table not in existing:
+                    try:
+                        existing[table] = {c["name"] for c in insp.get_columns(table)}
+                    except Exception:
+                        existing[table] = set()
+            for table, column, col_type in _MIGRATIONS:
+                if column not in existing.get(table, set()):
+                    sync_conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                    ))
+
+        await conn.run_sync(_run_migrations)

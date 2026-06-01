@@ -117,18 +117,42 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization"],
     )
 
-    # 上传大小限制中间件（在读取 body 前拦截）
+    # 上传大小限制中间件：包装 ASGI receive，流式检查实际 body 大小
+    # 不依赖 Content-Length 头（可伪造），而是检查实际接收的字节数
     MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+
+    class _PayloadTooLarge(Exception):
+        pass
 
     @app.middleware("http")
     async def _limit_upload_size(request, call_next):
         if request.url.path == "/documents/upload":
-            content_length = request.headers.get("content-length")
-            if content_length and int(content_length) > MAX_UPLOAD_SIZE:
+            received = 0
+            original_receive = request._receive
+
+            async def limiting_receive():
+                nonlocal received
+                msg = await original_receive()
+                if msg.get("type") == "http.request":
+                    received += len(msg.get("body", b""))
+                    if received > MAX_UPLOAD_SIZE:
+                        raise _PayloadTooLarge()
+                return msg
+
+            request._receive = limiting_receive
+            try:
+                return await call_next(request)
+            except _PayloadTooLarge:
+                # 丢弃剩余 body，避免连接处于脏状态
+                while True:
+                    msg = await original_receive()
+                    if msg.get("type") != "http.request" or not msg.get("more_body"):
+                        break
                 return JSONResponse(
                     status_code=413,
                     content={"code": "PAYLOAD_TOO_LARGE", "detail": "File exceeds 50MB limit"},
                 )
+
         return await call_next(request)
 
     # Request ID 中间件

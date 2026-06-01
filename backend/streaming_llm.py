@@ -60,8 +60,11 @@ class ChatOpenAICompatible(ChatOpenAI):
         return generation_chunk
 
 
-def create_llm(model: str, api_key: str, base_url: str, temperature: float = 0.01) -> ChatOpenAICompatible:
+def create_llm(model: str, api_key: str, base_url: str, temperature: float = None) -> ChatOpenAICompatible:
     """创建 LLM 实例，支持任意 OpenAI 兼容 API。"""
+    from config import settings
+    if temperature is None:
+        temperature = settings.LLM_TEMPERATURE
     return ChatOpenAICompatible(
         model=model,
         api_key=api_key,

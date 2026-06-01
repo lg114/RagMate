@@ -2,7 +2,6 @@ import logging
 import math
 import socket
 import threading
-from functools import lru_cache
 
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 from sentence_transformers import CrossEncoder
@@ -78,10 +77,19 @@ def _init_milvus():
     return client
 
 
-@lru_cache(maxsize=1)
+_reranker: CrossEncoder | None = None
+_reranker_lock = threading.Lock()
+
+
 def get_reranker() -> CrossEncoder:
-    """加载 Reranker 模型（单例）。"""
-    return CrossEncoder(settings.RERANKER_MODEL)
+    """加载 Reranker 模型（单例，失败后可重试）。"""
+    global _reranker
+    if _reranker is not None:
+        return _reranker
+    with _reranker_lock:
+        if _reranker is None:
+            _reranker = CrossEncoder(settings.RERANKER_MODEL)
+        return _reranker
 
 
 # ── Search ──────────────────────────────────────────────────────────────────
@@ -98,7 +106,7 @@ def _do_search(client, dense_vec, sparse_vec, over_fetch: int):
         sparse_req = AnnSearchRequest(
             data=[sparse_vec],
             anns_field="sparse",
-            param={"metric_type": "IP", "params": {"drop_ratio_search": 0.2}},
+            param={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
             limit=over_fetch,
         )
         return client.hybrid_search(
@@ -161,8 +169,8 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 
     top_score = candidates[0]["score"]  # 已是 sigmoid 概率
 
-    # 1. 动态阈值：top_score 的 50%，最低保底 threshold
-    effective_threshold = max(top_score * 0.5, threshold)
+    # 1. 动态阈值：top_score 的一定比例，最低保底 threshold
+    effective_threshold = max(top_score * settings.DYNAMIC_THRESHOLD_RATIO, threshold)
     scored = [c for c in candidates if c["score"] >= effective_threshold]
 
     if not scored:
@@ -177,8 +185,8 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     deduped = []
     for canonical, chunks in source_groups.items():
         chunks.sort(key=lambda x: x["score"], reverse=True)
-        high_count = sum(1 for c in chunks if c["score"] >= top_score * 0.6)
-        limit = min(max(high_count, 2), 4)
+        high_count = sum(1 for c in chunks if c["score"] >= top_score * settings.HIGH_SCORE_RATIO)
+        limit = min(max(high_count, settings.MIN_PER_SOURCE), settings.MAX_PER_SOURCE)
         deduped.extend(chunks[:limit])
 
     deduped.sort(key=lambda x: x["score"], reverse=True)
@@ -187,7 +195,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     result = [deduped[0]]
     for i in range(1, len(deduped)):
         gap = deduped[i - 1]["score"] - deduped[i]["score"]
-        if gap > 0.15:
+        if gap > settings.SCORE_GAP_THRESHOLD:
             break
         if len(result) >= k:
             break
@@ -214,7 +222,7 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
 
         if not candidates:
-            logger.info(f"Retrieval: query='{query[:50]}' → 0 candidates")
+            logger.info(f"Retrieval: len={len(query)} → 0 candidates")
             return []
 
         candidates, top_score = _rerank_and_score(query, candidates)
@@ -223,11 +231,11 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         result = _filter_and_dedup(candidates, threshold, k)
 
         if not result:
-            logger.info(f"Retrieval: query='{query[:50]}' → top_score={top_score:.3f} < {threshold}")
+            logger.info(f"Retrieval: len={len(query)} → top_score={top_score:.3f} < {threshold}")
             return []
 
         logger.info(
-            f"Retrieval: query='{query[:50]}' → top_score={top_score:.3f}, "
+            f"Retrieval: len={len(query)} → top_score={top_score:.3f}, "
             f"candidates={len(candidates)}, returned={len(result)}"
         )
         return result
