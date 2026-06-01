@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from sqlalchemy import create_engine, make_url, text
+from sqlalchemy import create_engine, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -45,9 +45,22 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # 增量迁移：补 file_mtime 列（旧数据库没有这列）
-        await conn.execute(text(
-            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_mtime DOUBLE PRECISION"
-        ))
+    """初始化数据库：通过 Alembic 运行迁移（幂等，兼容全新和已有数据库）。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    alembic_ini = Path(__file__).parent / "alembic.ini"
+    if alembic_ini.exists():
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=str(alembic_ini.parent),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Alembic migration failed:\n{result.stderr}")
+    else:
+        # fallback：无 alembic.ini 时用 create_all（仅开发环境）
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)

@@ -27,7 +27,6 @@ class ChatHistory(Base):
     __tablename__ = "chat_history"
     __table_args__ = (
         Index("idx_chat_session", "session_id", "created_at"),
-        Index("idx_chat_session_id", "session_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
