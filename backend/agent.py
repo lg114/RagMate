@@ -1,3 +1,4 @@
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,11 +15,27 @@ def _load_system_prompt() -> str:
 
 
 # ── Tool ────────────────────────────────────────────────────────────────────
+MAX_TOOL_RETRIEVALS = 8  # 单次 agent 调用中 retrieval_tool 的最大调用次数
+
+_tool_call_state = threading.local()
+
+
+def _reset_tool_counter():
+    """重置当前线程的工具调用计数器（每次 agent 调用前执行）。"""
+    _tool_call_state.retrieval_count = 0
+
+
 @tool
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
     from config import settings
     from errors import AppError
+
+    count = getattr(_tool_call_state, "retrieval_count", 0) + 1
+    _tool_call_state.retrieval_count = count
+
+    if count > MAX_TOOL_RETRIEVALS:
+        return "已达到最大检索次数，请基于已有信息回答用户。"
 
     try:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
@@ -68,6 +85,7 @@ def extract_text_content(content) -> str:
 # ── 公开 API ────────────────────────────────────────────────────────────────
 def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
     """运行 agent，支持多轮对话。messages 格式: [{"role": "user", "content": "..."}, ...]"""
+    _reset_tool_counter()
     return get_agent().invoke(
         {"messages": messages},
         config={
@@ -85,6 +103,7 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
     """
     from langchain_core.messages import AIMessageChunk, ToolMessage
 
+    _reset_tool_counter()
     for msg_chunk, _ in get_agent().stream(
         {"messages": messages},
         config={
