@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from sqlalchemy import create_engine, make_url
+from sqlalchemy import create_engine, inspect, make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -44,23 +44,32 @@ class Base(DeclarativeBase):
     pass
 
 
-async def init_db():
-    """初始化数据库：通过 Alembic 运行迁移（幂等，兼容全新和已有数据库）。"""
-    import subprocess
-    import sys
-    from pathlib import Path
+_MIGRATIONS = [
+    # (table, column, type) — 每条是一次增量迁移
+    ("documents", "file_mtime", "DOUBLE PRECISION"),
+]
 
-    alembic_ini = Path(__file__).parent / "alembic.ini"
-    if alembic_ini.exists():
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=str(alembic_ini.parent),
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Alembic migration failed:\n{result.stderr}")
-    else:
-        # fallback：无 alembic.ini 时用 create_all（仅开发环境）
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+
+async def init_db():
+    """初始化数据库：create_all 建表 + 增量迁移补列。"""
+    async with engine.begin() as conn:
+        # 1. create_all：已存在的表自动跳过，只建新表
+        await conn.run_sync(Base.metadata.create_all)
+
+        # 2. 增量迁移：用 inspect 检查列是否存在，不存在则添加
+        def _run_migrations(sync_conn):
+            existing = {}
+            insp = inspect(sync_conn)
+            for table, _, _ in _MIGRATIONS:
+                if table not in existing:
+                    try:
+                        existing[table] = {c["name"] for c in insp.get_columns(table)}
+                    except Exception:
+                        existing[table] = set()
+            for table, column, col_type in _MIGRATIONS:
+                if column not in existing.get(table, set()):
+                    sync_conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                    ))
+
+        await conn.run_sync(_run_migrations)
