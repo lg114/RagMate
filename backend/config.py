@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o"
     LLM_API_KEY: str = ""
     LLM_API_BASE_URL: str = ""
+    LLM_TEMPERATURE: float = Field(default=0.01, ge=0.0, le=2.0)
 
     # Embedding
     EMBEDDING_PROVIDER: str = "huggingface"
@@ -31,20 +32,28 @@ class Settings(BaseSettings):
 
     # Milvus
     MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: int = 19530
+    MILVUS_PORT: int = Field(default=19530, ge=1, le=65535)
     MILVUS_COLLECTION: str = "ragmate_docs"
-    MILVUS_TIMEOUT: float = 10.0
+    MILVUS_TIMEOUT: float = Field(default=10.0, gt=0)
 
     # Ingestion
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
+    CHUNK_SIZE: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP: int = Field(default=200, ge=0)
 
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    RERANK_CANDIDATES: int = 30       # rerank 候选池大小
-    FINAL_CONTEXT_K: int = 15         # 最终给 LLM 的片段数（动态策略的硬上限）
-    RERANK_SCORE_THRESHOLD: float = 0.3  # sigmoid 概率阈值，低于此分数的结果丢弃
+    RERANK_CANDIDATES: int = Field(default=30, gt=0)
+    FINAL_CONTEXT_K: int = Field(default=15, gt=0)
+    RERANK_SCORE_THRESHOLD: float = Field(default=0.3, gt=0.0, lt=1.0)
+    DROP_RATIO_SEARCH: float = Field(default=0.2, ge=0.0, lt=1.0)
+
+    # Reranker 动态过滤调参
+    DYNAMIC_THRESHOLD_RATIO: float = Field(default=0.5, gt=0.0, le=1.0)  # top_score 乘数
+    HIGH_SCORE_RATIO: float = Field(default=0.6, gt=0.0, le=1.0)         # 高分 chunk 判定比例
+    MAX_PER_SOURCE: int = Field(default=4, gt=0)                          # 单源最大 chunk 数
+    MIN_PER_SOURCE: int = Field(default=2, gt=0)                          # 单源最小 chunk 数
+    SCORE_GAP_THRESHOLD: float = Field(default=0.15, gt=0.0, lt=1.0)     # 分数断崖阈值
 
     # Documents
     DOCUMENTS_DIR: str = "./documents"
@@ -61,6 +70,10 @@ class Settings(BaseSettings):
             missing.append("LLM_API_KEY")
         if missing:
             raise ValueError(f"Required env vars not set: {', '.join(missing)}. Check your .env file.")
+        if self.CHUNK_OVERLAP >= self.CHUNK_SIZE:
+            raise ValueError(f"CHUNK_OVERLAP ({self.CHUNK_OVERLAP}) must be less than CHUNK_SIZE ({self.CHUNK_SIZE})")
+        if self.MIN_PER_SOURCE > self.MAX_PER_SOURCE:
+            raise ValueError(f"MIN_PER_SOURCE ({self.MIN_PER_SOURCE}) must be <= MAX_PER_SOURCE ({self.MAX_PER_SOURCE})")
         return self
 
 

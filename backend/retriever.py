@@ -98,7 +98,7 @@ def _do_search(client, dense_vec, sparse_vec, over_fetch: int):
         sparse_req = AnnSearchRequest(
             data=[sparse_vec],
             anns_field="sparse",
-            param={"metric_type": "IP", "params": {"drop_ratio_search": 0.2}},
+            param={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
             limit=over_fetch,
         )
         return client.hybrid_search(
@@ -161,8 +161,8 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 
     top_score = candidates[0]["score"]  # 已是 sigmoid 概率
 
-    # 1. 动态阈值：top_score 的 50%，最低保底 threshold
-    effective_threshold = max(top_score * 0.5, threshold)
+    # 1. 动态阈值：top_score 的一定比例，最低保底 threshold
+    effective_threshold = max(top_score * settings.DYNAMIC_THRESHOLD_RATIO, threshold)
     scored = [c for c in candidates if c["score"] >= effective_threshold]
 
     if not scored:
@@ -177,8 +177,8 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     deduped = []
     for canonical, chunks in source_groups.items():
         chunks.sort(key=lambda x: x["score"], reverse=True)
-        high_count = sum(1 for c in chunks if c["score"] >= top_score * 0.6)
-        limit = min(max(high_count, 2), 4)
+        high_count = sum(1 for c in chunks if c["score"] >= top_score * settings.HIGH_SCORE_RATIO)
+        limit = min(max(high_count, settings.MIN_PER_SOURCE), settings.MAX_PER_SOURCE)
         deduped.extend(chunks[:limit])
 
     deduped.sort(key=lambda x: x["score"], reverse=True)
@@ -187,7 +187,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     result = [deduped[0]]
     for i in range(1, len(deduped)):
         gap = deduped[i - 1]["score"] - deduped[i]["score"]
-        if gap > 0.15:
+        if gap > settings.SCORE_GAP_THRESHOLD:
             break
         if len(result) >= k:
             break
