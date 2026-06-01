@@ -1,5 +1,4 @@
 import threading
-from functools import lru_cache
 from pathlib import Path
 
 from langchain_core.tools import tool
@@ -60,15 +59,32 @@ def retrieval_tool(query: str) -> str:
 
 # ── Agent 实例 ──────────────────────────────────────────────────────────────
 
+_agent = None
+_agent_lock = threading.Lock()
 
-@lru_cache(maxsize=1)
+
 def get_agent():
-    """延迟创建 Deep Agent 实例（单例，首次调用时才初始化 LLM 连接）"""
-    return create_deep_agent(
-        model=get_llm(),
-        tools=[retrieval_tool],
-        system_prompt=_load_system_prompt(),
-    )
+    """获取 Deep Agent 单例。首次调用时创建。"""
+    global _agent
+    if _agent is not None:
+        return _agent
+    with _agent_lock:
+        if _agent is None:
+            _agent = create_deep_agent(
+                model=get_llm(),
+                tools=[retrieval_tool],
+                system_prompt=_load_system_prompt(),
+            )
+        return _agent
+
+
+def clear_agent_cache():
+    """清除 Agent 和 LLM 缓存，下次调用时重新创建。"""
+    global _agent
+    with _agent_lock:
+        _agent = None
+    from model_factory import clear_llm_cache
+    clear_llm_cache()
 
 
 # ── 内部工具函数 ────────────────────────────────────────────────────────────
@@ -90,7 +106,7 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
         {"messages": messages},
         config={
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 50,
+            "recursion_limit": 30,
         },
     )
 
@@ -108,7 +124,7 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
         {"messages": messages},
         config={
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 50,
+            "recursion_limit": 30,
         },
         stream_mode="messages",
     ):

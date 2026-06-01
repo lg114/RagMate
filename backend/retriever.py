@@ -2,7 +2,6 @@ import logging
 import math
 import socket
 import threading
-from functools import lru_cache
 
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 from sentence_transformers import CrossEncoder
@@ -78,10 +77,19 @@ def _init_milvus():
     return client
 
 
-@lru_cache(maxsize=1)
+_reranker: CrossEncoder | None = None
+_reranker_lock = threading.Lock()
+
+
 def get_reranker() -> CrossEncoder:
-    """加载 Reranker 模型（单例）。"""
-    return CrossEncoder(settings.RERANKER_MODEL)
+    """加载 Reranker 模型（单例，失败后可重试）。"""
+    global _reranker
+    if _reranker is not None:
+        return _reranker
+    with _reranker_lock:
+        if _reranker is None:
+            _reranker = CrossEncoder(settings.RERANKER_MODEL)
+        return _reranker
 
 
 # ── Search ──────────────────────────────────────────────────────────────────
