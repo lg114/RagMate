@@ -15,6 +15,13 @@ from ingest import build_source_filter
 
 logger = logging.getLogger("ragmate")
 
+# Windows 保留文件名（不区分大小写）
+_WIN_RESERVED = frozenset({
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+})
+
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 文件大小上限
 
 _PATH_SEPARATORS = {os.sep}
@@ -58,9 +65,14 @@ def validate_filename(filename: str) -> str:
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValidationError(f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
 
-    # 白名单：允许字母数字、中文、连字符、下划线、点、空格、&、()、+、=、@、#、$、%、!、~
-    if not re.match(r'^[\w\-. 一-鿿&()+=@#$%!~]+\.\w+$', name):
+    # 白名单：字母数字、中文、连字符、下划线、点、空格、&、()、+、=、@
+    if not re.match(r'^[\w\-. 一-鿿&()+=@]+\.\w+$', name):
         raise ValidationError("Filename contains invalid characters")
+
+    # 拒绝 Windows 保留文件名
+    stem = os.path.splitext(name)[0].upper()
+    if stem in _WIN_RESERVED:
+        raise ValidationError(f"Filename '{stem}' is a reserved system name")
 
     return name
 
@@ -116,23 +128,27 @@ async def save_document(
     if size_bytes > MAX_FILE_SIZE:
         raise ValidationError("File exceeds 50MB limit")
 
-    # 2. 写磁盘
+    # 2. 写临时文件（不直接写目标路径，避免崩溃后产生与 DB 不一致的孤立文件）
     os.makedirs(docs_dir, exist_ok=True)
     filepath = os.path.join(docs_dir, name)
+    tmp_path = filepath + ".tmp"
 
-    with open(filepath, "wb") as f:
-        f.write(content)
-
-    # 3. 写 DB，失败则回滚并清理磁盘文件
     try:
+        with open(tmp_path, "wb") as f:
+            f.write(content)
+
+        # 3. 写 DB
         doc = Document(filename=name, size_bytes=size_bytes, status="uploaded")
         session.add(doc)
         await session.commit()
     except Exception:
         await session.rollback()
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
         raise
+
+    # 4. DB 提交成功后原子重命名（同文件系统上 rename 是原子操作）
+    os.replace(tmp_path, filepath)
 
     return {
         "filename": name,
