@@ -67,7 +67,7 @@ def _detect_new_files(docs_dir, all_files):
 
 
 def _load_and_split(docs_dir, new_files):
-    """逐文件加载 + 切分，实时更新进度。返回 (chunks, chunk_counter)。"""
+    """逐文件加载 + 切分，实时更新进度。返回 (chunks, chunk_counter, failed_files)。"""
     chunks = []
     md_headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
     md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=md_headers)
@@ -119,7 +119,7 @@ def _load_and_split(docs_dir, new_files):
         chunk.metadata["content_hash"] = hashlib.md5(chunk.page_content.encode("utf-8")).hexdigest()
 
     logger.info(f"Split {len(new_files)} files into {len(chunks)} chunks")
-    return chunks, chunk_counter
+    return chunks, chunk_counter, failed_files
 
 
 def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict:
@@ -149,9 +149,9 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
         }
 
     # 3. 加载 + 切分
-    chunks, chunk_counter = _load_and_split(docs_dir, new_files)
+    chunks, chunk_counter, failed_files = _load_and_split(docs_dir, new_files)
     if not chunks:
-        return {"status": "failed", "error": "No text extracted from any file"}
+        return {"status": "failed", "error": "No text extracted from any file", "failed": failed_files}
 
     # 4. 内容去重
     client = get_milvus_client()
@@ -160,20 +160,23 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
     # 5. 确保 collection 存在
     ensure_collection(client)
 
-    # 6. 删除旧向量
-    delete_old_chunks(client, new_files)
-
-    # 7. 如果全部去重，提前返回
+    # 6. 如果全部去重，提前返回（不删除任何旧向量）
     if not chunks:
         skipped_list = [{"filename": f, "reason": r} for f, r in skipped_files.items()]
         result = {
             "status": "success", "document_count": 0, "chunk_count": 0,
-            "skipped": skipped_list, "message": "All chunks already exist",
+            "skipped": skipped_list, "failed": failed_files,
+            "message": "All chunks already exist",
         }
         set_ingest_status_sync(result)
         return result
 
-    # 8. 编码
+    # 7. 编码
+    files_with_new_chunks = set()
+    for chunk in chunks:
+        source = chunk.metadata.get("source", "unknown")
+        files_with_new_chunks.add(os.path.basename(source))
+
     texts = [chunk.page_content for chunk in chunks]
     set_ingest_status_sync({
         "status": "running", "stage": "encoding",
@@ -182,7 +185,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
     })
     dense_vecs, sparse_vecs = encode_documents(texts)
 
-    # 9. 写入 Milvus
+    # 8. 写入新向量（先插入后删除，失败则旧数据不丢）
     set_ingest_status_sync({
         "status": "running", "stage": "storing",
         "current_file": "", "progress": len(new_files), "total": len(new_files),
@@ -190,8 +193,12 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
     })
     insert_chunks(client, chunks, dense_vecs, sparse_vecs)
 
+    # 9. 新向量写入成功后，再删除旧向量（仅限确实有新数据的文件）
+    delete_old_chunks(client, list(files_with_new_chunks))
+
     # 10. 同步 PostgreSQL
-    ingested_files = [f for f in new_files if f not in skipped_files]
+    failed_names = {f["filename"] for f in failed_files}
+    ingested_files = [f for f in new_files if f not in skipped_files and f not in failed_names]
     try:
         sync_documents_table(docs_dir, ingested_files, dict(chunk_counter))
     except Exception as e:
