@@ -2,6 +2,7 @@
 import hashlib
 import logging
 import os
+import uuid
 from collections import Counter
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
@@ -14,7 +15,6 @@ from backend.domain.errors import ServiceUnavailableError
 from backend.domain.models import Document
 from backend.infrastructure.redis_client import set_ingest_status_sync
 from backend.infrastructure.milvus import (
-    build_source_filter,
     check_milvus_available,
     deduplicate_chunks,
     delete_old_chunks,
@@ -141,7 +141,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
         )
 
     # 2. 增量检测
-    new_files, _ = _detect_new_files(docs_dir, all_files)
+    new_files, ingested_info = _detect_new_files(docs_dir, all_files)
     if not new_files:
         return {
             "status": "success", "document_count": 0, "chunk_count": 0,
@@ -154,9 +154,21 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
     if not chunks:
         return {"status": "failed", "error": "No text extracted from any file", "failed": failed_files}
 
+    ingest_batch_id = uuid.uuid4().hex
+    for chunk in chunks:
+        chunk.metadata["ingest_batch_id"] = ingest_batch_id
+
     # 4. 内容去重
     client = get_milvus_client()
-    chunks, skipped_files = deduplicate_chunks(client, chunks, chunk_counter)
+    # 同名文件重新入库时，即使部分 chunk 内容未变化，也必须重新插入到本批次。
+    # 否则后续清理旧向量会把这些“未重新插入”的 chunk 一并删掉。
+    reingested_files = set(new_files).intersection(ingested_info)
+    chunks, skipped_files = deduplicate_chunks(
+        client,
+        chunks,
+        chunk_counter,
+        force_include_sources=reingested_files,
+    )
 
     # 5. 确保 collection 存在
     ensure_collection(client)
@@ -192,10 +204,10 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
         "current_file": "", "progress": len(new_files), "total": len(new_files),
         "chunk_count": len(chunks),
     })
-    insert_chunks(client, chunks, dense_vecs, sparse_vecs)
+    keep_ids_by_source = insert_chunks(client, chunks, dense_vecs, sparse_vecs)
 
     # 9. 新向量写入成功后，再删除旧向量（仅限确实有新数据的文件）
-    delete_old_chunks(client, list(files_with_new_chunks))
+    delete_old_chunks(client, {source: keep_ids_by_source[source] for source in files_with_new_chunks})
 
     # 10. 同步 PostgreSQL
     failed_names = {f["filename"] for f in failed_files}
@@ -215,6 +227,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
         "skipped": skipped_list,
         "failed": failed_files,
         "collection": settings.MILVUS_COLLECTION,
+        "ingest_batch_id": ingest_batch_id,
     }
     set_ingest_status_sync(result)
     return result

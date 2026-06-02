@@ -140,9 +140,10 @@ def ensure_collection(client):
     return True
 
 
-def deduplicate_chunks(client, chunks, chunk_counter):
+def deduplicate_chunks(client, chunks, chunk_counter, force_include_sources: set[str] | None = None):
     """查询 Milvus 中已存在的 content_hash，跳过重复 chunk。返回 (filtered_chunks, skipped_files)。"""
     skipped_files = {}
+    force_include_sources = force_include_sources or set()
     collection_exists = client.has_collection(settings.MILVUS_COLLECTION)
 
     if not collection_exists or not chunks:
@@ -171,8 +172,8 @@ def deduplicate_chunks(client, chunks, chunk_counter):
             file_skip_count = Counter()
             filtered_chunks = []
             for chunk in chunks:
-                if chunk.metadata["content_hash"] in existing_hashes:
-                    src = os.path.basename(chunk.metadata.get("source", ""))
+                src = os.path.basename(chunk.metadata.get("source", ""))
+                if src not in force_include_sources and chunk.metadata["content_hash"] in existing_hashes:
                     file_skip_count[src] += 1
                 else:
                     filtered_chunks.append(chunk)
@@ -193,34 +194,53 @@ def deduplicate_chunks(client, chunks, chunk_counter):
     return chunks, skipped_files
 
 
-def delete_old_chunks(client, filenames):
-    """删除指定文件的旧向量。"""
-    for filename in filenames:
+def build_stale_source_filter(filename: str, keep_ids: list[int]) -> str:
+    """构建删除同源旧向量的过滤表达式，保留本批次刚插入的 id。"""
+    if not keep_ids:
+        raise ValidationError(f"No inserted ids provided for source cleanup: {filename}")
+    if any(not isinstance(item_id, int) for item_id in keep_ids):
+        raise ValidationError(f"Invalid Milvus ids for source cleanup: {filename}")
+    keep_list = ", ".join(str(item_id) for item_id in keep_ids)
+    return f'{build_source_filter(filename)} and id not in [{keep_list}]'
+
+
+def delete_old_chunks(client, keep_ids_by_source: dict[str, list[int]]):
+    """删除指定文件的旧向量，保留本批次刚插入的新向量。"""
+    if not keep_ids_by_source:
+        return
+    for filename, keep_ids in keep_ids_by_source.items():
         try:
             client.delete(
                 collection_name=settings.MILVUS_COLLECTION,
-                filter=build_source_filter(filename),
+                filter=build_stale_source_filter(filename, keep_ids),
             )
         except Exception:
             logger.debug(f"Failed to delete old chunks for {filename}", exc_info=True)
 
 
-def insert_chunks(client, chunks, dense_vecs, sparse_vecs):
-    """将编码后的 chunk 写入 Milvus。"""
+def insert_chunks(client, chunks, dense_vecs, sparse_vecs) -> dict[str, list[int]]:
+    """将编码后的 chunk 写入 Milvus，并返回按来源文件分组的新 id。"""
     texts = [chunk.page_content for chunk in chunks]
     metadatas = [{
         "source": os.path.basename(chunk.metadata.get("source", "unknown")),
         "page": chunk.metadata.get("page"),
         "chunk_index": chunk.metadata.get("chunk_index", 0),
         "content_hash": chunk.metadata.get("content_hash", ""),
+        "ingest_batch_id": chunk.metadata.get("ingest_batch_id", ""),
     } for chunk in chunks]
 
+    ids = [uuid.uuid4().int & ((1 << 63) - 1) for _ in chunks]
     data = [
-        {"id": uuid.uuid4().int & ((1 << 63) - 1), "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
-        for d_vec, s_vec, text, meta in zip(dense_vecs, sparse_vecs, texts, metadatas)
+        {"id": item_id, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
+        for item_id, d_vec, s_vec, text, meta in zip(ids, dense_vecs, sparse_vecs, texts, metadatas)
     ]
     client.insert(
         collection_name=settings.MILVUS_COLLECTION,
         data=data,
     )
     client.load_collection(settings.MILVUS_COLLECTION)
+
+    ids_by_source: dict[str, list[int]] = {}
+    for item_id, meta in zip(ids, metadatas):
+        ids_by_source.setdefault(meta["source"], []).append(item_id)
+    return ids_by_source
