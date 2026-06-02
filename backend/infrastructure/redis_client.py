@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import redis
 import redis.asyncio as aioredis
 
-from config import settings
+from backend.infrastructure.config import settings
 
 _redis: aioredis.Redis | None = None
 _sync_redis: redis.Redis | None = None

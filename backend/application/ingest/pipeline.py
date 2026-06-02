@@ -8,23 +8,24 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 
 from sqlalchemy import select
 
-from config import settings
-from database import SyncSession
-from errors import ServiceUnavailableError
-from models import Document
-from redis_client import set_ingest_status_sync
-from retriever import _check_milvus_available, get_milvus_client
-
-from .db_sync import sync_documents_table
-from .encoding import encode_documents
-from .loaders import SUPPORTED_EXTENSIONS, load_document
-from .milvus_ops import (
+from backend.infrastructure.config import settings
+from backend.infrastructure.database import SyncSession
+from backend.domain.errors import ServiceUnavailableError
+from backend.domain.models import Document
+from backend.infrastructure.redis_client import set_ingest_status_sync
+from backend.infrastructure.milvus import (
     build_source_filter,
+    check_milvus_available,
     deduplicate_chunks,
     delete_old_chunks,
     ensure_collection,
+    get_milvus_client,
     insert_chunks,
 )
+from backend.infrastructure.encoding import encode_documents
+
+from .db_sync import sync_documents_table
+from .loaders import SUPPORTED_EXTENSIONS, load_document
 
 logger = logging.getLogger("ragmate")
 
@@ -134,7 +135,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
     if not all_files:
         return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
 
-    if not _check_milvus_available():
+    if not check_milvus_available():
         raise ServiceUnavailableError(
             f"Milvus 服务不可达 ({settings.MILVUS_HOST}:{settings.MILVUS_PORT})",
         )

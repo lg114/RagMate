@@ -1,2 +1,2 @@
-"""入口文件。uvicorn main:app --reload"""
-from app import app  # noqa: F401
+"""入口文件。uvicorn backend.main:app --reload"""
+from backend.app import app  # noqa: F401

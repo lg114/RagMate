@@ -3,7 +3,7 @@ from functools import lru_cache
 
 from FlagEmbedding import BGEM3FlagModel
 
-from config import settings
+from backend.infrastructure.config import settings
 
 ENCODE_BATCH_SIZE = 64
 

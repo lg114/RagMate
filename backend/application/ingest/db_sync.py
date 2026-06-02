@@ -5,8 +5,8 @@ import os
 
 from sqlalchemy import select
 
-from database import SyncSession
-from models import Document
+from backend.infrastructure.database import SyncSession
+from backend.domain.models import Document
 
 logger = logging.getLogger("ragmate")
 

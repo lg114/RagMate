@@ -33,7 +33,7 @@ def _load_eval_system_prompt() -> str:
 
 def generate_response(question: str, contexts: list[str]) -> str:
     """Generate an answer using LLM based on retrieved contexts."""
-    from model_factory import get_llm
+    from backend.infrastructure.model_factory import get_llm
 
     llm = get_llm()
     context_text = "\n\n---\n\n".join(contexts) if contexts else "（未找到相关上下文）"

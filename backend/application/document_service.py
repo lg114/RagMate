@@ -8,10 +8,10 @@ from pymilvus import MilvusClient
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
-from errors import NotFoundError, ValidationError
-from models import Document
-from ingest import build_source_filter
+from backend.infrastructure.config import settings
+from backend.domain.errors import NotFoundError, ValidationError
+from backend.domain.models import Document
+from backend.infrastructure.milvus import build_source_filter
 
 logger = logging.getLogger("ragmate")
 
@@ -60,7 +60,7 @@ def validate_filename(filename: str) -> str:
     if name != filename:
         raise ValidationError("Invalid filename")
 
-    from ingest import SUPPORTED_EXTENSIONS
+    from backend.application.ingest.loaders import SUPPORTED_EXTENSIONS
     ext = os.path.splitext(name)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValidationError(f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")

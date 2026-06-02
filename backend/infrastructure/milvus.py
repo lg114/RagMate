@@ -1,16 +1,83 @@
-"""Milvus 向量库操作：collection 管理、去重、插入。"""
+"""Milvus 向量库基础设施：客户端管理、collection 操作、去重、插入。"""
 import logging
 import os
+import socket
+import threading
 import uuid
 from collections import Counter
 
-from pymilvus import DataType, CollectionSchema, FieldSchema
+from pymilvus import AnnSearchRequest, CollectionSchema, DataType, FieldSchema, MilvusClient, RRFRanker
 
-from config import settings
-from errors import ValidationError
+from backend.domain.errors import ServiceUnavailableError, ValidationError
+from backend.infrastructure.config import settings
 
 logger = logging.getLogger("ragmate")
 
+# ── 客户端管理 ──────────────────────────────────────────────────────────────
+
+_milvus_client: MilvusClient | None = None
+_milvus_lock = threading.Lock()
+_collection_loaded: bool = False
+
+
+def get_milvus_client() -> MilvusClient:
+    """获取复用的 MilvusClient 实例（线程安全）"""
+    global _milvus_client
+    if _milvus_client is not None:
+        return _milvus_client
+    with _milvus_lock:
+        if _milvus_client is None:
+            _milvus_client = MilvusClient(
+                uri=f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}",
+                timeout=settings.MILVUS_TIMEOUT,
+            )
+        return _milvus_client
+
+
+def check_milvus_available() -> bool:
+    """快速检查 Milvus 服务是否可达"""
+    try:
+        with socket.create_connection(
+            (settings.MILVUS_HOST, settings.MILVUS_PORT),
+            timeout=3,
+        ):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+
+def init_milvus():
+    """确保 Milvus collection 已加载（线程安全）。"""
+    global _collection_loaded
+    client = get_milvus_client()
+    with _milvus_lock:
+        if _collection_loaded:
+            return client
+        try:
+            client.load_collection(settings.MILVUS_COLLECTION)
+            _collection_loaded = True
+        except Exception as e:
+            raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
+    return client
+
+
+def canonical_source(source: str) -> str:
+    """归一化来源文件名，用于检索去重。"""
+    if not source:
+        return ""
+    base, ext = os.path.splitext(source)
+    for suffix in ["_副本", " (副本)", "_copy", " (copy)"]:
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    if base.endswith(")") and "(" in base:
+        idx = base.rfind("(")
+        if base[idx + 1 : -1].isdigit():
+            base = base[:idx]
+    return (base + ext).lower()
+
+
+# ── Collection 操作 ──────────────────────────────────────────────────────────
 
 def build_source_filter(filename: str) -> str:
     """构建安全的 Milvus metadata source 过滤表达式。

@@ -22,7 +22,7 @@ logger = logging.getLogger("ragmate")
 
 def cmd_generate(args):
     """Generate a test set from documents."""
-    from config import settings
+    from backend.infrastructure.config import settings
 
     docs_dir = settings.DOCUMENTS_DIR
     if not os.path.exists(docs_dir):
@@ -59,7 +59,7 @@ def cmd_generate(args):
 
 def cmd_evaluate(args):
     """Evaluate RAG pipeline against a test set."""
-    from config import settings
+    from backend.infrastructure.config import settings
 
     testset_path = resolve_path(args.testset)
     if not testset_path.exists():

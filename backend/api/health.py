@@ -5,9 +5,9 @@ import logging
 from fastapi import APIRouter
 from sqlalchemy import select
 
-from database import async_session
-from redis_client import get_redis
-from retriever import _check_milvus_available
+from backend.infrastructure.database import async_session
+from backend.infrastructure.redis_client import get_redis
+from backend.infrastructure.milvus import check_milvus_available
 
 logger = logging.getLogger("ragmate")
 router = APIRouter()
@@ -22,7 +22,7 @@ def health():
 async def ready():
     status = {"milvus": False, "postgresql": False, "redis": False}
     try:
-        milvus_ok = await asyncio.to_thread(_check_milvus_available)
+        milvus_ok = await asyncio.to_thread(check_milvus_available)
         status["milvus"] = milvus_ok
     except Exception as e:
         logger.warning(f"Milvus health check failed: {e}")

@@ -1,7 +1,7 @@
 """RAGAS 指标计算。"""
 import logging
 
-from streaming_llm import ChatOpenAICompatible
+from backend.infrastructure.streaming_llm import ChatOpenAICompatible
 
 logger = logging.getLogger("ragmate")
 
@@ -21,9 +21,9 @@ def compute_metrics(test_cases: list[dict], judge_model: str = None):
     from ragas.dataset_schema import SingleTurnSample, EvaluationDataset
     from ragas.llms.base import LangchainLLMWrapper
     from ragas.embeddings.base import LangchainEmbeddingsWrapper
-    from model_factory import get_llm, get_embeddings
-    from streaming_llm import create_llm
-    from config import settings
+    from backend.infrastructure.model_factory import get_llm, get_embeddings
+    from backend.infrastructure.streaming_llm import create_llm
+    from backend.infrastructure.config import settings
 
     if judge_model:
         base_llm = create_llm(

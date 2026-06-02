@@ -8,8 +8,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 import torch
 
-from config import settings
-from streaming_llm import create_llm
+from backend.infrastructure.config import settings
+from backend.infrastructure.streaming_llm import create_llm
 
 
 @lru_cache(maxsize=1)

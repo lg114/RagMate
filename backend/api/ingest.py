@@ -1,9 +1,9 @@
 """入库端点。"""
 from fastapi import APIRouter
 
-from ingest_manager import start_ingest
-from redis_client import get_ingest_status
-from schemas import IngestRequest
+from backend.application.ingest_manager import start_ingest
+from backend.infrastructure.redis_client import get_ingest_status
+from backend.domain.schemas import IngestRequest
 
 router = APIRouter()
 

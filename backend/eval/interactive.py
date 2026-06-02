@@ -19,7 +19,7 @@ def _list_json_files(directory: str) -> list[Path]:
 
 def _menu_generate():
     """Interactive test set generation."""
-    from config import settings
+    from backend.infrastructure.config import settings
 
     print("\n--- 生成测试集 ---")
     size = input("测试用例数量 [50]: ").strip()

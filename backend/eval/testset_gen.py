@@ -16,7 +16,7 @@ def generate_testset(
     from ragas.testset import TestsetGenerator
     from ragas.llms.base import LangchainLLMWrapper
     from ragas.embeddings.base import LangchainEmbeddingsWrapper
-    from model_factory import get_llm, get_embeddings
+    from backend.infrastructure.model_factory import get_llm, get_embeddings
 
     llm = LangchainLLMWrapper(get_llm())
     embeddings = LangchainEmbeddingsWrapper(get_embeddings())

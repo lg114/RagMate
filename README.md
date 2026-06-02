@@ -118,8 +118,10 @@ LLM_API_BASE_URL=https://api.deepseek.com/v1
 
 ### 4. Start Server
 
+Run from the project root:
+
 ```bash
-uvicorn main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000
 ```
 
 Open http://localhost:8000 in browser.
@@ -280,15 +282,10 @@ All settings are configured via `.env` file or environment variables, validated 
 ```
 RagMate/
 ├── docker-compose.yml
-├── LICENSE
-├── README.md
-├── README_zh.md
-├── CHANGELOG.md
-├── .python-version
-├── .gitignore
-├── eval/                      # RAGAS evaluation data
-│   ├── testsets/              # Generated test sets
-│   └── reports/               # Evaluation reports
+├── LICENSE / README.md / README_zh.md / CHANGELOG.md
+├── eval/                          # RAGAS evaluation data
+│   ├── testsets/                  # Generated test sets
+│   └── reports/                   # Evaluation reports
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -296,21 +293,40 @@ RagMate/
 └── backend/
     ├── pyproject.toml
     ├── .env.example
-    ├── config.py              # Configuration (pydantic-settings)
-    ├── main.py                # FastAPI app + all endpoints
-    ├── agent.py               # Deep Agent (system prompt + retrieval_tool)
-    ├── chat.py                # Chat orchestration (sync + streaming)
-    ├── retriever.py           # Hybrid search + Reranking
-    ├── ingest.py              # Document processing + vector ingestion
-    ├── streaming_llm.py       # ChatOpenAI factory
-    ├── model_factory.py       # LLM / Embedding factory
-    ├── document_service.py    # Document CRUD
-    ├── database.py            # SQLAlchemy async/sync engines
-    ├── models.py              # ORM models (Document, ChatHistory)
-    ├── redis_client.py        # Redis session / lock / status
-    ├── errors.py              # Typed error hierarchy
-    ├── eval_cli.py            # RAGAS evaluation CLI
-    └── documents/             # Document storage directory
+    ├── main.py                    # Entry point (uvicorn backend.main:app)
+    ├── app.py                     # FastAPI factory, middleware, lifespan
+    ├── domain/                    # Business entities
+    │   ├── errors.py              # Typed error hierarchy
+    │   ├── models.py              # ORM models (Document, ChatHistory)
+    │   └── schemas.py             # Pydantic request/response schemas
+    ├── infrastructure/            # External system adapters
+    │   ├── config.py              # Configuration (pydantic-settings)
+    │   ├── database.py            # SQLAlchemy async/sync engines
+    │   ├── redis_client.py        # Redis session / lock / status
+    │   ├── rate_limiter.py        # Redis-based rate limiter
+    │   ├── streaming_llm.py       # ChatOpenAI-compatible factory
+    │   ├── model_factory.py       # LLM / Embedding factory
+    │   ├── encoding.py            # BGE-M3 dense + sparse encoding
+    │   └── milvus.py              # Milvus client management + CRUD
+    ├── core/                      # Domain logic
+    │   ├── retriever.py           # Hybrid search + Reranking + filtering
+    │   └── agent.py               # Deep Agent (system prompt + retrieval_tool)
+    ├── application/               # Use cases / services
+    │   ├── chat.py                # Chat orchestration (sync + streaming)
+    │   ├── document_service.py    # Document CRUD
+    │   ├── ingest_manager.py      # Ingest task lifecycle (lock, async)
+    │   └── ingest/                # Ingestion pipeline
+    │       ├── loaders.py         # Document loading by extension
+    │       ├── db_sync.py         # PostgreSQL document status sync
+    │       └── pipeline.py        # Main ingest orchestration
+    ├── api/                       # HTTP routes
+    │   ├── health.py              # /health, /ready
+    │   ├── chat.py                # /chat, /chat/stream, /chat/sessions
+    │   ├── documents.py           # /documents, /documents/upload
+    │   └── ingest.py              # /ingest, /ingest/status
+    ├── eval/                      # RAGAS evaluation CLI
+    ├── prompts/                   # Agent system prompts
+    └── documents/                 # Document storage directory
 ```
 
 ---

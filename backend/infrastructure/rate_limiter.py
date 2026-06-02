@@ -1,12 +1,12 @@
 """Redis 频率限制：每 IP 每分钟最多 30 次。基于固定窗口计数器，多 Worker 共享。"""
-from errors import ValidationError
+from backend.domain.errors import ValidationError
 
 _RATE_LIMIT_MAX = 30
 _RATE_LIMIT_WINDOW = 60  # 秒
 
 
 def check_rate_limit(ip: str):
-    from redis_client import get_sync_redis
+    from backend.infrastructure.redis_client import get_sync_redis
 
     key = f"ragmate:rate:{ip}"
     r = get_sync_redis()

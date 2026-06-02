@@ -6,10 +6,10 @@ import uuid
 
 from langchain_core.messages import AIMessage
 
-from agent import run_agent, run_agent_streaming, extract_text_content
-from database import async_session
-from models import ChatHistory
-from redis_client import load_session, save_session
+from backend.core.agent import run_agent, run_agent_streaming, extract_text_content
+from backend.infrastructure.database import async_session
+from backend.domain.models import ChatHistory
+from backend.infrastructure.redis_client import load_session, save_session
 
 logger = logging.getLogger("ragmate")
 

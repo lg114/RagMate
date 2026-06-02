@@ -5,12 +5,12 @@ from langchain_core.tools import tool
 
 from deepagents import create_deep_agent
 
-from model_factory import get_llm
-from retriever import retrieve
+from backend.infrastructure.model_factory import get_llm
+from backend.core.retriever import retrieve
 
 # ── System Prompt ───────────────────────────────────────────────────────────
 def _load_system_prompt() -> str:
-    return (Path(__file__).parent / "prompts" / "researcher.md").read_text(encoding="utf-8")
+    return (Path(__file__).parent.parent / "prompts" / "researcher.md").read_text(encoding="utf-8")
 
 
 # ── Tool ────────────────────────────────────────────────────────────────────
@@ -27,8 +27,8 @@ def _reset_tool_counter():
 @tool
 def retrieval_tool(query: str) -> str:
     """检索相关文档片段来回答用户问题。输入是用户的问题，返回相关文档内容。"""
-    from config import settings
-    from errors import AppError
+    from backend.infrastructure.config import settings
+    from backend.domain.errors import AppError
 
     count = getattr(_tool_call_state, "retrieval_count", 0) + 1
     _tool_call_state.retrieval_count = count
@@ -83,7 +83,7 @@ def clear_agent_cache():
     global _agent
     with _agent_lock:
         _agent = None
-    from model_factory import clear_llm_cache
+    from backend.infrastructure.model_factory import clear_llm_cache
     clear_llm_cache()
 
 
@@ -136,4 +136,3 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
             text = extract_text_content(getattr(msg_chunk, "content", ""))
             if text:
                 yield text
-

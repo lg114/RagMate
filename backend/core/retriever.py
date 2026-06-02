@@ -1,81 +1,17 @@
+"""检索管线：Milvus 混合检索 + Reranking + 动态过滤。"""
 import logging
 import math
-import socket
 import threading
 
-from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
+from pymilvus import AnnSearchRequest, RRFRanker
 from sentence_transformers import CrossEncoder
 
-from config import settings
-
-
-def canonical_source(source: str) -> str:
-    """归一化来源文件名，用于检索去重。"""
-    if not source:
-        return ""
-    import os
-    base, ext = os.path.splitext(source)
-    for suffix in ["_副本", " (副本)", "_copy", " (copy)"]:
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
-            break
-    if base.endswith(")") and "(" in base:
-        idx = base.rfind("(")
-        if base[idx + 1 : -1].isdigit():
-            base = base[:idx]
-    return (base + ext).lower()
+from backend.domain.errors import AppError, ServiceUnavailableError
+from backend.infrastructure.config import settings
+from backend.infrastructure.encoding import encode_query
+from backend.infrastructure.milvus import check_milvus_available, canonical_source, get_milvus_client, init_milvus
 
 logger = logging.getLogger("ragmate")
-
-_milvus_client: MilvusClient | None = None
-_milvus_lock = threading.Lock()
-_collection_loaded: bool = False
-
-
-# ── Milvus ──────────────────────────────────────────────────────────────────
-
-def get_milvus_client() -> MilvusClient:
-    """获取复用的 MilvusClient 实例（线程安全）"""
-    global _milvus_client
-    if _milvus_client is not None:
-        return _milvus_client
-    with _milvus_lock:
-        if _milvus_client is None:
-            _milvus_client = MilvusClient(
-                uri=f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}",
-                timeout=settings.MILVUS_TIMEOUT,
-            )
-        return _milvus_client
-
-
-def _check_milvus_available() -> bool:
-    """快速检查 Milvus 服务是否可达"""
-    try:
-        with socket.create_connection(
-            (settings.MILVUS_HOST, settings.MILVUS_PORT),
-            timeout=3,
-        ):
-            return True
-    except (socket.timeout, ConnectionRefusedError, OSError):
-        return False
-
-
-def _init_milvus():
-    """确保 Milvus collection 已加载（线程安全）。"""
-    from errors import ServiceUnavailableError
-
-    global _collection_loaded
-    client = get_milvus_client()
-    with _milvus_lock:
-        if _collection_loaded:
-            return client
-        try:
-            client.load_collection(settings.MILVUS_COLLECTION)
-            _collection_loaded = True
-        except Exception as e:
-            raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
-    return client
-
 
 _reranker: CrossEncoder | None = None
 _reranker_lock = threading.Lock()
@@ -208,14 +144,11 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
 
 def retrieve(query: str, k: int = None) -> list[dict]:
     """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
-    from errors import AppError, ServiceUnavailableError, ValidationError
-    from ingest.encoding import encode_query
-
     if k is None:
         k = settings.FINAL_CONTEXT_K
 
     try:
-        client = _init_milvus()
+        client = init_milvus()
         over_fetch = settings.RERANK_CANDIDATES
 
         dense_vec, sparse_vec = encode_query(query)

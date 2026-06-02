@@ -125,8 +125,10 @@ LLM_API_BASE_URL=https://api.deepseek.com/v1
 
 ### 4. 启动服务
 
+在项目根目录下运行：
+
 ```bash
-uvicorn main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000
 ```
 
 浏览器打开 http://localhost:8000
@@ -288,15 +290,10 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 ```
 RagMate/
 ├── docker-compose.yml
-├── LICENSE
-├── README.md
-├── README_zh.md
-├── CHANGELOG.md
-├── .python-version
-├── .gitignore
-├── eval/                      # RAGAS 评估数据
-│   ├── testsets/              # 生成的测试集
-│   └── reports/               # 评估报告
+├── LICENSE / README.md / README_zh.md / CHANGELOG.md
+├── eval/                          # RAGAS 评估数据
+│   ├── testsets/                  # 生成的测试集
+│   └── reports/                   # 评估报告
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -304,21 +301,40 @@ RagMate/
 └── backend/
     ├── pyproject.toml
     ├── .env.example
-    ├── config.py              # 配置（pydantic-settings）
-    ├── main.py                # FastAPI 入口 + 所有端点
-    ├── agent.py               # Deep Agent（系统提示 + retrieval_tool）
-    ├── chat.py                # 聊天编排（同步 + 流式）
-    ├── retriever.py           # 混合检索 + Reranking
-    ├── ingest.py              # 文档处理 + 向量入库
-    ├── streaming_llm.py       # ChatOpenAI 工厂
-    ├── model_factory.py       # LLM / Embedding 工厂
-    ├── document_service.py    # 文档 CRUD
-    ├── database.py            # SQLAlchemy 异步/同步引擎
-    ├── models.py              # ORM 模型（Document, ChatHistory）
-    ├── redis_client.py        # Redis 会话 / 锁 / 状态
-    ├── errors.py              # 类型化错误层级
-    ├── eval_cli.py            # RAGAS 评估 CLI
-    └── documents/             # 文档存储目录
+    ├── main.py                    # 入口 (uvicorn backend.main:app)
+    ├── app.py                     # FastAPI 工厂、中间件、生命周期
+    ├── domain/                    # 业务实体
+    │   ├── errors.py              # 类型化错误层级
+    │   ├── models.py              # ORM 模型（Document, ChatHistory）
+    │   └── schemas.py             # Pydantic 请求/响应模型
+    ├── infrastructure/            # 外部系统适配器
+    │   ├── config.py              # 配置（pydantic-settings）
+    │   ├── database.py            # SQLAlchemy 异步/同步引擎
+    │   ├── redis_client.py        # Redis 会话 / 锁 / 状态
+    │   ├── rate_limiter.py        # Redis 频率限制
+    │   ├── streaming_llm.py       # ChatOpenAI 兼容工厂
+    │   ├── model_factory.py       # LLM / Embedding 工厂
+    │   ├── encoding.py            # BGE-M3 dense + sparse 编码
+    │   └── milvus.py              # Milvus 客户端管理 + CRUD
+    ├── core/                      # 领域逻辑
+    │   ├── retriever.py           # 混合检索 + Reranking + 动态过滤
+    │   └── agent.py               # Deep Agent（系统提示 + retrieval_tool）
+    ├── application/               # 用例 / 服务层
+    │   ├── chat.py                # 聊天编排（同步 + 流式）
+    │   ├── document_service.py    # 文档 CRUD
+    │   ├── ingest_manager.py      # 入库任务生命周期（锁、异步）
+    │   └── ingest/                # 入库管道
+    │       ├── loaders.py         # 按扩展名加载文档
+    │       ├── db_sync.py         # PostgreSQL 文档状态同步
+    │       └── pipeline.py        # 入库主流程编排
+    ├── api/                       # HTTP 路由
+    │   ├── health.py              # /health, /ready
+    │   ├── chat.py                # /chat, /chat/stream, /chat/sessions
+    │   ├── documents.py           # /documents, /documents/upload
+    │   └── ingest.py              # /ingest, /ingest/status
+    ├── eval/                      # RAGAS 评估 CLI
+    ├── prompts/                   # Agent 系统提示
+    └── documents/                 # 文档存储目录
 ```
 
 ---

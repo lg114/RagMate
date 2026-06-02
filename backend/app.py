@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import settings
-from database import engine, init_db
-from errors import AppError
+from backend.infrastructure.config import settings
+from backend.infrastructure.database import engine, init_db
+from backend.domain.errors import AppError
 
 # 请求级上下文：每个请求生成唯一 request_id，贯穿整个调用链
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
@@ -44,8 +44,8 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from redis_client import get_redis, close_sync_redis
-    from ingest_manager import cancel_ingest
+    from backend.infrastructure.redis_client import get_redis, close_sync_redis
+    from backend.application.ingest_manager import cancel_ingest
 
     # 检查是否有遗留的 ingest 锁
     try:
@@ -66,13 +66,13 @@ async def lifespan(app: FastAPI):
     # 后台预热模型
     def _warmup_models():
         try:
-            from retriever import get_reranker
+            from backend.core.retriever import get_reranker
             get_reranker()
             logger.info("Reranker model warmed up")
         except Exception as e:
             logger.warning(f"Reranker warmup failed: {e}")
         try:
-            from ingest import get_bge_m3
+            from backend.infrastructure.encoding import get_bge_m3
             get_bge_m3()
             logger.info("BGE-M3 model warmed up")
         except Exception as e:
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.debug("Failed to dispose async engine on shutdown", exc_info=True)
         try:
-            from database import get_sync_engine
+            from backend.infrastructure.database import get_sync_engine
             sync_engine = get_sync_engine()
             if sync_engine is not None:
                 await asyncio.to_thread(sync_engine.dispose)
@@ -175,10 +175,10 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"code": "INTERNAL_ERROR", "detail": "An unexpected error occurred"})
 
     # 注册路由
-    from routes.health import router as health_router
-    from routes.chat import router as chat_router
-    from routes.documents import router as documents_router
-    from routes.ingest import router as ingest_router
+    from backend.api.health import router as health_router
+    from backend.api.chat import router as chat_router
+    from backend.api.documents import router as documents_router
+    from backend.api.ingest import router as ingest_router
 
     app.include_router(health_router)
     app.include_router(chat_router)

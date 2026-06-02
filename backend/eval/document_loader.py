@@ -13,7 +13,7 @@ def load_langchain_docs(docs_dir: str, max_docs: int = None) -> list[Document]:
     Reuses RagMate's existing loaders but skips chunking — RAGAS handles
     its own splitting internally.
     """
-    from ingest import load_document, SUPPORTED_EXTENSIONS
+    from backend.application.ingest.loaders import load_document, SUPPORTED_EXTENSIONS
 
     all_files = sorted(
         f for f in os.listdir(docs_dir)

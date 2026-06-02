@@ -6,12 +6,12 @@ from fastapi import APIRouter, Request
 from sqlalchemy import delete, func, select
 from starlette.responses import StreamingResponse
 
-from chat import chat, chat_stream
-from database import async_session
-from models import ChatHistory
-from rate_limiter import check_rate_limit
-from redis_client import get_redis
-from schemas import ChatRequest, ChatResponse, validate_session_id
+from backend.application.chat import chat, chat_stream
+from backend.infrastructure.database import async_session
+from backend.domain.models import ChatHistory
+from backend.infrastructure.rate_limiter import check_rate_limit
+from backend.infrastructure.redis_client import get_redis
+from backend.domain.schemas import ChatRequest, ChatResponse, validate_session_id
 
 logger = logging.getLogger("ragmate")
 router = APIRouter()

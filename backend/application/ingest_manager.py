@@ -3,8 +3,8 @@
 import asyncio
 import logging
 
-from ingest import ingest_documents
-from redis_client import (
+from backend.application.ingest.pipeline import ingest_documents
+from backend.infrastructure.redis_client import (
     acquire_ingest_lock,
     release_ingest_lock,
     renew_ingest_lock,

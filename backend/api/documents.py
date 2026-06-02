@@ -1,10 +1,10 @@
 """文档管理端点。"""
 from fastapi import APIRouter, File, UploadFile
 
-from config import settings
-import document_service
-from database import async_session
-from retriever import get_milvus_client
+from backend.infrastructure.config import settings
+import backend.application.document_service as document_service
+from backend.infrastructure.database import async_session
+from backend.infrastructure.milvus import get_milvus_client
 
 router = APIRouter()
 
