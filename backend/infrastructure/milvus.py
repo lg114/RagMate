@@ -47,13 +47,15 @@ def check_milvus_available() -> bool:
 
 
 def init_milvus():
-    """确保 Milvus collection 已加载（线程安全）。"""
+    """确保 Milvus collection 已加载（线程安全）。collection 不存在时返回 None。"""
     global _collection_loaded
     client = get_milvus_client()
     with _milvus_lock:
         if _collection_loaded:
             return client
         try:
+            if not client.has_collection(settings.MILVUS_COLLECTION):
+                return None
             client.load_collection(settings.MILVUS_COLLECTION)
             _collection_loaded = True
         except Exception as e:

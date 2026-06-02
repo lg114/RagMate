@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 
 from backend.application.ingest.pipeline import ingest_documents
 from backend.infrastructure.redis_client import (
@@ -15,12 +16,13 @@ logger = logging.getLogger("ragmate")
 
 _ingest_task: asyncio.Task | None = None
 _ingest_lock_token: str | None = None
+_ingest_cancel_event: threading.Event | None = None
 _start_lock = asyncio.Lock()
 
 
 async def _run_ingest(filenames: list[str] | None = None):
     """在后台线程中执行入库，通过 Redis 管理状态与锁。"""
-    global _ingest_lock_token
+    global _ingest_lock_token, _ingest_cancel_event
 
     async def _renew_loop():
         while True:
@@ -32,11 +34,17 @@ async def _run_ingest(filenames: list[str] | None = None):
                     logger.debug("Failed to renew ingest lock", exc_info=True)
 
     renew_task = asyncio.create_task(_renew_loop())
+    cancel_event = threading.Event()
+    _ingest_cancel_event = cancel_event
     try:
         await set_ingest_status({"status": "running"})
-        result = await asyncio.to_thread(ingest_documents, None, filenames)
-        await set_ingest_status(result)
+        result = await asyncio.to_thread(ingest_documents, None, filenames, cancel_event)
+        if cancel_event.is_set():
+            await set_ingest_status({"status": "idle"})
+        else:
+            await set_ingest_status(result)
     except asyncio.CancelledError:
+        cancel_event.set()
         await set_ingest_status({"status": "idle"})
         raise
     except Exception as e:
@@ -47,6 +55,7 @@ async def _run_ingest(filenames: list[str] | None = None):
         await asyncio.gather(renew_task, return_exceptions=True)
         global _ingest_task
         _ingest_task = None
+        _ingest_cancel_event = None
         if _ingest_lock_token:
             try:
                 await release_ingest_lock(_ingest_lock_token)
@@ -71,7 +80,9 @@ async def start_ingest(filenames: list[str] | None = None) -> dict:
 
 async def cancel_ingest():
     """取消正在运行的入库任务（用于应用关闭时清理）。"""
-    global _ingest_task
+    global _ingest_task, _ingest_cancel_event
+    if _ingest_cancel_event:
+        _ingest_cancel_event.set()
     if _ingest_task and not _ingest_task.done():
         _ingest_task.cancel()
         try:

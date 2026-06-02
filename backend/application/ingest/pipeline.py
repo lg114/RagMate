@@ -67,7 +67,7 @@ def _detect_new_files(docs_dir, all_files):
     return new_files, ingested_info
 
 
-def _load_and_split(docs_dir, new_files):
+def _load_and_split(docs_dir, new_files, cancel_event=None):
     """逐文件加载 + 切分，实时更新进度。返回 (chunks, chunk_counter, failed_files)。"""
     chunks = []
     md_headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
@@ -78,6 +78,8 @@ def _load_and_split(docs_dir, new_files):
 
     failed_files = []
     for i, filename in enumerate(new_files):
+        if cancel_event and cancel_event.is_set():
+            break
         try:
             set_ingest_status_sync({
                 "status": "running", "stage": "loading",
@@ -123,8 +125,12 @@ def _load_and_split(docs_dir, new_files):
     return chunks, chunk_counter, failed_files
 
 
-def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict:
-    """读取文档，切分，向量入库到 Milvus。增量模式：只处理新文件。"""
+def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_event=None) -> dict:
+    """读取文档，切分，向量入库到 Milvus。增量模式：只处理新文件。
+
+    Args:
+        cancel_event: threading.Event，设置后尽早终止入库流程。
+    """
     docs_dir = directory or settings.DOCUMENTS_DIR
 
     if not os.path.exists(docs_dir):
@@ -149,8 +155,13 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
             "message": "All documents already ingested",
         }
 
+    if cancel_event and cancel_event.is_set():
+        return {"status": "idle", "message": "Cancelled"}
+
     # 3. 加载 + 切分
-    chunks, chunk_counter, failed_files = _load_and_split(docs_dir, new_files)
+    chunks, chunk_counter, failed_files = _load_and_split(docs_dir, new_files, cancel_event)
+    if cancel_event and cancel_event.is_set():
+        return {"status": "idle", "message": "Cancelled"}
     if not chunks:
         return {"status": "failed", "error": "No text extracted from any file", "failed": failed_files}
 
@@ -183,6 +194,9 @@ def ingest_documents(directory: str = None, filenames: list[str] = None) -> dict
         }
         set_ingest_status_sync(result)
         return result
+
+    if cancel_event and cancel_event.is_set():
+        return {"status": "idle", "message": "Cancelled"}
 
     # 7. 编码
     files_with_new_chunks = set()

@@ -149,6 +149,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
 
     try:
         client = init_milvus()
+        if client is None:
+            logger.info("Retrieval: collection does not exist, returning empty")
+            return []
         over_fetch = settings.RERANK_CANDIDATES
 
         dense_vec, sparse_vec = encode_query(query)
