@@ -237,7 +237,13 @@ function renderAssistantMarkdown(text) {
       .join('');
     return `<div class="source-row"><span class="source-label">来源</span>${chips}</div>`;
   });
-  return DOMPurify.sanitize(marked.parse(withSourceChips));
+  let html = DOMPurify.sanitize(marked.parse(withSourceChips));
+  // Add code block headers with copy buttons
+  html = html.replace(/<pre><code(?: class="language-(\w+)")?>([\s\S]*?)<\/code><\/pre>/g, (_, lang, code) => {
+    const label = lang || 'code';
+    return `<div class="code-block-header"><span>${escapeHtml(label)}</span><button class="btn-copy-code" data-code="${escapeHtml(code.replace(/"/g, '&quot;'))}">复制</button></div><pre><code>${code}</code></pre>`;
+  });
+  return html;
 }
 
 // ── Session ID ──
@@ -435,7 +441,10 @@ const ChatPanel = {
       requestAnimationFrame(() => {
         if (div._streamDone) return;
         content.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
-        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+        // Smart scroll: only auto-scroll if user is near bottom
+        const el = this.messagesEl;
+        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        if (isNearBottom) el.scrollTop = el.scrollHeight;
         div._rafPending = false;
       });
     }
@@ -497,6 +506,23 @@ const ChatPanel = {
         }
       });
     }
+
+    // Bind code copy buttons
+    content.querySelectorAll('.btn-copy-code').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const code = btn.dataset.code
+          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        navigator.clipboard.writeText(code).then(() => {
+          btn.textContent = '已复制';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.textContent = '复制';
+            btn.classList.remove('copied');
+          }, 1500);
+        });
+      });
+    });
   },
 
   clear() {
@@ -546,6 +572,10 @@ const HistoryPanel = {
   },
 
   async load() {
+    // Show skeleton while loading
+    this.listEl.innerHTML = Array.from({length: 3}, () =>
+      `<div class="skeleton-history"><div class="skeleton skeleton-bar w-40"></div><div class="skeleton skeleton-bar w-20"></div></div>`
+    ).join('');
     try {
       const data = await API.getSessions();
       this.render(data.sessions || []);
@@ -561,25 +591,27 @@ const HistoryPanel = {
       return;
     }
     sessions.forEach(s => {
-      const div = document.createElement('div');
-      div.className = 'history-item' + (s.session_id === this.activeId ? ' active' : '');
-      div.innerHTML = `
-        <div class="history-item-content">
-          <div class="history-item-preview">${escapeHtml(s.first_message)}</div>
-          <div class="history-item-bottom">
-            <div class="history-item-time">${formatDate(s.created_at)}</div>
-            <button class="history-item-delete" title="删除">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-            </button>
-          </div>
+      const btn = document.createElement('button');
+      btn.className = 'history-item' + (s.session_id === this.activeId ? ' active' : '');
+      btn.setAttribute('role', 'listitem');
+      btn.innerHTML = `
+        <div class="history-item-preview">${escapeHtml(s.first_message)}</div>
+        <div class="history-item-bottom">
+          <div class="history-item-time">${formatDate(s.created_at)}</div>
+          <span class="history-item-delete" role="button" tabindex="0" title="删除" aria-label="删除会话">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </span>
         </div>
       `;
-      div.querySelector('.history-item-content').addEventListener('click', () => this.selectSession(s.session_id));
-      div.querySelector('.history-item-delete').addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.deleteSession(s.session_id);
+      btn.addEventListener('click', (e) => {
+        if (e.target.closest('.history-item-delete')) {
+          e.stopPropagation();
+          this.deleteSession(s.session_id);
+          return;
+        }
+        this.selectSession(s.session_id);
       });
-      this.listEl.appendChild(div);
+      this.listEl.appendChild(btn);
     });
   },
 
@@ -629,7 +661,7 @@ const HistoryPanel = {
 // ═══════════════════════ Documents Panel ═══════════════════════
 
 const DocumentsPanel = {
-  tbodyEl: document.getElementById('doc-table-body'),
+  listEl: document.getElementById('doc-card-list'),
   emptyEl: document.getElementById('doc-empty'),
   uploadZone: document.getElementById('upload-zone'),
   fileInput: document.getElementById('file-input'),
@@ -663,8 +695,10 @@ const DocumentsPanel = {
 
     this.selectAllEl.addEventListener('change', () => {
       const checked = this.selectAllEl.checked;
+      const listEl = document.getElementById('doc-card-list');
+      if (!listEl) return;
       this._suppressCheckboxEvent = true;
-      this.tbodyEl.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
+      listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
       this._suppressCheckboxEvent = false;
       this._updateBatchBar();
     });
@@ -676,22 +710,26 @@ const DocumentsPanel = {
   },
 
   _getSelectedFiles() {
-    return Array.from(this.tbodyEl.querySelectorAll('input[type="checkbox"]:checked'))
+    const listEl = document.getElementById('doc-card-list');
+    if (!listEl) return [];
+    return Array.from(listEl.querySelectorAll('input[type="checkbox"]:checked'))
       .map(cb => cb.dataset.filename);
   },
 
   _updateBatchBar() {
-    const selectedCbs = Array.from(this.tbodyEl.querySelectorAll('input[type="checkbox"]:checked'));
+    const listEl = document.getElementById('doc-card-list');
+    if (!listEl) return;
+    const selectedCbs = Array.from(listEl.querySelectorAll('input[type="checkbox"]:checked'));
     const count = selectedCbs.length;
     const hasSelection = count > 0;
     const hasUnIngested = selectedCbs.some(cb => cb.dataset.status !== 'ingested');
-    this.ingestBtn.classList.remove('btn-ingest-running', 'btn-ingest-done', 'btn-ingest-failed');
+    this.ingestBtn.removeAttribute('data-state');
     this.ingestBtn.disabled = !hasUnIngested;
     this.batchDeleteBtn.disabled = !hasSelection;
     this.batchDeleteText.textContent = hasSelection ? `删除 (${count})` : '删除';
     this.ingestBtnText.textContent = hasUnIngested ? `入库 (${selectedCbs.filter(cb => cb.dataset.status !== 'ingested').length})` : '入库';
     // 更新全选 checkbox 状态
-    const allCbs = this.tbodyEl.querySelectorAll('input[type="checkbox"]');
+    const allCbs = listEl.querySelectorAll('input[type="checkbox"]');
     this.selectAllEl.checked = allCbs.length > 0 && count === allCbs.length;
     this.selectAllEl.indeterminate = count > 0 && count < allCbs.length;
   },
@@ -725,6 +763,7 @@ const DocumentsPanel = {
   },
 
   async load() {
+    this._renderSkeleton();
     try {
       const data = await API.getDocuments();
       this.render(data.documents || []);
@@ -743,8 +782,29 @@ const DocumentsPanel = {
     }
   },
 
+  _renderSkeleton() {
+    const skeleton = document.getElementById('doc-skeleton');
+    if (!skeleton) return;
+    skeleton.innerHTML = Array.from({length: 4}, () =>
+      `<div class="skeleton-row">
+        <div class="skeleton skeleton-check"></div>
+        <div class="skeleton skeleton-bar w-40"></div>
+        <div class="skeleton skeleton-bar w-10"></div>
+        <div class="skeleton skeleton-bar w-16"></div>
+        <div class="skeleton skeleton-bar w-20"></div>
+      </div>`
+    ).join('');
+  },
+
   render(docs) {
-    this.tbodyEl.innerHTML = '';
+    const listEl = document.getElementById('doc-card-list');
+    if (!listEl) return;
+    const skeleton = document.getElementById('doc-skeleton');
+    if (skeleton) skeleton.innerHTML = '';
+
+    // Clear old cards (keep skeleton div)
+    listEl.querySelectorAll('.doc-card').forEach(el => el.remove());
+
     this.selectAllEl.checked = false;
     this.selectAllEl.indeterminate = false;
     this._updateBatchBar();
@@ -757,20 +817,30 @@ const DocumentsPanel = {
 
     docs.sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''));
     docs.forEach(doc => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="col-check"><input type="checkbox" data-filename="${escapeHtml(doc.filename)}" data-status="${doc.status}"></td>
-        <td title="${escapeHtml(doc.filename)}">${escapeHtml(truncate(doc.filename, 40))}</td>
-        <td>${formatFileSize(doc.size_bytes)}</td>
-        <td><span class="badge badge-${doc.status}">${statusLabel(doc.status)}${doc.chunk_count ? ' · ' + doc.chunk_count + ' 个片段' : ''}</span></td>
-        <td>${formatDate(doc.uploaded_at)}</td>
-        <td><button class="btn-delete" data-filename="${escapeHtml(doc.filename)}">删除</button></td>
+      const ext = doc.filename.split('.').pop().toLowerCase();
+      const iconClass = ['pdf','docx','xlsx','txt','md'].includes(ext) ? ext : 'txt';
+      const card = document.createElement('div');
+      card.className = 'doc-card';
+      card.innerHTML = `
+        <div class="doc-card-check"><input type="checkbox" data-filename="${escapeHtml(doc.filename)}" data-status="${doc.status}"></div>
+        <div class="doc-card-icon ${iconClass}">${ext}</div>
+        <div class="doc-card-info">
+          <div class="doc-card-name" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</div>
+          <div class="doc-card-meta">
+            <span>${formatFileSize(doc.size_bytes)}</span>
+            <span class="badge badge-${doc.status}">${statusLabel(doc.status)}${doc.chunk_count ? ' · ' + doc.chunk_count + ' 片段' : ''}</span>
+            <span>${formatDate(doc.uploaded_at)}</span>
+          </div>
+        </div>
+        <div class="doc-card-actions">
+          <button class="btn-delete" data-filename="${escapeHtml(doc.filename)}">删除</button>
+        </div>
       `;
-      tr.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+      card.querySelector('input[type="checkbox"]').addEventListener('change', () => {
         if (!this._suppressCheckboxEvent) this._updateBatchBar();
       });
-      tr.querySelector('.btn-delete').addEventListener('click', () => this.deleteDoc(doc.filename));
-      this.tbodyEl.appendChild(tr);
+      card.querySelector('.btn-delete').addEventListener('click', () => this.deleteDoc(doc.filename));
+      listEl.appendChild(card);
     });
   },
 
@@ -916,21 +986,21 @@ const DocumentsPanel = {
 
   setIngestBtnState(state) {
     if (this._ingestStateTimer) { clearTimeout(this._ingestStateTimer); this._ingestStateTimer = null; }
-    this.ingestBtn.classList.remove('btn-ingest-running', 'btn-ingest-done', 'btn-ingest-failed');
+    this.ingestBtn.removeAttribute('data-state');
     if (state === 'running') {
       this.ingestBtn.disabled = true;
-      this.ingestBtn.classList.add('btn-ingest-running');
+      this.ingestBtn.setAttribute('data-state', 'running');
       this.ingestSpinner.classList.remove('hidden');
       this.ingestBtnText.textContent = '入库中';
     } else if (state === 'done') {
       this.ingestBtn.disabled = true;
-      this.ingestBtn.classList.add('btn-ingest-done');
+      this.ingestBtn.setAttribute('data-state', 'done');
       this.ingestSpinner.classList.add('hidden');
       this.ingestBtnText.textContent = '完成';
       this._ingestStateTimer = setTimeout(() => this.setIngestBtnState('default'), 2000);
     } else if (state === 'failed') {
       this.ingestBtn.disabled = true;
-      this.ingestBtn.classList.add('btn-ingest-failed');
+      this.ingestBtn.setAttribute('data-state', 'failed');
       this.ingestSpinner.classList.add('hidden');
       this.ingestBtnText.textContent = '失败';
       this._ingestStateTimer = setTimeout(() => this.setIngestBtnState('default'), 2000);
@@ -960,9 +1030,9 @@ function statusLabel(s) {
 // ═══════════════════════ App Init ═══════════════════════
 
 document.addEventListener('DOMContentLoaded', () => {
-  ChatPanel.init();
-  HistoryPanel.init();
-  DocumentsPanel.init();
+  try { ChatPanel.init(); } catch (e) { console.error('ChatPanel init failed:', e); }
+  try { HistoryPanel.init(); } catch (e) { console.error('HistoryPanel init failed:', e); }
+  try { DocumentsPanel.init(); } catch (e) { console.error('DocumentsPanel init failed:', e); }
 
   document.querySelectorAll('.sidebar-tab').forEach(tab => {
     tab.addEventListener('click', () => {
