@@ -37,31 +37,26 @@ eval = [
 ]
 
 [project.scripts]
-ragmate-eval = "eval.cli:main"
+ragmate-eval = "backend.eval.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = [
-    "agent",
-    "app",
-    "chat",
-    "config",
-    "database",
-    "document_service",
-    "errors",
-    "ingest_manager",
-    "main",
-    "models",
-    "model_factory",
-    "rate_limiter",
-    "redis_client",
-    "retriever",
-    "schemas",
-    "streaming_llm",
+packages = [
+    "backend",
+    "backend.api",
+    "backend.application",
+    "backend.application.ingest",
+    "backend.core",
+    "backend.domain",
+    "backend.eval",
+    "backend.infrastructure",
 ]
 
-[tool.setuptools.packages.find]
-include = ["ingest*", "eval*", "routes*"]
+[tool.setuptools.package-dir]
+backend = "."
+
+[tool.setuptools.package-data]
+backend = ["prompts/*.md"]
