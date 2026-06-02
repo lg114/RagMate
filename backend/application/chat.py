@@ -5,6 +5,7 @@ import time
 import uuid
 
 from langchain_core.messages import AIMessage
+from sqlalchemy import delete, select
 
 from backend.core.agent import run_agent, run_agent_streaming, extract_text_content
 from backend.infrastructure.database import async_session
@@ -36,6 +37,30 @@ async def _persist_messages(session_id: str, messages: list[tuple[str, str]]):
             for role, content in messages
         )
         await session.commit()
+
+
+async def _delete_last_persisted_turn(session_id: str):
+    """删除 PostgreSQL 中最后一轮 user/assistant，用于重试或重新生成。"""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatHistory.id, ChatHistory.role)
+            .where(ChatHistory.session_id == session_id)
+            .order_by(ChatHistory.created_at.desc(), ChatHistory.id.desc())
+            .limit(2)
+        )
+        rows = result.fetchall()
+
+        ids_to_delete = []
+        if rows and rows[0].role == "assistant":
+            ids_to_delete.append(rows[0].id)
+            if len(rows) > 1 and rows[1].role == "user":
+                ids_to_delete.append(rows[1].id)
+        elif rows and rows[0].role == "user":
+            ids_to_delete.append(rows[0].id)
+
+        if ids_to_delete:
+            await session.execute(delete(ChatHistory).where(ChatHistory.id.in_(ids_to_delete)))
+            await session.commit()
 
 
 AGENT_TIMEOUT = 120  # Agent 调用超时（秒）
@@ -100,11 +125,17 @@ def _classify_error(e: Exception) -> str:
     return f"{_ERROR_SENTINEL}处理请求时出错，请稍后重试"
 
 
-def _strip_last_user_message(history: list[dict]) -> list[dict]:
-    """移除历史中最后一条用户消息（用于重试/重新生成）。"""
-    if history and history[-1].get("role") == "user":
-        return history[:-1]
-    return history
+def _strip_last_turn(history: list[dict]) -> list[dict]:
+    """移除历史中最后一轮 user/assistant（用于重试/重新生成）。"""
+    if not history:
+        return history
+
+    trimmed = history[:]
+    if trimmed[-1].get("role") == "assistant":
+        trimmed.pop()
+    if trimmed and trimmed[-1].get("role") == "user":
+        trimmed.pop()
+    return trimmed
 
 
 async def chat(message: str, session_id: str | None = None, replace_last: bool = False) -> dict:
@@ -115,9 +146,10 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
     # 1. 加载会话历史
     history = await load_session(session_id)
 
-    # 2. 重试/重新生成时，移除旧的用户消息
+    # 2. 重试/重新生成时，移除旧的一轮对话
     if replace_last:
-        history = _strip_last_user_message(history)
+        history = _strip_last_turn(history)
+        await _delete_last_persisted_turn(session_id)
 
     # 3. 追加用户消息
     history.append({"role": "user", "content": message})
@@ -167,7 +199,8 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     history = await load_session(session_id)
 
     if replace_last:
-        history = _strip_last_user_message(history)
+        history = _strip_last_turn(history)
+        await _delete_last_persisted_turn(session_id)
 
     history.append({"role": "user", "content": message})
 
