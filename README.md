@@ -121,7 +121,7 @@ LLM_API_BASE_URL=https://api.deepseek.com/v1
 Run from the project root:
 
 ```bash
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.app:app --reload --port 8000
 ```
 
 Open http://localhost:8000 in browser.
@@ -293,8 +293,7 @@ RagMate/
 └── backend/
     ├── pyproject.toml
     ├── .env.example
-    ├── main.py                    # Entry point (uvicorn backend.main:app)
-    ├── app.py                     # FastAPI factory, middleware, lifespan
+    ├── app.py                     # FastAPI factory, middleware, lifespan (uvicorn backend.app:app)
     ├── domain/                    # Business entities
     │   ├── errors.py              # Typed error hierarchy
     │   ├── models.py              # ORM models (Document, ChatHistory)
@@ -310,7 +309,8 @@ RagMate/
     │   └── milvus.py              # Milvus client management + CRUD
     ├── core/                      # Domain logic
     │   ├── retriever.py           # Hybrid search + Reranking + filtering
-    │   └── agent.py               # Deep Agent (system prompt + retrieval_tool)
+    │   ├── agent.py               # Deep Agent (system prompt + retrieval_tool)
+    │   └── prompts/               # Agent system prompts
     ├── application/               # Use cases / services
     │   ├── chat.py                # Chat orchestration (sync + streaming)
     │   ├── document_service.py    # Document CRUD
@@ -325,7 +325,6 @@ RagMate/
     │   ├── documents.py           # /documents, /documents/upload
     │   └── ingest.py              # /ingest, /ingest/status
     ├── eval/                      # RAGAS evaluation CLI
-    ├── prompts/                   # Agent system prompts
     └── documents/                 # Document storage directory
 ```
 

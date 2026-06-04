@@ -16,7 +16,7 @@ RAG_USER_PROMPT = """上下文：
 @lru_cache(maxsize=1)
 def _load_eval_system_prompt() -> str:
     """从 prompts/researcher.md 加载评估用 system prompt，剥离工具调用相关段落。"""
-    prompt_path = Path(__file__).resolve().parent.parent / "prompts" / "researcher.md"
+    prompt_path = Path(__file__).resolve().parent.parent / "core" / "prompts" / "researcher.md"
     if not prompt_path.exists():
         return "你是一个知识库问答助手。根据提供的上下文回答用户的问题。只基于提供的上下文回答，不要编造信息。"
     text = prompt_path.read_text(encoding="utf-8")

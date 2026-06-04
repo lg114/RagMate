@@ -10,7 +10,7 @@ from backend.core.retriever import retrieve
 
 # ── System Prompt ───────────────────────────────────────────────────────────
 def _load_system_prompt() -> str:
-    return (Path(__file__).parent.parent / "prompts" / "researcher.md").read_text(encoding="utf-8")
+    return (Path(__file__).parent / "prompts" / "researcher.md").read_text(encoding="utf-8")
 
 
 # ── Tool ────────────────────────────────────────────────────────────────────

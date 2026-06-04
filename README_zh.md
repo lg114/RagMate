@@ -128,7 +128,7 @@ LLM_API_BASE_URL=https://api.deepseek.com/v1
 在项目根目录下运行：
 
 ```bash
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.app:app --reload --port 8000
 ```
 
 浏览器打开 http://localhost:8000
@@ -301,8 +301,7 @@ RagMate/
 └── backend/
     ├── pyproject.toml
     ├── .env.example
-    ├── main.py                    # 入口 (uvicorn backend.main:app)
-    ├── app.py                     # FastAPI 工厂、中间件、生命周期
+    ├── app.py                     # FastAPI 工厂、中间件、生命周期 (uvicorn backend.app:app)
     ├── domain/                    # 业务实体
     │   ├── errors.py              # 类型化错误层级
     │   ├── models.py              # ORM 模型（Document, ChatHistory）
@@ -318,7 +317,8 @@ RagMate/
     │   └── milvus.py              # Milvus 客户端管理 + CRUD
     ├── core/                      # 领域逻辑
     │   ├── retriever.py           # 混合检索 + Reranking + 动态过滤
-    │   └── agent.py               # Deep Agent（系统提示 + retrieval_tool）
+    │   ├── agent.py               # Deep Agent（系统提示 + retrieval_tool）
+    │   └── prompts/               # Agent 系统提示
     ├── application/               # 用例 / 服务层
     │   ├── chat.py                # 聊天编排（同步 + 流式）
     │   ├── document_service.py    # 文档 CRUD
@@ -333,7 +333,6 @@ RagMate/
     │   ├── documents.py           # /documents, /documents/upload
     │   └── ingest.py              # /ingest, /ingest/status
     ├── eval/                      # RAGAS 评估 CLI
-    ├── prompts/                   # Agent 系统提示
     └── documents/                 # 文档存储目录
 ```
 
