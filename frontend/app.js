@@ -241,7 +241,8 @@ function renderAssistantMarkdown(text) {
   // Add code block headers with copy buttons
   html = html.replace(/<pre><code(?: class="language-(\w+)")?>([\s\S]*?)<\/code><\/pre>/g, (_, lang, code) => {
     const label = lang || 'code';
-    return `<div class="code-block-header"><span>${escapeHtml(label)}</span><button class="btn-copy-code" data-code="${escapeHtml(code.replace(/"/g, '&quot;'))}">复制</button></div><pre><code>${code}</code></pre>`;
+    const encoded = btoa(unescape(encodeURIComponent(code)));
+    return `<div class="code-block-header"><span>${escapeHtml(label)}</span><button class="btn-copy-code" data-code-b64="${encoded}">复制</button></div><pre><code>${code}</code></pre>`;
   });
   return html;
 }
@@ -281,7 +282,9 @@ const ChatPanel = {
     // Textarea 自动增高 + Enter 发送 / Shift+Enter 换行
     this.textareaEl.addEventListener('input', () => {
       this.textareaEl.style.height = 'auto';
-      this.textareaEl.style.height = Math.min(this.textareaEl.scrollHeight, 1.5 * 16 * 5) + 'px';
+      const fontSize = parseFloat(getComputedStyle(this.textareaEl).fontSize);
+      const lineHeight = parseFloat(getComputedStyle(this.textareaEl).lineHeight) || fontSize * 1.5;
+      this.textareaEl.style.height = Math.min(this.textareaEl.scrollHeight, lineHeight * 5) + 'px';
     });
     this.textareaEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -510,9 +513,7 @@ const ChatPanel = {
     // Bind code copy buttons
     content.querySelectorAll('.btn-copy-code').forEach(btn => {
       btn.addEventListener('click', () => {
-        const code = btn.dataset.code
-          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        const code = decodeURIComponent(escape(atob(btn.dataset.codeB64)));
         navigator.clipboard.writeText(code).then(() => {
           btn.textContent = '已复制';
           btn.classList.add('copied');
@@ -1071,7 +1072,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ═══════════════════════ Hero Canvas: 知识节点网络 ═══════════════════════
 
+let _heroCleanup = null;  // 追踪当前 hero 动画的清理函数
+
 function initHeroCanvas() {
+  // 清理上一次 hero 动画的所有资源
+  if (_heroCleanup) { _heroCleanup(); _heroCleanup = null; }
+
   const canvas = document.getElementById('hero-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -1147,10 +1153,8 @@ function initHeroCanvas() {
   createNodes();
   draw();
 
-  window.addEventListener('resize', () => {
-    resize();
-    createNodes();
-  });
+  const onResize = () => { resize(); createNodes(); };
+  window.addEventListener('resize', onResize);
 
   // Hide hero when first message is sent
   const observer = new MutationObserver(() => {
@@ -1163,4 +1167,11 @@ function initHeroCanvas() {
   });
   const msgContainer = document.getElementById('chat-messages');
   if (msgContainer) observer.observe(msgContainer, { childList: true });
+
+  // 注册清理函数：下次 initHeroCanvas 调用时会执行
+  _heroCleanup = () => {
+    cancelAnimationFrame(animId);
+    window.removeEventListener('resize', onResize);
+    observer.disconnect();
+  };
 }
