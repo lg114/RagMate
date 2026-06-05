@@ -1,5 +1,4 @@
 import logging
-import os
 import warnings
 from functools import lru_cache
 

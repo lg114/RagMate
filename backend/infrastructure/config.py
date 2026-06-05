@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     MIN_PER_SOURCE: int = Field(default=2, gt=0)                          # 单源最小 chunk 数
     SCORE_GAP_THRESHOLD: float = Field(default=0.15, gt=0.0, lt=1.0)     # 分数断崖阈值
 
+    # Agent
+    AGENT_RECURSION_LIMIT: int = Field(default=30, gt=0)
+
     # Documents
     DOCUMENTS_DIR: str = str(_BACKEND_DIR / "documents")
 

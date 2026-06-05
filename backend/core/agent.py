@@ -101,12 +101,13 @@ def extract_text_content(content) -> str:
 # ── 公开 API ────────────────────────────────────────────────────────────────
 def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
     """运行 agent，支持多轮对话。messages 格式: [{"role": "user", "content": "..."}, ...]"""
+    from backend.infrastructure.config import settings
     _reset_tool_counter()
     return get_agent().invoke(
         {"messages": messages},
         config={
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 30,
+            "recursion_limit": settings.AGENT_RECURSION_LIMIT,
         },
     )
 
@@ -119,12 +120,13 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
     """
     from langchain_core.messages import AIMessageChunk, ToolMessage
 
+    from backend.infrastructure.config import settings
     _reset_tool_counter()
     for msg_chunk, _ in get_agent().stream(
         {"messages": messages},
         config={
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 30,
+            "recursion_limit": settings.AGENT_RECURSION_LIMIT,
         },
         stream_mode="messages",
     ):

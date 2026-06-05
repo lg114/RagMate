@@ -218,7 +218,10 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
         except Exception as e:
             error_msg = _classify_error(e)
         finally:
-            loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+            except RuntimeError:
+                pass  # event loop already closed
 
     task = asyncio.get_running_loop().run_in_executor(None, _run)
 

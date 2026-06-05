@@ -11,7 +11,8 @@ ENCODE_BATCH_SIZE = 64
 @lru_cache(maxsize=1)
 def get_bge_m3():
     """加载 bge-m3 模型（单例），用于提取 dense + sparse 向量。"""
-    return BGEM3FlagModel(settings.EMBEDDING_MODEL, use_fp16=False)
+    use_fp16 = settings.EMBEDDING_DEVICE == "cuda"
+    return BGEM3FlagModel(settings.EMBEDDING_MODEL, use_fp16=use_fp16)
 
 
 def encode_documents(texts: list[str]) -> tuple[list, list]:

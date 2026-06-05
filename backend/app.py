@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"BGE-M3 warmup failed: {e}")
 
-    asyncio.get_running_loop().run_in_executor(None, _warmup_models)
+    _warmup_task = asyncio.get_running_loop().run_in_executor(None, _warmup_models)
 
     try:
         yield
@@ -115,6 +115,7 @@ def create_app() -> FastAPI:
         allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",")],
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],
+        max_age=3600,
     )
 
     # 上传大小限制中间件：包装 ASGI receive，流式检查实际 body 大小

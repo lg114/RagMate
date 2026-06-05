@@ -50,7 +50,10 @@ async def _run_ingest(filenames: list[str] | None = None):
         raise
     except Exception as e:
         logger.exception("Ingestion failed")
-        await set_ingest_status({"status": "failed", "error": str(e)})
+        try:
+            await set_ingest_status({"status": "failed", "error": str(e)})
+        except Exception:
+            logger.debug("Failed to set ingest failure status", exc_info=True)
     finally:
         renew_task.cancel()
         await asyncio.gather(renew_task, return_exceptions=True)

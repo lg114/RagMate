@@ -35,3 +35,15 @@ class ChatResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     filenames: list[str] = Field(default_factory=list, max_length=200)
+
+    @field_validator("filenames", mode="before")
+    @classmethod
+    def _validate_filenames(cls, v):
+        if not v:
+            return v
+        for name in v:
+            if not name or len(name) > 255:
+                raise ValidationError(f"Invalid filename: {name!r}")
+            if any(c in name for c in ('/', '\\', '\x00')):
+                raise ValidationError(f"Filename contains invalid characters: {name!r}")
+        return v
