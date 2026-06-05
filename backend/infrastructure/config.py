@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     SCORE_GAP_THRESHOLD: float = Field(default=0.15, gt=0.0, lt=1.0)     # 分数断崖阈值
 
     # Documents
-    DOCUMENTS_DIR: str = "./documents"
+    DOCUMENTS_DIR: str = str(_BACKEND_DIR / "documents")
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"

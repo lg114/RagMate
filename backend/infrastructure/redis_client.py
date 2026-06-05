@@ -11,15 +11,17 @@ from backend.infrastructure.config import settings
 
 _redis: aioredis.Redis | None = None
 _sync_redis: redis.Redis | None = None
-_redis_lock = asyncio.Lock()
+_redis_lock: asyncio.Lock | None = None
 _sync_redis_lock = threading.Lock()
 
 MAX_SESSION_MESSAGES = 200  # 单 session 最大消息数，超出则截断旧消息
 
 
 async def get_redis() -> aioredis.Redis:
-    global _redis
+    global _redis, _redis_lock
     if _redis is None:
+        if _redis_lock is None:
+            _redis_lock = asyncio.Lock()
         async with _redis_lock:
             if _redis is None:
                 _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)

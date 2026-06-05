@@ -36,7 +36,9 @@ class SyncSession:
         self._session = sessionmaker(bind=get_sync_engine())()
         return self._session
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self._session.rollback()
         self._session.close()
 
 

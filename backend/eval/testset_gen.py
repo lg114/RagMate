@@ -30,6 +30,7 @@ def generate_testset(
     testset = generator.generate_with_langchain_docs(
         documents,
         testset_size=size,
+        seed=seed,
         **kwargs,
     )
 

@@ -5,13 +5,14 @@ _RATE_LIMIT_MAX = 30
 _RATE_LIMIT_WINDOW = 60  # 秒
 
 
-def check_rate_limit(ip: str):
-    from backend.infrastructure.redis_client import get_sync_redis
+async def check_rate_limit(ip: str):
+    from backend.infrastructure.redis_client import get_redis
 
     key = f"ragmate:rate:{ip}"
-    r = get_sync_redis()
-    count = r.incr(key)
-    if count == 1:
-        r.expire(key, _RATE_LIMIT_WINDOW)
+    r = await get_redis()
+    pipe = r.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, _RATE_LIMIT_WINDOW)
+    count, _ = await pipe.execute()
     if count > _RATE_LIMIT_MAX:
         raise ValidationError("请求过于频繁，请稍后重试")

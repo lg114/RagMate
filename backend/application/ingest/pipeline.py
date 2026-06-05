@@ -55,11 +55,12 @@ def _detect_new_files(docs_dir, all_files):
             new_files.append(f)
         else:
             filepath = os.path.join(docs_dir, f)
-            current_mtime = os.path.getmtime(filepath)
             stored_mtime = ingested_info[f]
-            if stored_mtime is None:
-                new_files.append(f)
-            elif abs(current_mtime - stored_mtime) > 1:
+            try:
+                current_mtime = os.path.getmtime(filepath)
+            except OSError:
+                continue  # 文件仍不可访问，跳过
+            if stored_mtime is None or abs(current_mtime - stored_mtime) > 1:
                 logger.info(f"File modified: {f}, will re-ingest")
                 new_files.append(f)
 

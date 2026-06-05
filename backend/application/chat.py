@@ -67,8 +67,8 @@ AGENT_TIMEOUT = 120  # Agent 调用超时（秒）
 
 
 # 错误哨兵前缀，用于判断 response_text 是否为错误而非正常回复
-# 使用不太可能出现在 LLM 自然回复中的标记，避免误判
-_ERROR_SENTINEL = "[ERROR] "
+# 使用 UUID 标记确保不会与 LLM 自然输出冲突
+_ERROR_SENTINEL = "\x00ERR\x00"
 
 
 _CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))】", re.IGNORECASE)

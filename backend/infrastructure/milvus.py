@@ -72,9 +72,10 @@ def canonical_source(source: str) -> str:
         if base.endswith(suffix):
             base = base[: -len(suffix)]
             break
-    if base.endswith(")") and "(" in base:
-        idx = base.rfind("(")
-        if base[idx + 1 : -1].isdigit():
+    # 仅匹配 "文件名 (数字).ext" 这种典型的副本后缀格式（空格+括号+纯数字）
+    if base.endswith(")") and " (" in base:
+        idx = base.rfind(" (")
+        if base[idx + 2 : -1].isdigit():
             base = base[:idx]
     return (base + ext).lower()
 

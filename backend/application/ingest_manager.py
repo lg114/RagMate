@@ -5,6 +5,7 @@ import logging
 import threading
 
 from backend.application.ingest.pipeline import ingest_documents
+from backend.infrastructure.config import settings
 from backend.infrastructure.redis_client import (
     acquire_ingest_lock,
     release_ingest_lock,
@@ -38,7 +39,7 @@ async def _run_ingest(filenames: list[str] | None = None):
     _ingest_cancel_event = cancel_event
     try:
         await set_ingest_status({"status": "running"})
-        result = await asyncio.to_thread(ingest_documents, None, filenames, cancel_event)
+        result = await asyncio.to_thread(ingest_documents, settings.DOCUMENTS_DIR, filenames, cancel_event)
         if cancel_event.is_set():
             await set_ingest_status({"status": "idle"})
         else:

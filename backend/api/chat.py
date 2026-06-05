@@ -27,14 +27,14 @@ def _get_client_ip(request: Request) -> str:
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(body: ChatRequest, request: Request):
-    check_rate_limit(_get_client_ip(request))
+    await check_rate_limit(_get_client_ip(request))
     result = await chat(body.message, body.session_id, replace_last=body.replace_last)
     return ChatResponse(response=result["response"], session_id=result["session_id"])
 
 
 @router.post("/chat/stream")
 async def chat_stream_endpoint(body: ChatRequest, request: Request):
-    check_rate_limit(_get_client_ip(request))
+    await check_rate_limit(_get_client_ip(request))
 
     async def event_generator():
         async for chunk in chat_stream(body.message, body.session_id, replace_last=body.replace_last):
