@@ -68,6 +68,18 @@ def _detect_new_files(docs_dir, all_files):
     return new_files, ingested_info
 
 
+def _reconstruct_with_headers(doc):
+    """从 MarkdownHeaderTextSplitter 的 metadata 中还原带标题的完整文本。"""
+    headers = []
+    for key in ["Header 1", "Header 2", "Header 3"]:
+        if key in doc.metadata:
+            level = int(key.split()[-1])
+            headers.append("#" * level + " " + doc.metadata[key])
+    if headers:
+        return "\n".join(headers) + "\n\n" + doc.page_content
+    return doc.page_content
+
+
 def _get_text_splitter(ext: str):
     """根据文件扩展名返回对应的 text splitter。表格类返回 None（不切分）。"""
     if ext in (".xlsx", ".xls"):
@@ -87,6 +99,9 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
     chunks = []
     md_headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
     md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=md_headers)
+    parent_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.CHUNK_SIZE_PARENT, chunk_overlap=settings.CHUNK_OVERLAP_PARENT
+    )
     failed_files = []
     for i, filename in enumerate(new_files):
         if cancel_event and cancel_event.is_set():
@@ -110,15 +125,26 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
             for doc in pages:
                 ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
                 if ext in (".md", ".markdown"):
-                    md_chunks = md_splitter.split_text(doc.page_content)
-                    for c in md_chunks:
-                        c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
-                    splitter = _get_text_splitter(ext)
-                    chunks.extend(splitter.split_documents(md_chunks))
+                    sections = md_splitter.split_text(doc.page_content)
+                    for section in sections:
+                        section.metadata.update({k: v for k, v in doc.metadata.items() if k not in section.metadata})
+                        splitter = _get_text_splitter(ext)
+                        small_chunks = splitter.split_documents([section])
+                        parent_text = _reconstruct_with_headers(section)
+                        for c in small_chunks:
+                            c.metadata["parent_text"] = parent_text
+                        chunks.extend(small_chunks)
+                elif ext in (".xlsx", ".xls"):
+                    chunks.append(doc)
                 else:
                     splitter = _get_text_splitter(ext)
                     if splitter is not None:
-                        chunks.extend(splitter.split_documents([doc]))
+                        parents = parent_splitter.split_documents([doc])
+                        for parent in parents:
+                            small_chunks = splitter.split_documents([parent])
+                            for c in small_chunks:
+                                c.metadata["parent_text"] = parent.page_content
+                            chunks.extend(small_chunks)
                     else:
                         chunks.append(doc)
         except Exception as e:

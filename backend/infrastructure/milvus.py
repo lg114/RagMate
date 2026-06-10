@@ -3,7 +3,6 @@ import logging
 import os
 import socket
 import threading
-import uuid
 from collections import Counter
 
 from pymilvus import AnnSearchRequest, CollectionSchema, DataType, FieldSchema, MilvusClient, RRFRanker
@@ -104,12 +103,15 @@ def ensure_collection(client):
             indexes = client.list_indexes(settings.MILVUS_COLLECTION)
             has_sparse_field = "sparse" in field_names
             has_sparse_index = any(idx.get("field") == "sparse" for idx in indexes)
-            if not has_sparse_field or not has_sparse_index:
+            has_parent_text = "parent_text" in field_names
+            if not has_sparse_field or not has_sparse_index or not has_parent_text:
                 missing = []
                 if not has_sparse_field:
                     missing.append("sparse field")
                 if not has_sparse_index:
                     missing.append("sparse index")
+                if not has_parent_text:
+                    missing.append("parent_text field")
                 raise ValidationError(
                     f"Milvus collection '{settings.MILVUS_COLLECTION}' schema 不匹配"
                     f"（缺少: {', '.join(missing)}）。"
@@ -128,6 +130,7 @@ def ensure_collection(client):
             FieldSchema("dense", DataType.FLOAT_VECTOR, dim=dim),
             FieldSchema("sparse", DataType.SPARSE_FLOAT_VECTOR),
             FieldSchema("text", DataType.VARCHAR, max_length=65535),
+            FieldSchema("parent_text", DataType.VARCHAR, max_length=65535),
             FieldSchema("metadata", DataType.JSON),
         ])
         index_params = client.prepare_index_params()
@@ -224,6 +227,7 @@ def delete_old_chunks(client, keep_ids_by_source: dict[str, list[int]]):
 def insert_chunks(client, chunks, dense_vecs, sparse_vecs) -> dict[str, list[int]]:
     """将编码后的 chunk 写入 Milvus，并返回按来源文件分组的新 id。"""
     texts = [chunk.page_content for chunk in chunks]
+    parent_texts = [chunk.metadata.pop("parent_text", chunk.page_content) for chunk in chunks]
     metadatas = [{
         "source": os.path.basename(chunk.metadata.get("source", "unknown")),
         "page": chunk.metadata.get("page"),
@@ -232,17 +236,18 @@ def insert_chunks(client, chunks, dense_vecs, sparse_vecs) -> dict[str, list[int
         "ingest_batch_id": chunk.metadata.get("ingest_batch_id", ""),
     } for chunk in chunks]
 
-    ids = [uuid.uuid4().int & ((1 << 63) - 1) for _ in chunks]
     data = [
-        {"id": item_id, "dense": d_vec, "sparse": s_vec, "text": text, "metadata": meta}
-        for item_id, d_vec, s_vec, text, meta in zip(ids, dense_vecs, sparse_vecs, texts, metadatas)
+        {"dense": d_vec, "sparse": s_vec, "text": text, "parent_text": parent_text, "metadata": meta}
+        for d_vec, s_vec, text, parent_text, meta in zip(dense_vecs, sparse_vecs, texts, parent_texts, metadatas)
     ]
-    client.insert(
+    result = client.insert(
         collection_name=settings.MILVUS_COLLECTION,
         data=data,
     )
     client.load_collection(settings.MILVUS_COLLECTION)
 
+    # auto_id=True 时 Milvus 自动分配 id，从返回值中获取
+    ids = result.get("ids", [])
     ids_by_source: dict[str, list[int]] = {}
     for item_id, meta in zip(ids, metadatas):
         ids_by_source.setdefault(meta["source"], []).append(item_id)

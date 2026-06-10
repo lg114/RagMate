@@ -4,31 +4,37 @@ version = "0.8.0"
 description = "RAG application with agentic workflow"
 requires-python = ">=3.12"
 dependencies = [
-    "langchain>=0.2.0,<0.4.0",
-    "langchain-community>=0.2.0,<0.4.0",
-    "langchain-text-splitters>=0.2.0,<1.0.0",
-    "langchain-milvus>=0.1.0,<1.0.0",
-    "langchain-huggingface>=0.1.0,<1.0.0",
-    "torch>=2.0.0,<3.0.0",
+    # ── LangChain ecosystem ──
+    "langchain-core>=0.2.0,<1.0.0",
     "langchain-openai>=0.2.0,<0.4.0",
+    "langchain-community>=0.2.0,<0.4.0",
+    "langchain-huggingface>=0.1.0,<1.0.0",
+    "langchain-text-splitters>=0.2.0,<1.0.0",
+    # ── Agent framework ──
     "deepagents>=0.5.0",
-    "pydantic-settings>=2.0.0",
+    # ── Vector DB ──
     "pymilvus>=2.5.0",
+    # ── Embedding & reranking ──
+    "torch>=2.0.0,<3.0.0",
+    "sentence-transformers>=2.2.0",
+    "FlagEmbedding>=0.1.0",
+    # ── Web framework ──
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.6",
+    # ── Database ──
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "psycopg2-binary>=2.9.0",
     "redis>=5.0.0",
-    "python-multipart>=0.0.6",
+    # ── Document parsing ──
     "pypdf>=4.0.0",
-    "FlagEmbedding>=0.1.0",
-    "sentence-transformers>=2.2.0",
     "docx2txt>=0.8",
-    "unstructured>=0.12.0",
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
     "xlrd>=2.0.0",
+    # ── Configuration ──
+    "pydantic-settings>=2.0.0",
 ]
 
 [project.optional-dependencies]

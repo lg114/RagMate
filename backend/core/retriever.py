@@ -70,7 +70,7 @@ def _extract_candidates(results) -> list[dict]:
         entity = hit["entity"]
         meta = entity.get("metadata", {})
         candidates.append({
-            "text": entity["text"],
+            "text": entity.get("parent_text") or entity["text"],
             "source": meta.get("source", ""),
             "page": meta.get("page"),
             "chunk_index": meta.get("chunk_index"),

@@ -35,6 +35,7 @@ Thumbs.db
 # Project specific
 backend/ingest_status.json
 backend/documents/
+documents/
 volumes/
 eval/testsets/*.json
 eval/reports/*.json

@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_TXT: int = Field(default=200, ge=0)
     CHUNK_SIZE_TABLE: int = Field(default=1500, gt=0)
 
+    # Parent-child chunking (small-to-big)
+    CHUNK_SIZE_PARENT: int = Field(default=2500, gt=0)
+    CHUNK_OVERLAP_PARENT: int = Field(default=300, ge=0)
+
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
