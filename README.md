@@ -14,10 +14,11 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 
 - **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking + dynamic score filtering (sigmoid threshold, score-gap detection, adaptive source dedup) + contextual compression (sentence-level relevance filtering)
 - **Query Optimization** — Query contextualization (auto-rewrite follow-ups into standalone retrieval queries) + query routing (simple queries skip the agent for faster responses)
+- **Retrieval Confidence & Faithfulness** — Confidence badge (high/medium/low) based on retrieval quality + optional faithfulness check that flags unsupported claims (extra LLM call)
 - **Deep Agents** — LangGraph-based multi-turn reasoning agent with sub-agent delegation and complex query decomposition
 - **Streaming Output** — SSE real-time token-by-token streaming
 - **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support with content-hash deduplication
-- **Smart Chunking** — Markdown split by heading hierarchy, PDF page numbers preserved, all chunks carry sequential metadata
+- **Smart Chunking** — Adaptive chunk sizes per file type (PDF/DOCX/TXT/table), Markdown split by heading hierarchy, parent-child chunking (small-to-big retrieval), PDF page numbers preserved
 - **Multilingual Embedding** — BAAI/bge-m3 (1024-dim), native dense + sparse dual vectors, locally deployed
 - **Batch Operations** — Select multiple documents for batch ingest or batch delete with progress modal
 - **Flexible LLM Integration** — Access any OpenAI-compatible API (OpenAI, Anthropic, DeepSeek, MiMo, etc.) via LangChain ChatOpenAI
@@ -51,7 +52,11 @@ flowchart TD
     RRF --> RC[Cross-Encoder Rerank]
     RC --> DF[Dynamic Filtering\nSigmoid Threshold + Score Gap + Source Dedup]
     DF --> LLM[Deep Agent]
-    LLM --> ANS[Answer with Citations]
+    LLM --> CONF[Confidence Assessment\nhigh / medium / low]
+    CONF --> FC{Faithfulness\nCheck enabled?}
+    FC -->|Yes| CHK[Faithfulness Check\nFlag unsupported claims]
+    FC -->|No| ANS[Answer with Citations]
+    CHK --> ANS
 ```
 
 - Query contextualization: follow-up queries are rewritten into standalone retrieval queries for better multi-turn recall
@@ -59,7 +64,9 @@ flowchart TD
 - Milvus runs parallel ANN searches, fused via Reciprocal Rank Fusion
 - Cross-encoder reranks 30 candidates, then contextual compression removes irrelevant sentences
 - Dynamic scoring selects 4-15 optimal chunks with adaptive source limits for dominant documents
-- Deep Agents supports multi-step reasoning + sub-agent delegation
+- Deep Agent supports multi-step reasoning + sub-agent delegation
+- Retrieval confidence (high/medium/low) is computed from retrieval metrics and shown as a UI badge
+- Optional faithfulness check verifies each claim in the answer against retrieved context (controlled by `FAITHFULNESS_CHECK`, incurs an extra LLM call)
 
 ---
 
@@ -180,7 +187,7 @@ Metrics: Faithfulness, Answer Relevancy, Context Precision, Context Recall, Fact
 ```
 POST /chat
 Body: { "message": "...", "session_id": "optional" }
-Response: { "response": "...", "session_id": "..." }
+Response: { "response": "...", "session_id": "...", "confidence": "high|medium|low", "unsupported_claims": [...] }
 ```
 
 ```
@@ -188,7 +195,7 @@ POST /chat/stream
 Body: { "message": "...", "session_id": "optional" }
 Response: text/event-stream
   data: {"token": "..."}
-  data: {"done": true, "session_id": "..."}
+  data: {"done": true, "session_id": "...", "confidence": "high|medium|low", "unsupported_claims": [...]}
 ```
 
 ```
@@ -268,8 +275,14 @@ All settings are configured via `.env` file or environment variables, validated 
 | **Milvus** | `MILVUS_HOST` | `localhost` | Host |
 | | `MILVUS_PORT` | `19530` | Port |
 | | `MILVUS_COLLECTION` | `ragmate_docs` | Collection name |
-| **Ingestion** | `CHUNK_SIZE` | `1000` | Text chunk size |
-| | `CHUNK_OVERLAP` | `200` | Chunk overlap |
+| **Ingestion** | `CHUNK_SIZE` | `1000` | Default text chunk size |
+| | `CHUNK_OVERLAP` | `200` | Default chunk overlap |
+| | `CHUNK_SIZE_PDF` | `600` | PDF chunk size |
+| | `CHUNK_SIZE_DOCX` | `800` | DOCX chunk size |
+| | `CHUNK_SIZE_TXT` | `1000` | TXT chunk size |
+| | `CHUNK_SIZE_TABLE` | `1500` | Table/spreadsheet chunk size |
+| | `CHUNK_SIZE_PARENT` | `2500` | Parent chunk size (small-to-big retrieval) |
+| | `CHUNK_OVERLAP_PARENT` | `300` | Parent chunk overlap |
 | **Query Processing** | `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-up queries into standalone retrieval queries via LLM |
 | | `QUERY_ROUTING_ENABLED` | `true` | Route simple queries directly to LLM, skipping the agent |
 | **Retrieval** | `HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
@@ -278,7 +291,11 @@ All settings are configured via `.env` file or environment variables, validated 
 | | `FINAL_CONTEXT_K` | `15` | Max chunks passed to the LLM (hard cap) |
 | | `RERANK_SCORE_THRESHOLD` | `0.3` | Sigmoid probability threshold (0-1) |
 | | `CONTEXTUAL_COMPRESSION` | `true` | Sentence-level compression within chunks |
+| | `COMPRESSION_SCORE_THRESHOLD` | `0.4` | Sentence relevance threshold for compression |
+| | `COMPRESSION_MIN_CHARS` | `300` | Chunks shorter than this are not compressed |
 | | `SOURCE_DOMINANCE_THRESHOLD` | `0.9` | Dominant source adaptive limit threshold |
+| | `SOURCE_DOMINANCE_BOOST` | `1.5` | Max chunk multiplier for dominant source |
+| **Generation** | `FAITHFULNESS_CHECK` | `false` | Post-generation faithfulness verification (extra LLM call) |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | Enable tracing |
 | | `LANGSMITH_API_KEY` | | LangSmith API key |
 

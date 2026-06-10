@@ -14,10 +14,11 @@
 
 - **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking + 动态评分筛选（sigmoid 概率阈值、分数断崖检测、同源自适应去重）+ 上下文压缩（句子级相关性筛选）
 - **查询优化** — 查询上下文化（追问自动改写为自包含检索 query）+ 查询路由（简单查询跳过 Agent 直接回复）
+- **检索置信度 & 忠诚度校验** — 基于检索质量的置信度标识（high/medium/low）+ 可选的忠诚度校验，标记无依据的声明（额外 LLM 调用）
 - **Deep Agents** — 基于 LangGraph 的多轮推理 Agent，支持子 Agent 委派和复杂问题分解
 - **流式输出** — SSE 实时逐 token 流式返回
 - **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown，内容 hash 自动去重
-- **智能 Chunk** — Markdown 按标题层级切分，PDF 保留页码，所有 chunk 带序号元数据
+- **智能 Chunk** — 按文件类型自适应分块大小（PDF/DOCX/TXT/表格），Markdown 按标题层级切分，支持 Parent-child 分块（小找大检索），PDF 保留页码
 - **多语言 Embedding** — BAAI/bge-m3（1024 维），本地部署，原生支持 dense + sparse 双向量
 - **批量操作** — 多选文档批量入库或批量删除，带进度弹窗
 - **灵活的 LLM 接入** — 通过 LangChain ChatOpenAI 接入任意兼容 OpenAI 格式的 API
@@ -54,7 +55,11 @@ graph TD
     RRF --> RC[Cross-Encoder 精排]
     RC --> DF[动态评分筛选\nSigmoid 阈值 + 断崖检测 + 源文件去重]
     DF --> LLM[Deep Agent]
-    LLM --> ANS[带引用的回答]
+    LLM --> CONF[置信度评估\nhigh / medium / low]
+    CONF --> FC{忠诚度校验\n是否启用?}
+    FC -->|是| CHK[忠诚度校验\n标记无依据声明]
+    FC -->|否| ANS[带引用的回答]
+    CHK --> ANS
 
     style Q fill:#e1f5fe
     style ANS fill:#c8e6c9
@@ -67,6 +72,8 @@ graph TD
 - Cross-encoder 精排后，句子级上下文压缩去除无关内容
 - 动态评分筛选 4-15 个最优片段，核心来源自适应放宽上限
 - Deep Agent 支持多步推理 + 子代理委派
+- 检索置信度（high/medium/low）基于检索指标计算，前端展示置信度标识
+- 可选忠诚度校验：验证回答中的每个声明是否有检索上下文支持（`FAITHFULNESS_CHECK` 控制，额外消耗一次 LLM 调用）
 
 ---
 
@@ -188,7 +195,7 @@ ragmate-eval evaluate --testset eval/testsets/testset_v1.json --threshold 0.75
 ```
 POST /chat
 Body: { "message": "...", "session_id": "可选" }
-Response: { "response": "...", "session_id": "..." }
+Response: { "response": "...", "session_id": "...", "confidence": "high|medium|low", "unsupported_claims": [...] }
 ```
 
 ```
@@ -196,7 +203,7 @@ POST /chat/stream
 Body: { "message": "...", "session_id": "可选" }
 Response: text/event-stream
   data: {"token": "..."}
-  data: {"done": true, "session_id": "..."}
+  data: {"done": true, "session_id": "...", "confidence": "high|medium|low", "unsupported_claims": [...]}
 ```
 
 ```
@@ -276,8 +283,14 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | **Milvus** | `MILVUS_HOST` | `localhost` | 主机 |
 | | `MILVUS_PORT` | `19530` | 端口 |
 | | `MILVUS_COLLECTION` | `ragmate_docs` | Collection 名称 |
-| **入库** | `CHUNK_SIZE` | `1000` | 文本分块大小 |
-| | `CHUNK_OVERLAP` | `200` | 分块重叠 |
+| **入库** | `CHUNK_SIZE` | `1000` | 默认文本分块大小 |
+| | `CHUNK_OVERLAP` | `200` | 默认分块重叠 |
+| | `CHUNK_SIZE_PDF` | `600` | PDF 分块大小 |
+| | `CHUNK_SIZE_DOCX` | `800` | DOCX 分块大小 |
+| | `CHUNK_SIZE_TXT` | `1000` | TXT 分块大小 |
+| | `CHUNK_SIZE_TABLE` | `1500` | 表格/电子表格分块大小 |
+| | `CHUNK_SIZE_PARENT` | `2500` | 父分块大小（小找大检索） |
+| | `CHUNK_OVERLAP_PARENT` | `300` | 父分块重叠 |
 | **查询处理** | `QUERY_CONTEXTUALIZE` | `true` | 检索前用 LLM 改写追问为自包含 query |
 | | `QUERY_ROUTING_ENABLED` | `true` | 简单查询跳过 Agent 直接回复 |
 | **检索** | `HYBRID_SEARCH_ENABLED` | `true` | 启用混合检索 |
@@ -286,7 +299,11 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | | `FINAL_CONTEXT_K` | `15` | 最终给 LLM 的最大片段数（硬上限） |
 | | `RERANK_SCORE_THRESHOLD` | `0.3` | sigmoid 概率阈值（0-1） |
 | | `CONTEXTUAL_COMPRESSION` | `true` | chunk 内句子级压缩，去除无关内容 |
+| | `COMPRESSION_SCORE_THRESHOLD` | `0.4` | 句子保留阈值 |
+| | `COMPRESSION_MIN_CHARS` | `300` | 低于此长度的 chunk 不压缩 |
 | | `SOURCE_DOMINANCE_THRESHOLD` | `0.9` | 核心来源自适应放宽阈值 |
+| | `SOURCE_DOMINANCE_BOOST` | `1.5` | 主导来源 chunk 上限倍数 |
+| **生成** | `FAITHFULNESS_CHECK` | `false` | 生成后忠诚度校验（额外 LLM 调用） |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
 | | `LANGSMITH_API_KEY` | | LangSmith API Key |
 
