@@ -42,9 +42,16 @@ eval = [
     "ragas>=0.2.0",
     "tqdm>=4.65.0",
 ]
+test = [
+    "pytest>=8.0",
+]
 
 [project.scripts]
 ragmate-eval = "backend.eval.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [build-system]
 requires = ["setuptools>=68.0"]

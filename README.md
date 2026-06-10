@@ -145,6 +145,14 @@ Open http://localhost:8000 in browser.
 - **Chat** — Knowledge-base powered streaming Q&A with multi-turn conversation
 - **Documents** — Upload documents, manage documents, trigger ingestion
 
+### Unit Tests
+
+```bash
+cd backend
+pip install -e ".[test]"
+pytest -v
+```
+
 ### RAGAS Evaluation
 
 Evaluate your RAG pipeline quality with RAGAS metrics. Install eval dependencies and ensure infrastructure is running:
@@ -348,6 +356,7 @@ RagMate/
     │   ├── chat.py                # /chat, /chat/stream, /chat/sessions
     │   ├── documents.py           # /documents, /documents/upload
     │   └── ingest.py              # /ingest, /ingest/status
+    ├── tests/                     # Unit tests (pytest)
     ├── eval/                      # RAGAS evaluation CLI
     └── documents/                 # Document storage directory
 ```

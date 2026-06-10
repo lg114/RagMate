@@ -152,6 +152,14 @@ uvicorn backend.app:app --reload --port 8000
 - **对话** — 基于知识库的流式问答，支持多轮对话
 - **文档** — 上传文档、管理文档、触发入库
 
+### 单元测试
+
+```bash
+cd backend
+pip install -e ".[test]"
+pytest -v
+```
+
 ### RAGAS 评估
 
 使用 RAGAS 指标评估 RAG 管道质量。需要先安装评估依赖并启动基础设施：
@@ -356,6 +364,7 @@ RagMate/
     │   ├── chat.py                # /chat, /chat/stream, /chat/sessions
     │   ├── documents.py           # /documents, /documents/upload
     │   └── ingest.py              # /ingest, /ingest/status
+    ├── tests/                     # 单元测试（pytest）
     ├── eval/                      # RAGAS 评估 CLI
     └── documents/                 # 文档存储目录
 ```
