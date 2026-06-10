@@ -1,6 +1,7 @@
 """检索管线：Milvus 混合检索 + Reranking + 动态过滤。"""
 import logging
 import math
+import re
 import threading
 
 from pymilvus import AnnSearchRequest, RRFRanker
@@ -146,6 +147,49 @@ def _rerank_and_score(query: str, candidates: list[dict]) -> tuple[list[dict], f
     return candidates, candidates[0]["score"]
 
 
+# ── Contextual Compression ──────────────────────────────────────────────────
+
+_SENT_RE = re.compile(r"(?<=[。！？.!?\n])\s*")
+
+
+def _compress_chunks(query: str, candidates: list[dict]) -> list[dict]:
+    """用 reranker 对 chunk 内句子级评分，只保留相关句子。减少传给 LLM 的噪声。"""
+    from backend.infrastructure.config import settings
+    if not settings.CONTEXTUAL_COMPRESSION:
+        return candidates
+
+    reranker = get_reranker()
+
+    for c in candidates:
+        text = c["text"]
+        # 短 chunk 不压缩
+        if len(text) < settings.COMPRESSION_MIN_CHARS:
+            continue
+
+        sentences = [s.strip() for s in _SENT_RE.split(text) if s.strip()]
+        if len(sentences) <= 2:
+            continue
+
+        # 对每个句子做 reranker 评分
+        pairs = [(query, s) for s in sentences]
+        logits = reranker.predict(pairs)
+        scored_sentences = list(zip(sentences, [_sigmoid(float(l)) for l in logits]))
+
+        # 保留超过阈值的句子，至少保留 top-1
+        threshold = settings.COMPRESSION_SCORE_THRESHOLD
+        kept = [(s, sc) for s, sc in scored_sentences if sc >= threshold]
+        if not kept:
+            kept = [max(scored_sentences, key=lambda x: x[1])]
+
+        compressed = "".join(s for s, _ in kept)
+        # 只有压缩后明显更短才替换（避免微小变化的开销）
+        if len(compressed) < len(text) * 0.8:
+            c["text"] = compressed
+            c["compressed"] = True
+
+    return candidates
+
+
 def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[dict]:
     """基于 sigmoid 概率的动态过滤、去重、截断。"""
     if not candidates:
@@ -160,17 +204,32 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     if not scored:
         return []
 
-    # 2. 动态源文件去重：同源高分 chunk 多则放宽
+    # 2. 动态源文件去重：同源高分 chunk 多则放宽；核心来源软上限
     source_groups: dict[str, list] = {}
     for c in scored:
         canonical = canonical_source(c["source"])
         source_groups.setdefault(canonical, []).append(c)
 
+    # 计算每个来源的"主导度"（该来源最高分 / 全局最高分）
+    source_dominance: dict[str, float] = {}
+    for canonical, chunks in source_groups.items():
+        best = max(chunks, key=lambda x: x["score"])["score"]
+        source_dominance[canonical] = best / top_score if top_score > 0 else 0
+
     deduped = []
     for canonical, chunks in source_groups.items():
         chunks.sort(key=lambda x: x["score"], reverse=True)
         high_count = sum(1 for c in chunks if c["score"] >= top_score * settings.HIGH_SCORE_RATIO)
-        limit = min(max(high_count, settings.MIN_PER_SOURCE), settings.MAX_PER_SOURCE)
+        limit = max(high_count, settings.MIN_PER_SOURCE)
+
+        # 软限制：当该来源主导度很高时，放宽上限
+        dominance = source_dominance[canonical]
+        if dominance >= settings.SOURCE_DOMINANCE_THRESHOLD:
+            soft_limit = min(int(limit * settings.SOURCE_DOMINANCE_BOOST), k)
+        else:
+            soft_limit = settings.MAX_PER_SOURCE
+        limit = min(limit, soft_limit)
+
         deduped.extend(chunks[:limit])
 
     deduped.sort(key=lambda x: x["score"], reverse=True)
@@ -210,6 +269,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             return []
 
         candidates, top_score = _rerank_and_score(query, candidates)
+
+        # 上下文压缩：rerank 后、过滤前，压缩 chunk 内无关句子
+        candidates = _compress_chunks(query, candidates)
 
         threshold = settings.RERANK_SCORE_THRESHOLD
         result = _filter_and_dedup(candidates, threshold, k)

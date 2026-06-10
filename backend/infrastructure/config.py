@@ -70,9 +70,16 @@ class Settings(BaseSettings):
     # Reranker 动态过滤调参
     DYNAMIC_THRESHOLD_RATIO: float = Field(default=0.5, gt=0.0, le=1.0)  # top_score 乘数
     HIGH_SCORE_RATIO: float = Field(default=0.6, gt=0.0, le=1.0)         # 高分 chunk 判定比例
-    MAX_PER_SOURCE: int = Field(default=4, gt=0)                          # 单源最大 chunk 数
+    MAX_PER_SOURCE: int = Field(default=4, gt=0)                          # 单源最大 chunk 数（默认上限）
     MIN_PER_SOURCE: int = Field(default=2, gt=0)                          # 单源最小 chunk 数
     SCORE_GAP_THRESHOLD: float = Field(default=0.15, gt=0.0, lt=1.0)     # 分数断崖阈值
+    SOURCE_DOMINANCE_THRESHOLD: float = Field(default=0.9, gt=0.0, le=1.0)  # 来源主导度阈值（top 来源分数 / 全局最高分）
+    SOURCE_DOMINANCE_BOOST: float = Field(default=1.5, gt=1.0, le=3.0)     # 主导来源的 chunk 上限倍数
+
+    # 上下文压缩
+    CONTEXTUAL_COMPRESSION: bool = True                                  # 是否启用 chunk 内句子级压缩
+    COMPRESSION_SCORE_THRESHOLD: float = Field(default=0.4, gt=0.0, lt=1.0)  # 句子保留阈值
+    COMPRESSION_MIN_CHARS: int = Field(default=300, gt=0)                # 短于此长度的 chunk 不压缩
 
     # Query processing
     QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
