@@ -12,7 +12,7 @@
 
 ## 核心特性
 
-- **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking + 动态评分筛选（sigmoid 概率阈值、分数断崖检测、同源自适应去重）
+- **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking + 动态评分筛选（sigmoid 概率阈值、分数断崖检测、同源自适应去重）+ 上下文压缩（句子级相关性筛选）
 - **查询优化** — 查询上下文化（追问自动改写为自包含检索 query）+ 查询路由（简单查询跳过 Agent 直接回复）
 - **Deep Agents** — 基于 LangGraph 的多轮推理 Agent，支持子 Agent 委派和复杂问题分解
 - **流式输出** — SSE 实时逐 token 流式返回
@@ -64,7 +64,8 @@ graph TD
 - 查询上下文化：追问自动改写为自包含检索 query，提升多轮对话检索质量
 - BGE-M3 一次编码同时输出 dense（语义）+ sparse（关键词）向量
 - Milvus 并行 ANN 检索，RRF 融合排序，召回 30 候选
-- Cross-encoder 精排后，动态评分筛选 4-15 个最优片段
+- Cross-encoder 精排后，句子级上下文压缩去除无关内容
+- 动态评分筛选 4-15 个最优片段，核心来源自适应放宽上限
 - Deep Agent 支持多步推理 + 子代理委派
 
 ---
@@ -284,6 +285,8 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | | `RERANK_CANDIDATES` | `30` | rerank 候选池大小 |
 | | `FINAL_CONTEXT_K` | `15` | 最终给 LLM 的最大片段数（硬上限） |
 | | `RERANK_SCORE_THRESHOLD` | `0.3` | sigmoid 概率阈值（0-1） |
+| | `CONTEXTUAL_COMPRESSION` | `true` | chunk 内句子级压缩，去除无关内容 |
+| | `SOURCE_DOMINANCE_THRESHOLD` | `0.9` | 核心来源自适应放宽阈值 |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | 启用追踪 |
 | | `LANGSMITH_API_KEY` | | LangSmith API Key |
 

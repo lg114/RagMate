@@ -12,7 +12,7 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 
 ## Key Features
 
-- **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking + dynamic score filtering (sigmoid threshold, score-gap detection, adaptive source dedup)
+- **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking + dynamic score filtering (sigmoid threshold, score-gap detection, adaptive source dedup) + contextual compression (sentence-level relevance filtering)
 - **Query Optimization** — Query contextualization (auto-rewrite follow-ups into standalone retrieval queries) + query routing (simple queries skip the agent for faster responses)
 - **Deep Agents** — LangGraph-based multi-turn reasoning agent with sub-agent delegation and complex query decomposition
 - **Streaming Output** — SSE real-time token-by-token streaming
@@ -57,7 +57,8 @@ flowchart TD
 - Query contextualization: follow-up queries are rewritten into standalone retrieval queries for better multi-turn recall
 - BGE-M3 encodes query into dense (semantic) + sparse (keyword) vectors in one pass
 - Milvus runs parallel ANN searches, fused via Reciprocal Rank Fusion
-- Cross-encoder reranks 30 candidates, dynamic scoring selects 4-15 optimal chunks
+- Cross-encoder reranks 30 candidates, then contextual compression removes irrelevant sentences
+- Dynamic scoring selects 4-15 optimal chunks with adaptive source limits for dominant documents
 - Deep Agents supports multi-step reasoning + sub-agent delegation
 
 ---
@@ -276,6 +277,8 @@ All settings are configured via `.env` file or environment variables, validated 
 | | `RERANK_CANDIDATES` | `30` | Rerank candidate pool size |
 | | `FINAL_CONTEXT_K` | `15` | Max chunks passed to the LLM (hard cap) |
 | | `RERANK_SCORE_THRESHOLD` | `0.3` | Sigmoid probability threshold (0-1) |
+| | `CONTEXTUAL_COMPRESSION` | `true` | Sentence-level compression within chunks |
+| | `SOURCE_DOMINANCE_THRESHOLD` | `0.9` | Dominant source adaptive limit threshold |
 | **LangSmith** | `LANGSMITH_TRACING` | `false` | Enable tracing |
 | | `LANGSMITH_API_KEY` | | LangSmith API key |
 
