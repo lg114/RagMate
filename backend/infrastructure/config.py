@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = Field(default=1000, gt=0)
     CHUNK_OVERLAP: int = Field(default=200, ge=0)
 
+    # Adaptive chunking per file type
+    CHUNK_SIZE_PDF: int = Field(default=600, gt=0)
+    CHUNK_OVERLAP_PDF: int = Field(default=100, ge=0)
+    CHUNK_SIZE_DOCX: int = Field(default=800, gt=0)
+    CHUNK_OVERLAP_DOCX: int = Field(default=150, ge=0)
+    CHUNK_SIZE_TXT: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_TXT: int = Field(default=200, ge=0)
+    CHUNK_SIZE_TABLE: int = Field(default=1500, gt=0)
+
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"

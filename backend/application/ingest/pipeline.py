@@ -68,15 +68,25 @@ def _detect_new_files(docs_dir, all_files):
     return new_files, ingested_info
 
 
+def _get_text_splitter(ext: str):
+    """根据文件扩展名返回对应的 text splitter。表格类返回 None（不切分）。"""
+    if ext in (".xlsx", ".xls"):
+        return None
+    size, overlap = {
+        ".md": (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP),
+        ".markdown": (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP),
+        ".pdf": (settings.CHUNK_SIZE_PDF, settings.CHUNK_OVERLAP_PDF),
+        ".docx": (settings.CHUNK_SIZE_DOCX, settings.CHUNK_OVERLAP_DOCX),
+        ".txt": (settings.CHUNK_SIZE_TXT, settings.CHUNK_OVERLAP_TXT),
+    }.get(ext, (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP))
+    return RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=overlap)
+
+
 def _load_and_split(docs_dir, new_files, cancel_event=None):
     """逐文件加载 + 切分，实时更新进度。返回 (chunks, chunk_counter, failed_files)。"""
     chunks = []
     md_headers = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
     md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=md_headers)
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
-    )
-
     failed_files = []
     for i, filename in enumerate(new_files):
         if cancel_event and cancel_event.is_set():
@@ -87,7 +97,7 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
                 "current_file": filename, "progress": i, "total": len(new_files),
             })
             filepath = os.path.join(docs_dir, filename)
-            pages = load_document(filepath)
+            pages = load_document(filepath, table_chunk_size=settings.CHUNK_SIZE_TABLE)
             logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
 
             if not pages:
@@ -103,9 +113,14 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
                     md_chunks = md_splitter.split_text(doc.page_content)
                     for c in md_chunks:
                         c.metadata.update({k: v for k, v in doc.metadata.items() if k not in c.metadata})
-                    chunks.extend(text_splitter.split_documents(md_chunks))
+                    splitter = _get_text_splitter(ext)
+                    chunks.extend(splitter.split_documents(md_chunks))
                 else:
-                    chunks.extend(text_splitter.split_documents([doc]))
+                    splitter = _get_text_splitter(ext)
+                    if splitter is not None:
+                        chunks.extend(splitter.split_documents([doc]))
+                    else:
+                        chunks.append(doc)
         except Exception as e:
             logger.error(f"Failed to process {filename}: {e}")
             failed_files.append({"filename": filename, "error": str(e)})
