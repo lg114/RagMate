@@ -1,4 +1,5 @@
 """聊天端点。"""
+import asyncio
 import json
 import logging
 
@@ -29,9 +30,18 @@ async def chat_endpoint(body: ChatRequest, request: Request):
 async def chat_stream_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
 
+    _HEARTBEAT_INTERVAL = 15  # 秒
+
     async def event_generator():
-        async for chunk in chat_stream(body.message, body.session_id, replace_last=body.replace_last):
-            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        ait = chat_stream(body.message, body.session_id, replace_last=body.replace_last).__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(ait.__anext__(), _HEARTBEAT_INTERVAL)
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                yield ":heartbeat\n\n"
+            except StopAsyncIteration:
+                break
 
     return StreamingResponse(
         event_generator(),
