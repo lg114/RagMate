@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     COMPRESSION_SCORE_THRESHOLD: float = Field(default=0.4, gt=0.0, lt=1.0)  # 句子保留阈值
     COMPRESSION_MIN_CHARS: int = Field(default=300, gt=0)                # 短于此长度的 chunk 不压缩
 
+    # 忠诚度校验
+    FAITHFULNESS_CHECK: bool = False                                     # 生成后校验声明是否有依据（增加一次 LLM 调用）
+
     # Query processing
     QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
     QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过 agent 直接回复

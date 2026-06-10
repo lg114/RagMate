@@ -14,6 +14,14 @@ from backend.infrastructure.milvus import check_milvus_available, canonical_sour
 
 logger = logging.getLogger("ragmate")
 
+# ── 检索质量指标（线程本地，供 confidence 计算） ──────────────────────────────
+_metrics = threading.local()
+
+
+def get_retrieval_metrics() -> dict | None:
+    """获取最近一次检索的质量指标。"""
+    return getattr(_metrics, "last", None)
+
 _CONTEXTUALIZE_PROMPT = """根据以下对话历史，将用户的最新问题改写为一个独立、完整的搜索查询。
 要求：
 - 补全省略的指代（如"它"、"这个"、"那个"）为具体实体
@@ -247,6 +255,60 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     return result
 
 
+# ── Faithfulness Check ───────────────────────────────────────────────────────
+
+_FAITHFULNESS_PROMPT = """判断以下"声明"是否被"证据"支持。逐条输出 JSON 数组，每条格式：
+{{"claim": "声明内容", "supported": true/false}}
+
+只输出 JSON 数组，不要解释。
+
+声明：
+{claims}
+
+证据：
+{evidence}"""
+
+
+def check_faithfulness(response: str, source_texts: list[str]) -> list[dict] | None:
+    """检查生成的 response 中的声明是否被 source_texts 支持。
+
+    返回 [{"claim": "...", "supported": true/false}, ...]，失败时返回 None。
+    """
+    from backend.infrastructure.config import settings
+    if not settings.FAITHFULNESS_CHECK:
+        return None
+    if not source_texts or not response:
+        return None
+
+    # 简单按句号拆分声明（取前 10 条避免 prompt 过长）
+    sentences = [s.strip() for s in re.split(r"(?<=[。！？.!?\n])", response) if s.strip() and len(s.strip()) > 10]
+    if not sentences:
+        return None
+    sentences = sentences[:10]
+
+    evidence = "\n---\n".join(source_texts[:10])
+
+    try:
+        from backend.infrastructure.model_factory import get_llm
+        llm = get_llm()
+        prompt = _FAITHFULNESS_PROMPT.format(
+            claims="\n".join(f"{i+1}. {s}" for i, s in enumerate(sentences)),
+            evidence=evidence,
+        )
+        result = llm.invoke(prompt)
+        import json
+        # 提取 JSON 数组
+        text = result.content.strip()
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            return json.loads(text[start:end])
+    except Exception as e:
+        logger.warning(f"Faithfulness check failed: {e}")
+
+    return None
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 def retrieve(query: str, k: int = None) -> list[dict]:
@@ -284,6 +346,15 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             f"Retrieval: len={len(query)} → top_score={top_score:.3f}, "
             f"candidates={len(candidates)}, returned={len(result)}"
         )
+
+        # 存储检索质量指标
+        _metrics.last = {
+            "top_score": round(top_score, 3),
+            "candidates": len(candidates),
+            "returned": len(result),
+            "threshold": round(threshold, 3),
+        }
+
         return result
 
     except AppError:

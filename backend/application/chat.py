@@ -99,7 +99,7 @@ def _direct_llm_reply(history: list[dict]) -> str:
 _ERROR_SENTINEL = "\x00ERR\x00"
 
 
-_CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))】", re.IGNORECASE)
+_CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))(?:[,，]\s*第\d+页)?】", re.IGNORECASE)
 _SOURCE_LINE_RE = re.compile(r"^\s*数据来源[:：].*$", re.MULTILINE)
 
 
@@ -112,7 +112,8 @@ def normalize_citations(text: str) -> str:
 
     cleaned = _SOURCE_LINE_RE.sub("", text)
     for source in sources:
-        cleaned = cleaned.replace(f"【{source}】", "")
+        # 移除所有匹配该文件名的引用（可能带页码）
+        cleaned = re.sub(r"【" + re.escape(source) + r"(?:[,，]\s*第\d+页)?】", "", cleaned)
 
     cleaned = re.sub(r"[ \t]+([，。；：、,.!?！？])", r"\1", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
@@ -237,7 +238,25 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
         msgs.append(("assistant", response_text))
     await _persist_messages(session_id, msgs)
 
-    return {"response": _strip_error_sentinel(response_text), "session_id": session_id}
+    resp = {"response": _strip_error_sentinel(response_text), "session_id": session_id}
+
+    # 从 agent 上下文中取出检索数据，计算置信度
+    from backend.core.agent import pop_retrieval_data
+    rdata = pop_retrieval_data(session_id)
+    if rdata:
+        metrics_list = rdata.get("metrics", [])
+        if metrics_list:
+            best_score = max(m["top_score"] for m in metrics_list)
+            total_returned = sum(m["returned"] for m in metrics_list)
+            if best_score >= 0.7 and total_returned >= 3:
+                level = "high"
+            elif best_score >= 0.4 and total_returned >= 1:
+                level = "medium"
+            else:
+                level = "low"
+            resp["confidence"] = {"level": level, "score": best_score, "chunks": total_returned}
+
+    return resp
 
 
 _SENTINEL = object()
@@ -331,6 +350,35 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     is_error = _is_error_response(response_text)
     elapsed = time.monotonic() - t0
 
+    # 从 agent 上下文中取出检索数据
+    from backend.core.agent import pop_retrieval_data
+    rdata = pop_retrieval_data(session_id)
+
+    # 计算置信度
+    confidence = None
+    if rdata:
+        metrics_list = rdata.get("metrics", [])
+        if metrics_list:
+            best_score = max(m["top_score"] for m in metrics_list)
+            total_returned = sum(m["returned"] for m in metrics_list)
+            if best_score >= 0.7 and total_returned >= 3:
+                level = "high"
+            elif best_score >= 0.4 and total_returned >= 1:
+                level = "medium"
+            else:
+                level = "low"
+            confidence = {"level": level, "score": best_score, "chunks": total_returned}
+
+    # 忠诚度校验（可选，增加一次 LLM 调用）
+    faithfulness = None
+    if not is_error and rdata and rdata.get("texts"):
+        from backend.core.retriever import check_faithfulness
+        faithfulness = check_faithfulness(response_text, rdata["texts"])
+        if faithfulness:
+            unsupported = [c for c in faithfulness if not c.get("supported")]
+            if unsupported:
+                logger.warning(f"Faithfulness: {len(unsupported)} unsupported claims in session={session_id[:8]}")
+
     if is_error:
         logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
     else:
@@ -343,4 +391,11 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
         msgs.append(("assistant", response_text))
     await _persist_messages(session_id, msgs)
 
-    yield {"done": True, "session_id": session_id}
+    done_event = {"done": True, "session_id": session_id}
+    if confidence:
+        done_event["confidence"] = confidence
+    if faithfulness:
+        unsupported = [c for c in faithfulness if not c.get("supported")]
+        if unsupported:
+            done_event["unsupported_claims"] = unsupported
+    yield done_event

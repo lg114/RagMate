@@ -42,7 +42,7 @@ const API = {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.done) { onDone(data.session_id); return; }
+            if (data.done) { onDone(data); return; }
             if (data.error) { onError(data.error); return; }
             if (data.token) onToken(data.token);
           } catch (e) {
@@ -56,7 +56,7 @@ const API = {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.done) { onDone(data.session_id); return; }
+            if (data.done) { onDone(data); return; }
             if (data.error) { onError(data.error); return; }
             if (data.token) onToken(data.token);
           } catch (e) { /* ignore */ }
@@ -200,7 +200,7 @@ function truncate(str, len) {
 }
 
 function normalizeCitations(text) {
-  const citationRe = /【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))】/gi;
+  const citationRe = /【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))(?:[,，]\s*第\d+页)?】/gi;
   const sources = [];
   let citationCount = 0;
   let match;
@@ -212,7 +212,8 @@ function normalizeCitations(text) {
 
   let cleaned = text.replace(/^\s*数据来源[:：].*$/gm, '');
   sources.forEach(source => {
-    cleaned = cleaned.split(`【${source}】`).join('');
+    // 移除所有匹配该文件名的引用（可能带页码）
+    cleaned = cleaned.replace(new RegExp(`【${source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[,，]\\s*第\\d+页)?】`, 'g'), '');
   });
   cleaned = cleaned
     .replace(/[ \t]+([，。；：、,.!?！？])/g, '$1')
@@ -396,9 +397,9 @@ const ChatPanel = {
       text,
       sid,
       (token) => { fullText += token; this.appendStreamToken(streamDiv, fullText); },
-      (sessionId) => {
-        this.finalizeStreamMessage(streamDiv, fullText);
-        sessionStorage.setItem('ragmate_session_id', sessionId);
+      (doneData) => {
+        this.finalizeStreamMessage(streamDiv, fullText, doneData);
+        sessionStorage.setItem('ragmate_session_id', doneData.session_id);
         this.setDisabled(false);
         this.textareaEl.focus();
         HistoryPanel.load();
@@ -453,10 +454,29 @@ const ChatPanel = {
     }
   },
 
-  finalizeStreamMessage(div, fullText) {
+  finalizeStreamMessage(div, fullText, doneData = {}) {
     div._streamDone = true;
     const content = div.querySelector('.msg-content');
     content.innerHTML = renderAssistantMarkdown(fullText || '没有收到回复');
+
+    // 置信度指示器
+    if (doneData.confidence) {
+      const level = doneData.confidence.level;
+      const label = { high: '高置信', medium: '中置信', low: '低置信' }[level] || level;
+      const badge = document.createElement('div');
+      badge.className = `confidence-badge confidence-${level}`;
+      badge.textContent = label;
+      badge.title = `最高相关度: ${doneData.confidence.score}, 引用片段: ${doneData.confidence.chunks}`;
+      content.appendChild(badge);
+    }
+
+    // 忠诚度警告
+    if (doneData.unsupported_claims && doneData.unsupported_claims.length > 0) {
+      const warn = document.createElement('div');
+      warn.className = 'faithfulness-warning';
+      warn.innerHTML = `⚠ 以下声明可能缺乏文献支撑：<ul>${doneData.unsupported_claims.map(c => `<li>${escapeHtml(c.claim)}</li>`).join('')}</ul>`;
+      content.appendChild(warn);
+    }
 
     // Add action buttons
     const actionsHtml = `<div class="msg-actions">

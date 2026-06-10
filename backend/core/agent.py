@@ -8,6 +8,28 @@ from deepagents import create_deep_agent
 from backend.infrastructure.model_factory import get_llm
 from backend.core.retriever import retrieve
 
+# ── 跨线程上下文存储 ─────────────────────────────────────────────────────────
+# retrieval_tool 在 LangGraph 线程池中执行，与 run_agent 调用者不在同一线程，
+# 因此不能用 threading.local()。使用模块级 dict（以 session_id 为 key）做跨线程通信。
+_contexts: dict[str, dict] = {}
+_contexts_lock = threading.Lock()
+_current_session_id: str | None = None  # 每次 agent 调用前设置
+
+
+def _prepare_session(session_id: str, messages: list[dict]):
+    """agent 调用前，初始化该 session 的上下文。"""
+    global _current_session_id
+    _current_session_id = session_id
+    with _contexts_lock:
+        _contexts[session_id] = {"messages": messages, "metrics": [], "texts": []}
+
+
+def pop_retrieval_data(session_id: str) -> dict | None:
+    """agent 调用后，取出并清除该 session 的检索数据。"""
+    with _contexts_lock:
+        return _contexts.pop(session_id, None)
+
+
 # ── System Prompt ───────────────────────────────────────────────────────────
 def _load_system_prompt() -> str:
     return (Path(__file__).parent / "prompts" / "researcher.md").read_text(encoding="utf-8")
@@ -16,13 +38,8 @@ def _load_system_prompt() -> str:
 # ── Tool ────────────────────────────────────────────────────────────────────
 MAX_TOOL_RETRIEVALS = 8  # 单次 agent 调用中 retrieval_tool 的最大调用次数
 
-_tool_call_state = threading.local()
-
-
-def _reset_tool_counter():
-    """重置当前线程的工具调用计数器和对话历史（每次 agent 调用前执行）。"""
-    _tool_call_state.retrieval_count = 0
-    _tool_call_state.messages = []
+_retrieval_counts: dict[str, int] = {}  # session_id → count
+_counts_lock = threading.Lock()
 
 
 @tool
@@ -31,17 +48,22 @@ def retrieval_tool(query: str) -> str:
     from backend.infrastructure.config import settings
     from backend.domain.errors import AppError
 
-    count = getattr(_tool_call_state, "retrieval_count", 0) + 1
-    _tool_call_state.retrieval_count = count
+    sid = _current_session_id or "default"
 
+    # 检索次数限制
+    with _counts_lock:
+        count = _retrieval_counts.get(sid, 0) + 1
+        _retrieval_counts[sid] = count
     if count > MAX_TOOL_RETRIEVALS:
         return "已达到最大检索次数，请基于已有信息回答用户。"
 
     # 查询上下文化：用对话历史改写追问为自包含 query
-    history = getattr(_tool_call_state, "messages", [])
-    if len(history) > 1:
-        from backend.core.retriever import contextualize_query
-        query = contextualize_query(query, history)
+    ctx = _contexts.get(sid)
+    if ctx:
+        history = ctx.get("messages", [])
+        if len(history) > 1:
+            from backend.core.retriever import contextualize_query
+            query = contextualize_query(query, history)
 
     try:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
@@ -49,6 +71,14 @@ def retrieval_tool(query: str) -> str:
         return "检索服务暂时不可用，请稍后重试"
     if not results:
         return "未找到相关文档"
+
+    # 收集检索质量指标和结果（用于 confidence 和 faithfulness check）
+    from backend.core.retriever import get_retrieval_metrics
+    metrics = get_retrieval_metrics()
+    if ctx and metrics:
+        ctx["metrics"].append(metrics)
+    if ctx:
+        ctx["texts"].extend(r.get("text", "") for r in results)
 
     parts = []
     for r in results:
@@ -85,6 +115,28 @@ def get_agent():
         return _agent
 
 
+def get_confidence(session_id: str) -> dict | None:
+    """根据检索指标计算置信度。"""
+    ctx = _contexts.get(session_id)
+    if not ctx:
+        return None
+    metrics_list = ctx.get("metrics", [])
+    if not metrics_list:
+        return None
+
+    best_score = max(m["top_score"] for m in metrics_list)
+    total_returned = sum(m["returned"] for m in metrics_list)
+
+    if best_score >= 0.7 and total_returned >= 3:
+        level = "high"
+    elif best_score >= 0.4 and total_returned >= 1:
+        level = "medium"
+    else:
+        level = "low"
+
+    return {"level": level, "score": best_score, "chunks": total_returned}
+
+
 def clear_agent_cache():
     """清除 Agent 和 LLM 缓存，下次调用时重新创建。"""
     global _agent
@@ -109,15 +161,18 @@ def extract_text_content(content) -> str:
 def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
     """运行 agent，支持多轮对话。messages 格式: [{"role": "user", "content": "..."}, ...]"""
     from backend.infrastructure.config import settings
-    _reset_tool_counter()
-    _tool_call_state.messages = messages
-    return get_agent().invoke(
-        {"messages": messages},
-        config={
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": settings.AGENT_RECURSION_LIMIT,
-        },
-    )
+    _prepare_session(thread_id, messages)
+    try:
+        return get_agent().invoke(
+            {"messages": messages},
+            config={
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": settings.AGENT_RECURSION_LIMIT,
+            },
+        )
+    finally:
+        with _counts_lock:
+            _retrieval_counts.pop(thread_id, None)
 
 
 def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
@@ -129,21 +184,24 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
     from langchain_core.messages import AIMessageChunk, ToolMessage
 
     from backend.infrastructure.config import settings
-    _reset_tool_counter()
-    _tool_call_state.messages = messages
-    for msg_chunk, _ in get_agent().stream(
-        {"messages": messages},
-        config={
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": settings.AGENT_RECURSION_LIMIT,
-        },
-        stream_mode="messages",
-    ):
-        if isinstance(msg_chunk, ToolMessage):
-            continue
-        if isinstance(msg_chunk, AIMessageChunk):
-            if getattr(msg_chunk, "tool_calls", None):
+    _prepare_session(thread_id, messages)
+    try:
+        for msg_chunk, _ in get_agent().stream(
+            {"messages": messages},
+            config={
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": settings.AGENT_RECURSION_LIMIT,
+            },
+            stream_mode="messages",
+        ):
+            if isinstance(msg_chunk, ToolMessage):
                 continue
-            text = extract_text_content(getattr(msg_chunk, "content", ""))
-            if text:
-                yield text
+            if isinstance(msg_chunk, AIMessageChunk):
+                if getattr(msg_chunk, "tool_calls", None):
+                    continue
+                text = extract_text_content(getattr(msg_chunk, "content", ""))
+                if text:
+                    yield text
+    finally:
+        with _counts_lock:
+            _retrieval_counts.pop(thread_id, None)
