@@ -65,6 +65,34 @@ async def _delete_last_persisted_turn(session_id: str):
 
 AGENT_TIMEOUT = 120  # Agent 调用超时（秒）
 
+# ── 查询路由：明显的非 RAG 查询，跳过 agent 直接回复 ─────────────────────────
+_NON_RAG_RE = re.compile(
+    r"^(?:"
+    r"你好|hello|hi|hey|嗨|哈喽|哈啰"
+    r"|谢谢|感谢|thanks|thank you"
+    r"|你是谁|你叫什么|你能做什么|介绍一下你自己|你是哪个模型"
+    r"|好的?|ok|嗯|知道了|明白|收到|了解"
+    r"|再见|拜拜|bye|goodbye"
+    r")\s*[!！?？.。]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_simple_query(message: str) -> bool:
+    """判断是否为简单的非 RAG 查询（问候、感谢等）。"""
+    return bool(_NON_RAG_RE.match(message.strip()))
+
+
+def _direct_llm_reply(history: list[dict]) -> str:
+    """直接调用 LLM 回复简单查询，不经过 agent（同步）。"""
+    from backend.infrastructure.model_factory import get_llm
+    from backend.core.agent import _load_system_prompt
+
+    llm = get_llm()
+    messages = [{"role": "system", "content": _load_system_prompt()}] + history
+    response = llm.invoke(messages)
+    return response.content
+
 
 # 错误哨兵前缀，用于判断 response_text 是否为错误而非正常回复
 # 使用 UUID 标记确保不会与 LLM 自然输出冲突
@@ -154,7 +182,32 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
     # 3. 追加用户消息
     history.append({"role": "user", "content": message})
 
-    # 3. 调用 Agent（同步，放到线程中执行，带超时）
+    # 3.5 查询路由：简单查询跳过 agent
+    from backend.infrastructure.config import settings
+    if settings.QUERY_ROUTING_ENABLED and _is_simple_query(message):
+        t0 = time.monotonic()
+        try:
+            response_text = await asyncio.to_thread(_direct_llm_reply, history)
+            response_text = normalize_citations(response_text)
+        except Exception as e:
+            response_text = _classify_error(e)
+        elapsed = time.monotonic() - t0
+
+        is_error = _is_error_response(response_text)
+        if is_error:
+            logger.warning(f"chat route error: session={session_id[:8]} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
+        else:
+            history.append({"role": "assistant", "content": response_text})
+            logger.info(f"chat route ok: session={session_id[:8]} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
+        await save_session(session_id, history)
+
+        msgs = [("user", message)]
+        if not is_error:
+            msgs.append(("assistant", response_text))
+        await _persist_messages(session_id, msgs)
+        return {"response": _strip_error_sentinel(response_text), "session_id": session_id}
+
+    # 4. 调用 Agent（同步，放到线程中执行，带超时）
     t0 = time.monotonic()
     try:
         result = await asyncio.wait_for(
@@ -203,6 +256,32 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
         await _delete_last_persisted_turn(session_id)
 
     history.append({"role": "user", "content": message})
+
+    # 查询路由：简单查询跳过 agent
+    from backend.infrastructure.config import settings
+    if settings.QUERY_ROUTING_ENABLED and _is_simple_query(message):
+        t0 = time.monotonic()
+        try:
+            response_text = await asyncio.to_thread(_direct_llm_reply, history)
+            response_text = normalize_citations(response_text)
+        except Exception as e:
+            response_text = _classify_error(e)
+        elapsed = time.monotonic() - t0
+
+        is_error = _is_error_response(response_text)
+        if is_error:
+            logger.warning(f"chat_stream route error: session={session_id[:8]} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
+            await save_session(session_id, history)
+            yield {"error": _strip_error_sentinel(response_text)}
+            return
+
+        history.append({"role": "assistant", "content": response_text})
+        logger.info(f"chat_stream route ok: session={session_id[:8]} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
+        await save_session(session_id, history)
+        await _persist_messages(session_id, [("user", message), ("assistant", response_text)])
+        yield {"token": response_text}
+        yield {"done": True, "session_id": session_id}
+        return
 
     queue: asyncio.Queue = asyncio.Queue()
     full_response: list[str] = []

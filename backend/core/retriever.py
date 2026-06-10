@@ -13,6 +13,54 @@ from backend.infrastructure.milvus import check_milvus_available, canonical_sour
 
 logger = logging.getLogger("ragmate")
 
+_CONTEXTUALIZE_PROMPT = """根据以下对话历史，将用户的最新问题改写为一个独立、完整的搜索查询。
+要求：
+- 补全省略的指代（如"它"、"这个"、"那个"）为具体实体
+- 补全省略的上下文，使查询可以独立理解
+- 保持原意，不要添加原问题没有的信息
+- 只输出改写后的查询，不要解释
+
+对话历史：
+{history}
+
+用户最新问题：{query}"""
+
+
+def contextualize_query(query: str, messages: list[dict]) -> str:
+    """用轻量 LLM 调用把追问改写为自包含的检索 query。失败时返回原 query。"""
+    from backend.infrastructure.config import settings
+    if not settings.QUERY_CONTEXTUALIZE:
+        return query
+
+    # 取最近 2-3 轮（最多 6 条 message）
+    recent = messages[-6:-1]  # 排除最后一条（当前用户消息）
+    if not recent:
+        return query
+
+    history_lines = []
+    for msg in recent:
+        role = "用户" if msg.get("role") == "user" else "助手"
+        content = msg.get("content", "")
+        # 截断过长的回复，只保留前 300 字符
+        if len(content) > 300:
+            content = content[:300] + "..."
+        history_lines.append(f"{role}：{content}")
+    history_text = "\n".join(history_lines)
+
+    try:
+        from backend.infrastructure.model_factory import get_llm
+        llm = get_llm()
+        prompt = _CONTEXTUALIZE_PROMPT.format(history=history_text, query=query)
+        response = llm.invoke(prompt)
+        rewritten = response.content.strip().strip('"').strip("'")
+        if rewritten and rewritten != query:
+            logger.info(f"Query contextualized: '{query}' → '{rewritten}'")
+            return rewritten
+    except Exception as e:
+        logger.warning(f"Query contextualization failed, using original: {e}")
+
+    return query
+
 _reranker: CrossEncoder | None = None
 _reranker_lock = threading.Lock()
 

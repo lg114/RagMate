@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     MIN_PER_SOURCE: int = Field(default=2, gt=0)                          # 单源最小 chunk 数
     SCORE_GAP_THRESHOLD: float = Field(default=0.15, gt=0.0, lt=1.0)     # 分数断崖阈值
 
+    # Query processing
+    QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
+    QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过 agent 直接回复
+
     # Agent
     AGENT_RECURSION_LIMIT: int = Field(default=30, gt=0)
 

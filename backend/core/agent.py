@@ -20,8 +20,9 @@ _tool_call_state = threading.local()
 
 
 def _reset_tool_counter():
-    """重置当前线程的工具调用计数器（每次 agent 调用前执行）。"""
+    """重置当前线程的工具调用计数器和对话历史（每次 agent 调用前执行）。"""
     _tool_call_state.retrieval_count = 0
+    _tool_call_state.messages = []
 
 
 @tool
@@ -35,6 +36,12 @@ def retrieval_tool(query: str) -> str:
 
     if count > MAX_TOOL_RETRIEVALS:
         return "已达到最大检索次数，请基于已有信息回答用户。"
+
+    # 查询上下文化：用对话历史改写追问为自包含 query
+    history = getattr(_tool_call_state, "messages", [])
+    if len(history) > 1:
+        from backend.core.retriever import contextualize_query
+        query = contextualize_query(query, history)
 
     try:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
@@ -103,6 +110,7 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
     """运行 agent，支持多轮对话。messages 格式: [{"role": "user", "content": "..."}, ...]"""
     from backend.infrastructure.config import settings
     _reset_tool_counter()
+    _tool_call_state.messages = messages
     return get_agent().invoke(
         {"messages": messages},
         config={
@@ -122,6 +130,7 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
 
     from backend.infrastructure.config import settings
     _reset_tool_counter()
+    _tool_call_state.messages = messages
     for msg_chunk, _ in get_agent().stream(
         {"messages": messages},
         config={

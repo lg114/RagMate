@@ -13,6 +13,7 @@
 ## 核心特性
 
 - **混合检索** — Dense + Sparse 向量混合搜索（RRF 融合）+ 交叉编码器 Reranking + 动态评分筛选（sigmoid 概率阈值、分数断崖检测、同源自适应去重）
+- **查询优化** — 查询上下文化（追问自动改写为自包含检索 query）+ 查询路由（简单查询跳过 Agent 直接回复）
 - **Deep Agents** — 基于 LangGraph 的多轮推理 Agent，支持子 Agent 委派和复杂问题分解
 - **流式输出** — SSE 实时逐 token 流式返回
 - **多格式文档** — 支持 PDF、DOCX、XLSX、TXT、Markdown，内容 hash 自动去重
@@ -60,6 +61,7 @@ graph TD
     style DF fill:#fff9c4
 ```
 
+- 查询上下文化：追问自动改写为自包含检索 query，提升多轮对话检索质量
 - BGE-M3 一次编码同时输出 dense（语义）+ sparse（关键词）向量
 - Milvus 并行 ANN 检索，RRF 融合排序，召回 30 候选
 - Cross-encoder 精排后，动态评分筛选 4-15 个最优片段
@@ -275,6 +277,8 @@ Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql":
 | | `MILVUS_COLLECTION` | `ragmate_docs` | Collection 名称 |
 | **入库** | `CHUNK_SIZE` | `1000` | 文本分块大小 |
 | | `CHUNK_OVERLAP` | `200` | 分块重叠 |
+| **查询处理** | `QUERY_CONTEXTUALIZE` | `true` | 检索前用 LLM 改写追问为自包含 query |
+| | `QUERY_ROUTING_ENABLED` | `true` | 简单查询跳过 Agent 直接回复 |
 | **检索** | `HYBRID_SEARCH_ENABLED` | `true` | 启用混合检索 |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker 模型 |
 | | `RERANK_CANDIDATES` | `30` | rerank 候选池大小 |

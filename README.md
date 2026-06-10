@@ -13,6 +13,7 @@ An enterprise-grade knowledge management system based on Retrieval-Augmented Gen
 ## Key Features
 
 - **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking + dynamic score filtering (sigmoid threshold, score-gap detection, adaptive source dedup)
+- **Query Optimization** — Query contextualization (auto-rewrite follow-ups into standalone retrieval queries) + query routing (simple queries skip the agent for faster responses)
 - **Deep Agents** — LangGraph-based multi-turn reasoning agent with sub-agent delegation and complex query decomposition
 - **Streaming Output** — SSE real-time token-by-token streaming
 - **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support with content-hash deduplication
@@ -53,6 +54,7 @@ flowchart TD
     LLM --> ANS[Answer with Citations]
 ```
 
+- Query contextualization: follow-up queries are rewritten into standalone retrieval queries for better multi-turn recall
 - BGE-M3 encodes query into dense (semantic) + sparse (keyword) vectors in one pass
 - Milvus runs parallel ANN searches, fused via Reciprocal Rank Fusion
 - Cross-encoder reranks 30 candidates, dynamic scoring selects 4-15 optimal chunks
@@ -267,6 +269,8 @@ All settings are configured via `.env` file or environment variables, validated 
 | | `MILVUS_COLLECTION` | `ragmate_docs` | Collection name |
 | **Ingestion** | `CHUNK_SIZE` | `1000` | Text chunk size |
 | | `CHUNK_OVERLAP` | `200` | Chunk overlap |
+| **Query Processing** | `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-up queries into standalone retrieval queries via LLM |
+| | `QUERY_ROUTING_ENABLED` | `true` | Route simple queries directly to LLM, skipping the agent |
 | **Retrieval** | `HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
 | | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model |
 | | `RERANK_CANDIDATES` | `30` | Rerank candidate pool size |
