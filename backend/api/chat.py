@@ -31,17 +31,31 @@ async def chat_stream_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
 
     _HEARTBEAT_INTERVAL = 15  # 秒
+    _SENTINEL = object()
 
     async def event_generator():
-        ait = chat_stream(body.message, body.session_id, replace_last=body.replace_last).__aiter__()
-        while True:
+        queue = asyncio.Queue()
+
+        async def producer():
             try:
-                chunk = await asyncio.wait_for(ait.__anext__(), _HEARTBEAT_INTERVAL)
+                async for chunk in chat_stream(body.message, body.session_id, replace_last=body.replace_last):
+                    await queue.put(chunk)
+            finally:
+                await queue.put(_SENTINEL)
+
+        task = asyncio.create_task(producer())
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), _HEARTBEAT_INTERVAL)
+                except asyncio.TimeoutError:
+                    yield ":heartbeat\n\n"
+                    continue
+                if chunk is _SENTINEL:
+                    break
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            except asyncio.TimeoutError:
-                yield ":heartbeat\n\n"
-            except StopAsyncIteration:
-                break
+        finally:
+            task.cancel()
 
     return StreamingResponse(
         event_generator(),
