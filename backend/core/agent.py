@@ -1,3 +1,4 @@
+import contextvars
 import threading
 from pathlib import Path
 
@@ -9,17 +10,17 @@ from backend.infrastructure.model_factory import get_llm
 from backend.core.retriever import retrieve
 
 # ── 跨线程上下文存储 ─────────────────────────────────────────────────────────
-# retrieval_tool 在 LangGraph 线程池中执行，与 run_agent 调用者不在同一线程，
-# 因此不能用 threading.local()。使用模块级 dict（以 session_id 为 key）做跨线程通信。
+# retrieval_tool 在 LangGraph 线程池中执行，与 run_agent 调用者不在同一线程。
+# Python 3.12+ 的 ThreadPoolExecutor.submit() 会自动复制调用线程的 contextvars，
+# 因此用 ContextVar 替代模块级全局变量，避免并发请求互相污染 session_id。
 _contexts: dict[str, dict] = {}
 _contexts_lock = threading.Lock()
-_current_session_id: str | None = None  # 每次 agent 调用前设置
+_current_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_session_id", default=None)
 
 
 def _prepare_session(session_id: str, messages: list[dict]):
     """agent 调用前，初始化该 session 的上下文。"""
-    global _current_session_id
-    _current_session_id = session_id
+    _current_session_id.set(session_id)
     with _contexts_lock:
         _contexts[session_id] = {"messages": messages, "metrics": [], "texts": []}
 
@@ -48,7 +49,7 @@ def retrieval_tool(query: str) -> str:
     from backend.infrastructure.config import settings
     from backend.domain.errors import AppError
 
-    sid = _current_session_id or "default"
+    sid = _current_session_id.get() or "default"
 
     # 检索次数限制
     with _counts_lock:
@@ -170,6 +171,11 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
                 "recursion_limit": settings.AGENT_RECURSION_LIMIT,
             },
         )
+    except BaseException:
+        # 异常/取消时清理 _contexts，防止内存泄漏（成功路径由调用方 pop_retrieval_data 清理）
+        with _contexts_lock:
+            _contexts.pop(thread_id, None)
+        raise
     finally:
         with _counts_lock:
             _retrieval_counts.pop(thread_id, None)
@@ -202,6 +208,10 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
                 text = extract_text_content(getattr(msg_chunk, "content", ""))
                 if text:
                     yield text
+    except BaseException:
+        with _contexts_lock:
+            _contexts.pop(thread_id, None)
+        raise
     finally:
         with _counts_lock:
             _retrieval_counts.pop(thread_id, None)
