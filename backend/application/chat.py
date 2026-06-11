@@ -14,6 +14,16 @@ from backend.infrastructure.redis_client import load_session, save_session
 
 logger = logging.getLogger("ragmate")
 
+# 上下文窗口限制：保留最近 N 轮对话（每轮 = user + assistant）
+_MAX_HISTORY_TURNS = 10
+
+
+def _trim_history(history: list[dict]) -> list[dict]:
+    """截断历史到最近 N 轮，避免 prompt 膨胀。"""
+    if len(history) <= _MAX_HISTORY_TURNS * 2:
+        return history
+    return history[-(_MAX_HISTORY_TURNS * 2):]
+
 
 def extract_text(response: dict) -> str:
     """从 deepagents 的 AIMessage 中提取最终回复文本。"""
@@ -180,6 +190,9 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
         history = _strip_last_turn(history)
         await _delete_last_persisted_turn(session_id)
 
+    # 2.5 截断历史，避免 prompt 膨胀
+    history = _trim_history(history)
+
     # 3. 追加用户消息
     history.append({"role": "user", "content": message})
 
@@ -274,6 +287,7 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
         history = _strip_last_turn(history)
         await _delete_last_persisted_turn(session_id)
 
+    history = _trim_history(history)
     history.append({"role": "user", "content": message})
 
     # 查询路由：简单查询跳过 agent
