@@ -40,6 +40,9 @@ async def chat_stream_endpoint(body: ChatRequest, request: Request):
             try:
                 async for chunk in chat_stream(body.message, body.session_id, replace_last=body.replace_last):
                     await queue.put(chunk)
+            except Exception as e:
+                logger.error(f"Stream producer failed: {e}", exc_info=True)
+                await queue.put({"error": str(e)})
             finally:
                 await queue.put(_SENTINEL)
 
@@ -52,6 +55,10 @@ async def chat_stream_endpoint(body: ChatRequest, request: Request):
                     yield ":heartbeat\n\n"
                     continue
                 if chunk is _SENTINEL:
+                    break
+                # 处理错误事件
+                if isinstance(chunk, dict) and "error" in chunk:
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     break
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         finally:

@@ -106,8 +106,24 @@ class Settings(BaseSettings):
             missing.append("LLM_API_KEY")
         if missing:
             raise ValueError(f"Required env vars not set: {', '.join(missing)}. Check your .env file.")
-        if self.CHUNK_OVERLAP >= self.CHUNK_SIZE:
-            raise ValueError(f"CHUNK_OVERLAP ({self.CHUNK_OVERLAP}) must be less than CHUNK_SIZE ({self.CHUNK_SIZE})")
+        
+        # 验证所有 chunk size 配置
+        chunk_configs = [
+            ("CHUNK_SIZE", "CHUNK_OVERLAP"),
+            ("CHUNK_SIZE_PDF", "CHUNK_OVERLAP_PDF"),
+            ("CHUNK_SIZE_DOCX", "CHUNK_OVERLAP_DOCX"),
+            ("CHUNK_SIZE_TXT", "CHUNK_OVERLAP_TXT"),
+            ("CHUNK_SIZE_PARENT", "CHUNK_OVERLAP_PARENT"),
+        ]
+        
+        for size_name, overlap_name in chunk_configs:
+            size = getattr(self, size_name)
+            overlap = getattr(self, overlap_name)
+            if overlap >= size:
+                raise ValueError(
+                    f"{overlap_name} ({overlap}) must be less than {size_name} ({size})"
+                )
+        
         if self.MIN_PER_SOURCE > self.MAX_PER_SOURCE:
             raise ValueError(f"MIN_PER_SOURCE ({self.MIN_PER_SOURCE}) must be <= MAX_PER_SOURCE ({self.MAX_PER_SOURCE})")
         return self

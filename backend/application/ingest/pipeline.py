@@ -30,16 +30,32 @@ from .loaders import SUPPORTED_EXTENSIONS, load_document
 logger = logging.getLogger("ragmate")
 
 
-def _discover_files(docs_dir, filenames):
-    """发现目录下所有支持的文件，可选过滤指定文件名。"""
+def _discover_files(docs_dir: str, filenames: list[str] | None) -> list[str]:
+    """发现目录下所有支持的文件，可选过滤指定文件名。
+    
+    Args:
+        docs_dir: 文档目录路径
+        filenames: 要过滤的文件名列表，None 表示返回所有文件
+        
+    Returns:
+        排序后的文件名列表
+    """
     all_files = sorted(f for f in os.listdir(docs_dir) if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS)
     if filenames is not None:
         all_files = [f for f in all_files if f in filenames]
     return all_files
 
 
-def _detect_new_files(docs_dir, all_files):
-    """检测新文件或已修改的文件（基于 mtime）。"""
+def _detect_new_files(docs_dir: str, all_files: list[str]) -> tuple[list[str], dict]:
+    """检测新文件或已修改的文件（基于 mtime）。
+    
+    Args:
+        docs_dir: 文档目录路径
+        all_files: 所有待检查的文件名列表
+        
+    Returns:
+        (新文件列表, 已索引文件信息字典 {filename: mtime})
+    """
     with SyncSession() as session:
         result = session.execute(
             select(Document.filename, Document.file_mtime).where(

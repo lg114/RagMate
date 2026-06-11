@@ -118,24 +118,13 @@ def get_agent():
 
 def get_confidence(session_id: str) -> dict | None:
     """根据检索指标计算置信度。"""
+    from backend.core.retriever import calculate_confidence
+    
     ctx = _contexts.get(session_id)
     if not ctx:
         return None
-    metrics_list = ctx.get("metrics", [])
-    if not metrics_list:
-        return None
-
-    best_score = max(m["top_score"] for m in metrics_list)
-    total_returned = sum(m["returned"] for m in metrics_list)
-
-    if best_score >= 0.7 and total_returned >= 3:
-        level = "high"
-    elif best_score >= 0.4 and total_returned >= 1:
-        level = "medium"
-    else:
-        level = "low"
-
-    return {"level": level, "score": best_score, "chunks": total_returned}
+    
+    return calculate_confidence(ctx.get("metrics", []))
 
 
 def clear_agent_cache():

@@ -18,6 +18,32 @@ logger = logging.getLogger("ragmate")
 _metrics = threading.local()
 
 
+def calculate_confidence(metrics_list: list[dict]) -> dict | None:
+    """根据检索指标计算置信度。
+    
+    Args:
+        metrics_list: 检索指标列表，每个元素包含 top_score 和 returned 字段
+        
+    Returns:
+        置信度字典 {"level": "high|medium|low", "score": float, "chunks": int}
+        或 None（如果输入为空）
+    """
+    if not metrics_list:
+        return None
+    
+    best_score = max(m["top_score"] for m in metrics_list)
+    total_returned = sum(m["returned"] for m in metrics_list)
+    
+    if best_score >= 0.7 and total_returned >= 3:
+        level = "high"
+    elif best_score >= 0.4 and total_returned >= 1:
+        level = "medium"
+    else:
+        level = "low"
+    
+    return {"level": level, "score": best_score, "chunks": total_returned}
+
+
 def get_retrieval_metrics() -> dict | None:
     """获取最近一次检索的质量指标。"""
     return getattr(_metrics, "last", None)
@@ -87,8 +113,18 @@ def get_reranker() -> CrossEncoder:
 
 # ── Search ──────────────────────────────────────────────────────────────────
 
-def _do_search(client, dense_vec, sparse_vec, over_fetch: int):
-    """执行一次混合检索或 dense 检索。"""
+def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
+    """执行一次混合检索或 dense 检索。
+    
+    Args:
+        client: Milvus 客户端实例
+        dense_vec: 稠密向量 (1024维)
+        sparse_vec: 稀疏向量 (scipy sparse matrix)
+        over_fetch: 过采样数量
+        
+    Returns:
+        搜索结果列表
+    """
     if settings.HYBRID_SEARCH_ENABLED:
         dense_req = AnnSearchRequest(
             data=[dense_vec],
@@ -121,7 +157,14 @@ def _do_search(client, dense_vec, sparse_vec, over_fetch: int):
 
 
 def _extract_candidates(results) -> list[dict]:
-    """从 Milvus 结果中提取候选。"""
+    """从 Milvus 结果中提取候选。
+    
+    Args:
+        results: Milvus 搜索结果
+        
+    Returns:
+        候选文档列表，每个包含 text, metadata, top_score
+    """
     candidates = []
     for hit in results[0]:
         entity = hit["entity"]

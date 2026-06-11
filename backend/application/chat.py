@@ -145,12 +145,24 @@ def _strip_error_sentinel(text: str) -> str:
 
 def _classify_error(e: Exception) -> str:
     """根据异常类型和消息内容返回用户友好的错误提示（带哨兵前缀）"""
-    msg = str(e).lower()
-
+    
+    # 优先检查异常类型（更可靠）
     if isinstance(e, asyncio.TimeoutError):
         return f"{_ERROR_SENTINEL}请求超时，请稍后重试"
     if isinstance(e, asyncio.CancelledError):
         return f"{_ERROR_SENTINEL}请求被取消"
+    
+    # 检查 LLM SDK 的异常类名
+    exc_type_name = type(e).__name__
+    if "RateLimit" in exc_type_name or "TooManyRequests" in exc_type_name:
+        return f"{_ERROR_SENTINEL}请求频率超限，请稍后重试"
+    if "Authentication" in exc_type_name or "Unauthorized" in exc_type_name:
+        return f"{_ERROR_SENTINEL}API 认证失败，请检查 API Key 配置"
+    if "InsufficientQuota" in exc_type_name or "QuotaExceeded" in exc_type_name:
+        return f"{_ERROR_SENTINEL}API 配额不足，请检查账户余额"
+    
+    # 降级到消息内容匹配
+    msg = str(e).lower()
     if any(k in msg for k in ("rate_limit", "429", "rate limit")):
         return f"{_ERROR_SENTINEL}请求频率超限，请稍后重试"
     if any(k in msg for k in ("auth", "401", "api key", "unauthorized")):
@@ -255,19 +267,13 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
 
     # 从 agent 上下文中取出检索数据，计算置信度
     from backend.core.agent import pop_retrieval_data
+    from backend.core.retriever import calculate_confidence
+    
     rdata = pop_retrieval_data(session_id)
     if rdata:
-        metrics_list = rdata.get("metrics", [])
-        if metrics_list:
-            best_score = max(m["top_score"] for m in metrics_list)
-            total_returned = sum(m["returned"] for m in metrics_list)
-            if best_score >= 0.7 and total_returned >= 3:
-                level = "high"
-            elif best_score >= 0.4 and total_returned >= 1:
-                level = "medium"
-            else:
-                level = "low"
-            resp["confidence"] = {"level": level, "score": best_score, "chunks": total_returned}
+        confidence = calculate_confidence(rdata.get("metrics", []))
+        if confidence:
+            resp["confidence"] = confidence
 
     return resp
 
@@ -371,19 +377,8 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     rdata = pop_retrieval_data(session_id)
 
     # 计算置信度
-    confidence = None
-    if rdata:
-        metrics_list = rdata.get("metrics", [])
-        if metrics_list:
-            best_score = max(m["top_score"] for m in metrics_list)
-            total_returned = sum(m["returned"] for m in metrics_list)
-            if best_score >= 0.7 and total_returned >= 3:
-                level = "high"
-            elif best_score >= 0.4 and total_returned >= 1:
-                level = "medium"
-            else:
-                level = "low"
-            confidence = {"level": level, "score": best_score, "chunks": total_returned}
+    from backend.core.retriever import calculate_confidence
+    confidence = calculate_confidence(rdata.get("metrics", []) if rdata else None)
 
     # 忠诚度校验（可选，增加一次 LLM 调用）
     faithfulness = None
