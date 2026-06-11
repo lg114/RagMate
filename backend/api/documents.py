@@ -1,5 +1,5 @@
 """文档管理端点。"""
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from backend.api.deps import get_client_ip
 from backend.infrastructure.config import settings
@@ -21,6 +21,8 @@ async def list_documents():
 @router.post("/documents/upload")
 async def upload_document(request: Request, file: UploadFile = File(...)):
     await check_rate_limit(get_client_ip(request))
+    if file.size and file.size > 50 * 1024 * 1024:
+        raise HTTPException(413, "文件不能超过 50MB")
     content = await file.read()
     async with async_session() as session:
         return await document_service.save_document(
