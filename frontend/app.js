@@ -443,17 +443,18 @@ const ChatPanel = {
   appendStreamToken(div, fullText) {
     const content = div.querySelector('.msg-content');
     if (div._streamDone) return;
-    if (!div._rafPending) {
-      div._rafPending = true;
-      requestAnimationFrame(() => {
+    // 存储最新文本，debounce 回调读取时始终是最新的
+    div._latestText = fullText;
+    if (!div._streamTimer) {
+      div._streamTimer = setTimeout(() => {
+        div._streamTimer = null;
         if (div._streamDone) return;
-        content.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+        content.innerHTML = DOMPurify.sanitize(marked.parse(div._latestText));
         // Smart scroll: only auto-scroll if user is near bottom
         const el = this.messagesEl;
         const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
         if (isNearBottom) el.scrollTop = el.scrollHeight;
-        div._rafPending = false;
-      });
+      }, 80);
     }
   },
 
@@ -513,23 +514,31 @@ const ChatPanel = {
 
     if (regenBtn) {
       regenBtn.addEventListener('click', () => {
-        if (this._lastUserText && !this.loading) {
-          const lastText = this._lastUserText;
-          // Remove the last AI message and its divider
-          const lastMsg = div;
-          const prevSibling = lastMsg.previousElementSibling;
-          if (prevSibling && prevSibling.classList.contains('msg-divider')) prevSibling.remove();
-          lastMsg.remove();
-          // Remove the last user message and its divider
-          const userMsg = this.messagesEl.querySelector('.msg-user:last-of-type');
-          if (userMsg) {
-            const userDivider = userMsg.previousElementSibling;
-            if (userDivider && userDivider.classList.contains('msg-divider')) userDivider.remove();
-            userMsg.remove();
-          }
-          this.textareaEl.value = lastText;
-          this.send(true);
+        if (this.loading) return;
+
+        // 从 DOM 中查找前一条用户消息（支持历史会话，不依赖 _lastUserText）
+        let userMsg = null;
+        let el = div.previousElementSibling;
+        if (el && el.classList.contains('msg-divider')) el = el.previousElementSibling;
+        if (el && el.classList.contains('msg-user')) userMsg = el;
+
+        const userText = userMsg
+          ? userMsg.querySelector('.msg-content')?.textContent || ''
+          : (this._lastUserText || '');
+        if (!userText) return;
+
+        // 移除 assistant 消息及其 divider
+        const prevSibling = div.previousElementSibling;
+        if (prevSibling && prevSibling.classList.contains('msg-divider')) prevSibling.remove();
+        div.remove();
+        // 移除 user 消息及其 divider
+        if (userMsg) {
+          const userDivider = userMsg.previousElementSibling;
+          if (userDivider && userDivider.classList.contains('msg-divider')) userDivider.remove();
+          userMsg.remove();
         }
+        this.textareaEl.value = userText;
+        this.send(true);
       });
     }
 
@@ -552,19 +561,19 @@ const ChatPanel = {
   clear() {
     newSession();
     this.messagesEl.innerHTML = `
-      <div id="hero-empty" class="hero-empty">
-        <canvas id="hero-canvas" class="hero-canvas"></canvas>
+      <div id="hero-empty" class="hero-empty empty-state">
+        <canvas id="hero-canvas" class="hero-canvas" aria-hidden="true"></canvas>
         <div class="hero-content">
+          <p class="hero-eyebrow">RAG Knowledge Base</p>
           <h1 class="hero-title">你的<span class="accent">知识库</span> AI 助手</h1>
           <p class="hero-subtitle">上传文档，建立专属知识库。提问即检索，精准溯源，拒绝幻觉。</p>
           <div class="hero-suggestions">
-            <button class="hero-suggestion" data-q="这个知识库包含哪些文档？">这个知识库包含哪些文档？</button>
-            <button class="hero-suggestion" data-q="帮我总结一下核心要点">帮我总结核心要点</button>
-            <button class="hero-suggestion" data-q="有哪些常见问题和解决方案？">常见问题和解决方案</button>
+            <button class="hero-suggestion" data-q="帮我总结这个知识库的核心内容">帮我总结这个知识库的核心内容</button>
+            <button class="hero-suggestion" data-q="这些文档之间有什么关联？">这些文档之间有什么关联？</button>
+            <button class="hero-suggestion" data-q="有没有互相矛盾的说法？">有没有互相矛盾的说法？</button>
           </div>
         </div>
       </div>`;
-    initHeroCanvas();
     document.querySelectorAll('.hero-suggestion').forEach(btn => {
       btn.addEventListener('click', () => {
         const q = btn.dataset.q;
@@ -699,12 +708,14 @@ const DocumentsPanel = {
   batchDeleteBtn: document.getElementById('btn-batch-delete'),
   batchDeleteText: document.getElementById('btn-batch-delete-text'),
   pollTimer: null,
+  _uploadQueue: [],
+  _uploading: false,
 
   init() {
     this.fileInput.addEventListener('change', (e) => {
       const files = Array.from(e.target.files);
       e.target.value = '';
-      files.forEach(file => this.upload(file));
+      this._enqueueUploads(files);
     });
 
     this.uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); this.uploadZone.classList.add('drag-over'); });
@@ -712,7 +723,7 @@ const DocumentsPanel = {
     this.uploadZone.addEventListener('drop', (e) => {
       e.preventDefault();
       this.uploadZone.classList.remove('drag-over');
-      Array.from(e.dataTransfer.files).forEach(file => this.upload(file));
+      this._enqueueUploads(Array.from(e.dataTransfer.files));
     });
 
     this.ingestBtn.addEventListener('click', () => this.startIngest());
@@ -866,6 +877,21 @@ const DocumentsPanel = {
       card.querySelector('.btn-delete').addEventListener('click', () => this.deleteDoc(doc.filename));
       listEl.appendChild(card);
     });
+  },
+
+  _enqueueUploads(files) {
+    this._uploadQueue.push(...files);
+    this._processUploadQueue();
+  },
+
+  async _processUploadQueue() {
+    if (this._uploading) return;
+    this._uploading = true;
+    while (this._uploadQueue.length > 0) {
+      const file = this._uploadQueue.shift();
+      await this.upload(file);
+    }
+    this._uploading = false;
   },
 
   async upload(file) {
@@ -1079,8 +1105,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.addEventListener('beforeunload', () => DocumentsPanel.stopPolling());
 
-  // Hero empty state
-  initHeroCanvas();
+  // Hero suggestions
   document.querySelectorAll('.hero-suggestion').forEach(btn => {
     btn.addEventListener('click', () => {
       const q = btn.dataset.q;
@@ -1093,108 +1118,4 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ═══════════════════════ Hero Canvas: 知识节点网络 ═══════════════════════
-
-let _heroCleanup = null;  // 追踪当前 hero 动画的清理函数
-
-function initHeroCanvas() {
-  // 清理上一次 hero 动画的所有资源
-  if (_heroCleanup) { _heroCleanup(); _heroCleanup = null; }
-
-  const canvas = document.getElementById('hero-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const hero = canvas.parentElement;
-  let w, h, nodes = [], animId;
-
-  function resize() {
-    w = canvas.width = hero.offsetWidth;
-    h = canvas.height = hero.offsetHeight;
-  }
-
-  function createNodes() {
-    nodes = [];
-    const count = Math.floor((w * h) / 12000);
-    for (let i = 0; i < count; i++) {
-      nodes.push({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.8,
-        pulse: Math.random() * Math.PI * 2,
-      });
-    }
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, w, h);
-    const t = Date.now() * 0.001;
-
-    // Draw connections
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const dx = nodes[i].x - nodes[j].x;
-        const dy = nodes[i].y - nodes[j].y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 120) {
-          const alpha = (1 - dist / 120) * 0.12;
-          ctx.strokeStyle = `rgba(240,180,41,${alpha})`;
-          ctx.lineWidth = 0.5;
-          ctx.beginPath();
-          ctx.moveTo(nodes[i].x, nodes[i].y);
-          ctx.lineTo(nodes[j].x, nodes[j].y);
-          ctx.stroke();
-        }
-      }
-    }
-
-    // Draw nodes
-    for (const node of nodes) {
-      node.x += node.vx;
-      node.y += node.vy;
-      if (node.x < 0 || node.x > w) node.vx *= -1;
-      if (node.y < 0 || node.y > h) node.vy *= -1;
-
-      const glow = Math.sin(t * 2 + node.pulse) * 0.3 + 0.7;
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(240,180,41,${glow * 0.5})`;
-      ctx.fill();
-
-      // Glow halo
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, node.r * 3, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(240,180,41,${glow * 0.06})`;
-      ctx.fill();
-    }
-
-    animId = requestAnimationFrame(draw);
-  }
-
-  resize();
-  createNodes();
-  draw();
-
-  const onResize = () => { resize(); createNodes(); };
-  window.addEventListener('resize', onResize);
-
-  // Hide hero when first message is sent
-  const observer = new MutationObserver(() => {
-    const heroEl = document.getElementById('hero-empty');
-    const msgs = document.querySelectorAll('.msg');
-    if (heroEl && msgs.length > 0) {
-      heroEl.style.display = 'none';
-      cancelAnimationFrame(animId);
-    }
-  });
-  const msgContainer = document.getElementById('chat-messages');
-  if (msgContainer) observer.observe(msgContainer, { childList: true });
-
-  // 注册清理函数：下次 initHeroCanvas 调用时会执行
-  _heroCleanup = () => {
-    cancelAnimationFrame(animId);
-    window.removeEventListener('resize', onResize);
-    observer.disconnect();
-  };
-}
+// Hero canvas removed — Apple HIG uses clean whitespace

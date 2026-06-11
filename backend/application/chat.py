@@ -331,6 +331,8 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
             yield {"token": token}
     except asyncio.CancelledError:
         task.cancel()
+        # 保存用户消息到 Redis，避免取消后丢失上下文
+        await save_session(session_id, history)
         raise
     try:
         await task
