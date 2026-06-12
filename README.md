@@ -1,95 +1,74 @@
 # RagMate
 
-[中文版](README_zh.md)
-
-An enterprise-grade knowledge management system based on Retrieval-Augmented Generation (RAG). Users upload documents, and the system retrieves the most relevant content from the knowledge base via vector search and LLM inference to generate accurate answers.
+**Enterprise-Grade RAG Knowledge Management System**
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![FastAPI](https://img.shields.io/badge/fastapi-0.115-green.svg)](https://fastapi.tiangolo.com/)
 
----
-
-## Key Features
-
-- **Hybrid Search** — Dense + Sparse vector hybrid search with RRF fusion + cross-encoder reranking + dynamic score filtering (sigmoid threshold, score-gap detection, adaptive source dedup) + contextual compression (sentence-level relevance filtering)
-- **Query Optimization** — Query contextualization (auto-rewrite follow-ups into standalone retrieval queries) + query routing (simple queries skip the agent for faster responses)
-- **Retrieval Confidence & Faithfulness** — Confidence badge (high/medium/low) based on retrieval quality + optional faithfulness check that flags unsupported claims (extra LLM call)
-- **Deep Agents** — LangGraph-based multi-turn reasoning agent with sub-agent delegation and complex query decomposition
-- **Streaming Output** — SSE real-time token-by-token streaming
-- **Multi-Format Documents** — PDF, DOCX, XLSX, TXT, Markdown support with content-hash deduplication
-- **Smart Chunking** — Adaptive chunk sizes per file type (PDF/DOCX/TXT/table), Markdown split by heading hierarchy, parent-child chunking (small-to-big retrieval), PDF page numbers preserved
-- **Multilingual Embedding** — BAAI/bge-m3 (1024-dim), native dense + sparse dual vectors, locally deployed
-- **Batch Operations** — Select multiple documents for batch ingest or batch delete with progress modal
-- **Flexible LLM Integration** — Access any OpenAI-compatible API (OpenAI, Anthropic, DeepSeek, MiMo, etc.) via LangChain ChatOpenAI
-- **Evaluation CLI** — Built-in RAGAS evaluation with CI/CD quality gating
-- **Self-Hosted** — All data on-premise, no external dependencies
+[中文版](README_zh.md) · [English](README.md)
 
 ---
 
-## Architecture
+## 🎯 What is RagMate?
 
-### Indexing Pipeline
+RagMate is a **self-hosted knowledge management system** that combines Retrieval-Augmented Generation (RAG) with advanced vector search and LLM reasoning. Upload your documents, build a searchable knowledge base, and get accurate answers with citations—**all data stays on-premise**.
 
-```mermaid
-flowchart LR
-    A[Document] --> B[Chunk Splitting]
-    B --> C[Embedding\nDense + Sparse]
-    C --> D[(Vector DB)]
-```
+### Why RagMate?
 
-- Chunk Splitting: Markdown split by heading, others use `RecursiveCharacterTextSplitter`
-- Embedding: dense (semantic) + sparse (keyword) dual vectors
-- Vector DB stores dual vectors + metadata (source, page, chunk_index)
-
-### Query Pipeline
-
-```mermaid
-flowchart TD
-    Q[User Query] --> E[BGE-M3 Encode\nDense + Sparse]
-    E --> S[Milvus Hybrid Search\nDense ANN + Sparse ANN]
-    S --> RRF[RRF Fusion\n30 Candidates]
-    RRF --> RC[Cross-Encoder Rerank]
-    RC --> DF[Dynamic Filtering\nSigmoid Threshold + Score Gap + Source Dedup]
-    DF --> LLM[Deep Agent]
-    LLM --> CONF[Confidence Assessment\nhigh / medium / low]
-    CONF --> FC{Faithfulness\nCheck enabled?}
-    FC -->|Yes| CHK[Faithfulness Check\nFlag unsupported claims]
-    FC -->|No| ANS[Answer with Citations]
-    CHK --> ANS
-```
-
-- Query contextualization: follow-up queries are rewritten into standalone retrieval queries for better multi-turn recall
-- BGE-M3 encodes query into dense (semantic) + sparse (keyword) vectors in one pass
-- Milvus runs parallel ANN searches, fused via Reciprocal Rank Fusion
-- Cross-encoder reranks 30 candidates, then contextual compression removes irrelevant sentences
-- Dynamic scoring selects 4-15 optimal chunks with adaptive source limits for dominant documents
-- Deep Agent supports multi-step reasoning + sub-agent delegation
-- Retrieval confidence (high/medium/low) is computed from retrieval metrics and shown as a UI badge
-- Optional faithfulness check verifies each claim in the answer against retrieved context (controlled by `FAITHFULNESS_CHECK`, incurs an extra LLM call)
+- ✅ **No vendor lock-in** — Self-hosted, full control over your data
+- ✅ **Production-ready** — Hybrid search, confidence scoring, evaluation tools
+- ✅ **Developer-friendly** — Clean architecture, comprehensive docs, easy deployment
+- ✅ **Enterprise-grade** — Multi-format support, batch operations, streaming responses
 
 ---
 
-## Quick Start
+## ✨ Key Features
+
+### 🔍 Advanced Retrieval
+- **Hybrid Search**: Dense (semantic) + Sparse (keyword) vectors with RRF fusion
+- **Cross-Encoder Reranking**: BGE-Reranker-v2-m3 for precision
+- **Dynamic Filtering**: Adaptive thresholds, source deduplication, contextual compression
+- **Query Optimization**: Auto-rewrite follow-ups, smart routing for simple queries
+
+### 🤖 Intelligent Agents
+- **Deep Reasoning**: LangGraph-based multi-turn agents with sub-agent delegation
+- **Streaming Output**: Real-time token-by-token SSE responses
+- **Confidence Scoring**: High/Medium/Low badges based on retrieval quality
+- **Faithfulness Check**: Optional verification to flag unsupported claims
+
+### 📄 Document Management
+- **Multi-Format Support**: PDF, DOCX, XLSX, TXT, Markdown
+- **Smart Chunking**: Adaptive sizes per file type, parent-child retrieval, heading-aware splitting
+- **Content Deduplication**: Hash-based prevention of duplicate indexing
+- **Batch Operations**: Select multiple files for bulk ingest/delete with progress tracking
+
+### 📊 Built-in Evaluation
+- **RAGAS Integration**: Faithfulness, Answer Relevancy, Context Precision/Recall
+- **Interactive CLI**: Generate test sets, run evaluations, view reports
+- **CI/CD Gating**: Threshold-based pass/fail for automated quality checks
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.12+
-- Docker Desktop (for Milvus, PostgreSQL, Redis)
+- Docker Desktop (for infrastructure services)
 
-### 1. Start Infrastructure
+### 1. Launch Infrastructure
 
 ```bash
 docker-compose up -d
 ```
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| Milvus | 19530 | Vector database (dense + sparse) |
-| Attu | 8080 | Milvus web admin UI |
-| PostgreSQL | 5432 | Document metadata, chat history |
-| Redis | 6379 | Session cache, distributed lock |
-| MinIO | 9001 | Milvus object storage backend |
+This starts:
+- **Milvus** (19530) — Vector database
+- **PostgreSQL** (5432) — Metadata & chat history
+- **Redis** (6379) — Session cache & distributed locks
+- **MinIO** (9000/9001) — Object storage
+- **Attu** (8080) — Milvus admin UI
 
 ### 2. Install Dependencies
 
@@ -99,7 +78,6 @@ pip install -e .
 ```
 
 For RAGAS evaluation (optional):
-
 ```bash
 pip install -e ".[eval]"
 ```
@@ -110,42 +88,276 @@ pip install -e ".[eval]"
 cp .env.example .env
 ```
 
-Edit `.env` with your LLM API settings:
+Edit `.env` with your LLM credentials:
 
 ```env
+LLM_API_KEY=your-api-key-here
 LLM_MODEL=gpt-4o
-LLM_API_KEY=your_api_key
 LLM_API_BASE_URL=https://api.openai.com/v1
 ```
 
-Supports any OpenAI-compatible API (DeepSeek, MiMo, etc.):
-
-```env
-LLM_MODEL=deepseek-chat
-LLM_API_KEY=your_key
-LLM_API_BASE_URL=https://api.deepseek.com/v1
-```
+Supports any OpenAI-compatible API: DeepSeek, Anthropic, Claude, etc.
 
 ### 4. Start Server
-
-Run from the project root:
 
 ```bash
 uvicorn backend.app:app --reload --port 8000
 ```
 
-Open http://localhost:8000 in browser.
+Open **http://localhost:8000** in your browser.
 
 ---
 
-## Usage
+## 📖 Usage
 
-### Web UI
+### Web Interface
 
-- **Chat** — Knowledge-base powered streaming Q&A with multi-turn conversation
-- **Documents** — Upload documents, manage documents, trigger ingestion
+**Chat Tab**: Ask questions about your documents with real-time streaming responses  
+**Documents Tab**: Upload files, manage knowledge base, trigger ingestion
 
-### Unit Tests
+### API Endpoints
+
+#### Chat
+```http
+POST /chat
+{
+  "message": "What is RAG?",
+  "session_id": "optional"
+}
+
+POST /chat/stream  # Server-Sent Events
+GET  /chat/sessions
+GET  /chat/sessions/{session_id}
+DELETE /chat/sessions/{session_id}
+```
+
+#### Documents
+```http
+GET    /documents
+POST   /documents/upload  # multipart/form-data, max 50MB
+DELETE /documents/{filename}
+```
+
+#### Ingestion
+```http
+POST /ingest              # Trigger indexing
+GET  /ingest/status       # Check progress
+```
+
+#### Health Checks
+```http
+GET /health   # Basic health check
+GET /ready    # Detailed service readiness
+```
+
+Full API docs: **http://localhost:8000/docs** (Swagger UI)
+
+---
+
+## 🏗️ Architecture
+
+### Indexing Pipeline
+
+```mermaid
+flowchart LR
+    A[Document] --> B[Smart Chunking]
+    B --> C[BGE-M3 Encoding\nDense + Sparse]
+    C --> D[(Milvus Vector DB)]
+    D --> E[PostgreSQL Metadata]
+```
+
+1. **Chunking**: File-type-specific splitting (PDF/DOCX/TXT/Table/Markdown)
+2. **Encoding**: BGE-M3 generates dual vectors (1024-dim dense + sparse)
+3. **Storage**: Milvus stores vectors, PostgreSQL tracks metadata
+
+### Query Pipeline
+
+```mermaid
+flowchart TD
+    Q[User Query] --> C{Query Router}
+    C -->|Simple| L[Direct LLM Response]
+    C -->|Complex| E[BGE-M3 Encode]
+    E --> S[Milvus Hybrid Search]
+    S --> R[RRF Fusion]
+    R --> K[Rerank Top-30]
+    K --> F[Dynamic Filter]
+    F --> M[Contextual Compress]
+    M --> A[Deep Agent]
+    A --> G[Generate Answer]
+    G --> H[Confidence Score]
+    H --> I{Faithfulness?}
+    I -->|Yes| V[Verify Claims]
+    I -->|No| O[Output + Citations]
+    V --> O
+```
+
+Key stages:
+1. **Query Routing**: Simple queries skip retrieval for speed
+2. **Hybrid Search**: Parallel dense + sparse ANN → RRF fusion
+3. **Reranking**: Cross-encoder scores top-30 candidates
+4. **Filtering**: Sigmoid threshold + score-gap detection + source dedup
+5. **Compression**: Sentence-level relevance filtering
+6. **Generation**: Deep agent with multi-turn reasoning
+7. **Validation**: Optional faithfulness check (extra LLM call)
+
+---
+
+## ⚙️ Configuration
+
+All settings via environment variables or `.env` file. Validated by `pydantic-settings`.
+
+### Essential Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_API_KEY` | *(required)* | Your LLM provider API key |
+| `LLM_MODEL` | `gpt-4o` | Model name |
+| `LLM_API_BASE_URL` | | Custom endpoint (e.g., DeepSeek, Claude) |
+| `EMBEDDING_DEVICE` | `cpu` | `cpu` or `cuda` (GPU acceleration) |
+| `DATABASE_URL` | `postgresql+asyncpg://...` | PostgreSQL connection |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
+| `MILVUS_HOST` | `localhost` | Milvus server address |
+
+### Tuning Parameters
+
+| Category | Variable | Default | Impact |
+|----------|----------|---------|--------|
+| **Chunking** | `CHUNK_SIZE` | 1000 | Larger = more context, lower precision |
+| | `CHUNK_OVERLAP` | 200 | Maintains continuity between chunks |
+| | `CHUNK_SIZE_PDF` | 600 | Smaller for technical docs |
+| **Retrieval** | `RERANK_CANDIDATES` | 30 | More = better quality, slower |
+| | `FINAL_CONTEXT_K` | 15 | Max chunks sent to LLM |
+| | `RERANK_SCORE_THRESHOLD` | 0.3 | Discard low-relevance results |
+| **Agent** | `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-up queries |
+| | `FAITHFULNESS_CHECK` | `false` | Verify answer accuracy (+1 LLM call) |
+
+See `.env.example` for all 30+ configuration options.
+
+---
+
+## 🧪 Evaluation
+
+Built-in RAGAS evaluation for measuring RAG pipeline quality.
+
+### Interactive Mode
+
+```bash
+cd backend
+ragmate-eval
+```
+
+Guided workflow: generate test sets → run evaluation → view reports.
+
+### CI/CD Mode
+
+```bash
+# Generate test set from uploaded documents
+ragmate-eval generate --size 50 --output eval/testsets/testset.json
+
+# Run evaluation
+ragmate-eval evaluate --testset eval/testsets/testset.json \
+  --report eval/reports/report.json
+
+# Quality gate (exit non-zero if below threshold)
+ragmate-eval evaluate --testset eval/testsets/testset.json \
+  --threshold 0.75
+```
+
+**Metrics**: Faithfulness, Answer Relevancy, Context Precision, Context Recall, Factual Correctness
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Web Framework** | FastAPI + Uvicorn | Async REST API, serves frontend |
+| **Frontend** | Vanilla HTML/CSS/JS | Zero-dependency, Apple HIG-inspired UI |
+| **LLM** | LangChain ChatOpenAI | Any OpenAI-compatible API |
+| **Embedding** | BAAI/bge-m3 | 1024-dim multilingual dual vectors |
+| **Vector DB** | Milvus 2.5 | Hybrid search (dense + sparse + RRF) |
+| **Reranker** | BAAI/bge-reranker-v2-m3 | Cross-encoder precision ranking |
+| **Agent** | LangGraph (Deep Agents) | Multi-turn reasoning + tool calling |
+| **Database** | PostgreSQL 15 | Document metadata, chat history |
+| **Cache** | Redis 7 | Session state, distributed locks |
+| **Storage** | MinIO | Milvus object storage backend |
+| **Tracing** | LangSmith (optional) | Agent execution monitoring |
+
+---
+
+## 📂 Project Structure
+
+```
+RagMate/
+├── docker-compose.yml          # Infrastructure orchestration
+├── README.md                   # This file
+├── backend/
+│   ├── app.py                  # FastAPI factory, middleware, lifespan
+│   │
+│   ├── api/                    # HTTP route handlers
+│   │   ├── chat.py            # /chat, /chat/stream, /chat/sessions
+│   │   ├── documents.py       # /documents CRUD
+│   │   ├── ingest.py          # /ingest status
+│   │   └── deps.py            # Dependency injection helpers
+│   │
+│   ├── domain/                 # Business entities
+│   │   ├── models.py          # SQLAlchemy ORM models
+│   │   ├── schemas.py         # Pydantic validators
+│   │   └── errors.py          # Typed error hierarchy
+│   │
+│   ├── infrastructure/         # External adapters
+│   │   ├── config.py          # pydantic-settings configuration
+│   │   ├── database.py        # PostgreSQL async engines
+│   │   ├── redis_client.py    # Redis session/lock client
+│   │   ├── milvus.py          # Milvus vector DB operations
+│   │   ├── encoding.py        # BGE-M3 encoder
+│   │   └── model_factory.py   # LLM factory
+│   │
+│   ├── core/                   # Domain logic
+│   │   ├── retriever.py       # Hybrid search + reranking + filtering
+│   │   ├── agent.py           # Deep Agent (LangGraph)
+│   │   └── prompts/           # System prompt templates
+│   │
+│   ├── application/            # Use cases
+│   │   ├── chat.py            # Chat orchestration (sync + stream)
+│   │   ├── document_service.py # Document CRUD
+│   │   ├── ingest_manager.py  # Ingest lifecycle management
+│   │   └── ingest/            # Ingestion pipeline
+│   │       ├── loaders.py     # PDF/DOCX/XLSX parsers
+│   │       ├── db_sync.py     # PostgreSQL sync
+│   │       └── pipeline.py    # Main orchestrator
+│   │
+│   └── eval/                   # RAGAS evaluation CLI
+│       ├── cli.py             # Command-line interface
+│       ├── metrics.py         # Metric computation
+│       └── report.py          # Report generation
+│
+├── frontend/                   # Web UI (zero-dependency)
+│   ├── index.html
+│   ├── style.css              # Apple HIG design system
+│   └── app.js
+│
+└── eval/                       # Evaluation data
+    ├── testsets/              # Generated test sets
+    └── reports/               # Evaluation reports
+```
+
+---
+
+## 🔒 Security
+
+- **Self-Hosted**: All data stored locally, no external dependencies
+- **Upload Limits**: 50MB max file size (enforced via ASGI middleware)
+- **Rate Limiting**: Redis-based per-IP throttling
+- **Request Tracking**: UUID per request for audit trails
+- **Input Validation**: Pydantic schemas for all API endpoints
+- **CORS Control**: Configurable allowed origins
+
+---
+
+## 🧩 Development
+
+### Running Tests
 
 ```bash
 cd backend
@@ -153,233 +365,65 @@ pip install -e ".[test]"
 pytest -v
 ```
 
-### RAGAS Evaluation
-
-Evaluate your RAG pipeline quality with RAGAS metrics. Install eval dependencies and ensure infrastructure is running:
+### Code Quality
 
 ```bash
-cd backend
-pip install -e ".[eval]"
+# Type checking
+mypy backend/
 
-# Make sure Milvus, PostgreSQL, Redis are running
-docker-compose up -d
+# Linting
+ruff check backend/
+
+# Formatting
+ruff format backend/
 ```
 
-Interactive mode (recommended):
+### Tracing (Optional)
 
-```bash
-ragmate-eval
-```
+Enable LangSmith for agent execution monitoring:
 
-CLI mode (for CI/CD):
-
-```bash
-# Generate test set
-ragmate-eval generate --size 50 --output eval/testsets/testset_v1.json
-
-# Run evaluation
-ragmate-eval evaluate --testset eval/testsets/testset_v1.json --report eval/reports/report.json
-
-# CI/CD gate — exit non-zero if overall score below threshold
-ragmate-eval evaluate --testset eval/testsets/testset_v1.json --threshold 0.75
-```
-
-Metrics: Faithfulness, Answer Relevancy, Context Precision, Context Recall, Factual Correctness.
-
----
-
-## API Reference
-
-### Chat
-
-```
-POST /chat
-Body: { "message": "...", "session_id": "optional" }
-Response: { "response": "...", "session_id": "...", "confidence": "high|medium|low", "unsupported_claims": [...] }
-```
-
-```
-POST /chat/stream
-Body: { "message": "...", "session_id": "optional" }
-Response: text/event-stream
-  data: {"token": "..."}
-  data: {"done": true, "session_id": "...", "confidence": "high|medium|low", "unsupported_claims": [...]}
-```
-
-```
-GET /chat/sessions
-Response: { "sessions": [{ "session_id": "...", "first_message": "...", "created_at": "..." }] }
-```
-
-```
-GET /chat/sessions/{session_id}
-Response: { "session_id": "...", "messages": [{ "role": "...", "content": "...", "created_at": "..." }] }
-```
-
-```
-DELETE /chat/sessions/{session_id}
-Response: { "success": true }
-```
-
-### Documents
-
-```
-GET /documents
-Response: { "documents": [{ "filename": "...", "size_bytes": ..., "status": "...", "chunk_count": ... }] }
-```
-
-```
-POST /documents/upload
-Body: multipart/form-data, field name "file" (PDF/DOCX/XLSX/TXT/MD, max 50MB)
-Response: { "filename": "...", "status": "uploaded" }
-```
-
-```
-DELETE /documents/{filename}
-Response: { "success": true }
-```
-
-### Ingestion
-
-```
-POST /ingest
-Body: { "filenames": ["file1.pdf", "file2.docx"] } (optional, omit to ingest all new files)
-Response: { "status": "started" | "already_running" }
-```
-
-```
-GET /ingest/status
-Response: { "status": "idle|running|success|failed", "document_count": ..., "chunk_count": ... }
-```
-
-### System
-
-```
-GET /health
-Response: { "status": "ok" }
-
-GET /ready
-Response: { "status": "ready|degraded", "checks": { "milvus": ..., "postgresql": ..., "redis": ... } }
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your-key
+LANGSMITH_PROJECT=ragmate
 ```
 
 ---
 
-## Configuration
+## ❓ FAQ
 
-All settings are configured via `.env` file or environment variables, validated by `pydantic-settings`.
+**Q: Can I use local LLMs?**  
+A: Yes! Set `LLM_API_BASE_URL` to your local endpoint (e.g., Ollama, LM Studio).
 
-| Category | Variable | Default | Description |
-|----------|----------|---------|-------------|
-| **LLM** | `LLM_MODEL` | `gpt-4o` | Model name |
-| | `LLM_API_KEY` | | API key |
-| | `LLM_API_BASE_URL` | | Custom API endpoint |
-| **Embedding** | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` or `openai` |
-| | `EMBEDDING_MODEL` | `BAAI/bge-m3` | Embedding model |
-| | `EMBEDDING_DEVICE` | `cpu` | `cpu` or `cuda` |
-| | `EMBEDDING_NORMALIZE` | `true` | Normalize embeddings |
-| | `HF_TOKEN` | | HuggingFace token |
-| **Database** | `DATABASE_URL` | `postgresql+asyncpg://...` | PostgreSQL connection |
-| | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
-| **Milvus** | `MILVUS_HOST` | `localhost` | Host |
-| | `MILVUS_PORT` | `19530` | Port |
-| | `MILVUS_COLLECTION` | `ragmate_docs` | Collection name |
-| **Ingestion** | `CHUNK_SIZE` | `1000` | Default text chunk size |
-| | `CHUNK_OVERLAP` | `200` | Default chunk overlap |
-| | `CHUNK_SIZE_PDF` | `600` | PDF chunk size |
-| | `CHUNK_SIZE_DOCX` | `800` | DOCX chunk size |
-| | `CHUNK_SIZE_TXT` | `1000` | TXT chunk size |
-| | `CHUNK_SIZE_TABLE` | `1500` | Table/spreadsheet chunk size |
-| | `CHUNK_SIZE_PARENT` | `2500` | Parent chunk size (small-to-big retrieval) |
-| | `CHUNK_OVERLAP_PARENT` | `300` | Parent chunk overlap |
-| **Query Processing** | `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-up queries into standalone retrieval queries via LLM |
-| | `QUERY_ROUTING_ENABLED` | `true` | Route simple queries directly to LLM, skipping the agent |
-| **Retrieval** | `HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
-| | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model |
-| | `RERANK_CANDIDATES` | `30` | Rerank candidate pool size |
-| | `FINAL_CONTEXT_K` | `15` | Max chunks passed to the LLM (hard cap) |
-| | `RERANK_SCORE_THRESHOLD` | `0.3` | Sigmoid probability threshold (0-1) |
-| | `CONTEXTUAL_COMPRESSION` | `true` | Sentence-level compression within chunks |
-| | `COMPRESSION_SCORE_THRESHOLD` | `0.4` | Sentence relevance threshold for compression |
-| | `COMPRESSION_MIN_CHARS` | `300` | Chunks shorter than this are not compressed |
-| | `SOURCE_DOMINANCE_THRESHOLD` | `0.9` | Dominant source adaptive limit threshold |
-| | `SOURCE_DOMINANCE_BOOST` | `1.5` | Max chunk multiplier for dominant source |
-| **Generation** | `FAITHFULNESS_CHECK` | `false` | Post-generation faithfulness verification (extra LLM call) |
-| **LangSmith** | `LANGSMITH_TRACING` | `false` | Enable tracing |
-| | `LANGSMITH_API_KEY` | | LangSmith API key |
+**Q: How much RAM do I need?**  
+A: Minimum 8GB for CPU mode. BGE-M3 embedding model requires ~2GB. GPU recommended for production.
+
+**Q: Which file formats are supported?**  
+A: PDF, DOCX, XLSX/XLS, TXT, Markdown. Tables in spreadsheets are preserved as-is.
+
+**Q: Can I customize chunking?**  
+A: Yes, adjust `CHUNK_SIZE_*` and `CHUNK_OVERLAP_*` in `.env` per file type.
+
+**Q: How do I backup my data?**  
+A: Backup `volumes/` directory (PostgreSQL, Milvus, MinIO data). Stop services first for consistency.
 
 ---
 
-## Project Structure
-
-```
-RagMate/
-├── docker-compose.yml
-├── LICENSE / README.md / README_zh.md / CHANGELOG.md
-├── eval/                          # RAGAS evaluation data
-│   ├── testsets/                  # Generated test sets
-│   └── reports/                   # Evaluation reports
-├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
-└── backend/
-    ├── pyproject.toml
-    ├── .env.example
-    ├── app.py                     # FastAPI factory, middleware, lifespan (uvicorn backend.app:app)
-    ├── domain/                    # Business entities
-    │   ├── errors.py              # Typed error hierarchy
-    │   ├── models.py              # ORM models (Document, ChatHistory)
-    │   └── schemas.py             # Pydantic request/response schemas
-    ├── infrastructure/            # External system adapters
-    │   ├── config.py              # Configuration (pydantic-settings)
-    │   ├── database.py            # SQLAlchemy async/sync engines
-    │   ├── redis_client.py        # Redis session / lock / status
-    │   ├── rate_limiter.py        # Redis-based rate limiter
-    │   ├── streaming_llm.py       # ChatOpenAI-compatible factory
-    │   ├── model_factory.py       # LLM / Embedding factory
-    │   ├── encoding.py            # BGE-M3 dense + sparse encoding
-    │   └── milvus.py              # Milvus client management + CRUD
-    ├── core/                      # Domain logic
-    │   ├── retriever.py           # Hybrid search + Reranking + filtering
-    │   ├── agent.py               # Deep Agent (system prompt + retrieval_tool)
-    │   └── prompts/               # Agent system prompts
-    ├── application/               # Use cases / services
-    │   ├── chat.py                # Chat orchestration (sync + streaming)
-    │   ├── document_service.py    # Document CRUD
-    │   ├── ingest_manager.py      # Ingest task lifecycle (lock, async)
-    │   └── ingest/                # Ingestion pipeline
-    │       ├── loaders.py         # Document loading by extension
-    │       ├── db_sync.py         # PostgreSQL document status sync
-    │       └── pipeline.py        # Main ingest orchestration
-    ├── api/                       # HTTP routes
-    │   ├── health.py              # /health, /ready
-    │   ├── chat.py                # /chat, /chat/stream, /chat/sessions
-    │   ├── documents.py           # /documents, /documents/upload
-    │   └── ingest.py              # /ingest, /ingest/status
-    ├── tests/                     # Unit tests (pytest)
-    ├── eval/                      # RAGAS evaluation CLI
-    └── documents/                 # Document storage directory
-```
-
----
-
-## Tech Stack
-
-| Component | Technology | Description |
-|-----------|------------|-------------|
-| Web Framework | FastAPI + Uvicorn | ASGI, serves frontend static files |
-| Frontend | HTML/CSS/JS | Zero-dependency native frontend |
-| LLM | LangChain ChatOpenAI | Access any OpenAI-compatible API |
-| Embedding | BAAI/bge-m3 | 1024-dim, multilingual, dense + sparse dual vectors |
-| Vector DB | Milvus 2.5 | Hybrid search (dense + sparse + RRF) |
-| Reranker | BAAI/bge-reranker-v2-m3 | Cross-encoder reranking |
-| Agent | LangGraph (Deep Agents) | Multi-turn reasoning + tool calling |
-| Tracing | LangSmith | Agent execution monitoring |
-| Cache | Redis | Session state + distributed lock |
-| Storage | PostgreSQL | Document metadata + chat history |
-
----
-
-## License
+## 📝 License
 
 MIT License — see [LICENSE](LICENSE).
+
+---
+
+## 🙌 Acknowledgments
+
+Built with amazing open-source tools:
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [LangChain](https://python.langchain.com/)
+- [Milvus](https://milvus.io/)
+- [BGE Models](https://github.com/FlagOpen/FlagEmbedding)
+- [RAGAS](https://docs.ragas.ai/)
+
+---
+
+**Ready to build your knowledge base?** Start with `docker-compose up -d` 🚀
