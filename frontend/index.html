@@ -48,16 +48,17 @@
           </div>
           <div id="chat-messages" class="chat-messages">
             <div id="hero-empty" class="hero-empty empty-state">
-              <canvas id="hero-canvas" class="hero-canvas" aria-hidden="true"></canvas>
               <div class="hero-content">
-                <p class="hero-eyebrow">RAG Knowledge Base</p>
                 <h1 class="hero-title">你的<span class="accent">知识库</span> AI 助手</h1>
-                <p class="hero-subtitle">上传文档，建立专属知识库。提问即检索，精准溯源，拒绝幻觉。</p>
-                <div class="hero-suggestions">
-                  <button class="hero-suggestion" data-q="帮我总结这个知识库的核心内容">帮我总结这个知识库的核心内容</button>
-                  <button class="hero-suggestion" data-q="这些文档之间有什么关联？">这些文档之间有什么关联？</button>
-                  <button class="hero-suggestion" data-q="有没有互相矛盾的说法？">有没有互相矛盾的说法？</button>
+                <p class="hero-subtitle">上传文档，开启智能问答</p>
+                <div class="hero-steps" id="hero-steps">
+                  <div class="hero-step" data-step="1"><span class="hero-step-num">1</span>上传文档</div>
+                  <div class="hero-step-line"></div>
+                  <div class="hero-step" data-step="2"><span class="hero-step-num">2</span>智能提问</div>
+                  <div class="hero-step-line"></div>
+                  <div class="hero-step" data-step="3"><span class="hero-step-num">3</span>精准溯源</div>
                 </div>
+                <div class="hero-cards" id="hero-cards"></div>
               </div>
             </div>
           </div>

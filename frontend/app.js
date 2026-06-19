@@ -186,6 +186,33 @@ function formatDate(isoStr) {
   return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatTime(isoStr) {
+  if (!isoStr) return '';
+  return new Date(isoStr).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function getDateKey(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDateSeparator(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.floor((today - target) / 86400000);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  if (diff === 2) return '前天';
+  const isSameYear = d.getFullYear() === now.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  return isSameYear ? `${month}月${day}日` : `${d.getFullYear()}年${month}月${day}日`;
+}
+
 function escapeHtml(str) {
   return str
     .replace(/&/g, '&amp;')
@@ -562,19 +589,33 @@ const ChatPanel = {
     newSession();
     this.messagesEl.innerHTML = `
       <div id="hero-empty" class="hero-empty empty-state">
-        <canvas id="hero-canvas" class="hero-canvas" aria-hidden="true"></canvas>
         <div class="hero-content">
-          <p class="hero-eyebrow">RAG Knowledge Base</p>
           <h1 class="hero-title">你的<span class="accent">知识库</span> AI 助手</h1>
-          <p class="hero-subtitle">上传文档，建立专属知识库。提问即检索，精准溯源，拒绝幻觉。</p>
-          <div class="hero-suggestions">
-            <button class="hero-suggestion" data-q="帮我总结这个知识库的核心内容">帮我总结这个知识库的核心内容</button>
-            <button class="hero-suggestion" data-q="这些文档之间有什么关联？">这些文档之间有什么关联？</button>
-            <button class="hero-suggestion" data-q="有没有互相矛盾的说法？">有没有互相矛盾的说法？</button>
+          <p class="hero-subtitle">上传文档，开启智能问答</p>
+          <div class="hero-steps" id="hero-steps">
+            <div class="hero-step" data-step="1"><span class="hero-step-num">1</span>上传文档</div>
+            <div class="hero-step-line"></div>
+            <div class="hero-step" data-step="2"><span class="hero-step-num">2</span>智能提问</div>
+            <div class="hero-step-line"></div>
+            <div class="hero-step" data-step="3"><span class="hero-step-num">3</span>精准溯源</div>
           </div>
+          <div class="hero-cards" id="hero-cards"></div>
         </div>
       </div>`;
-    document.querySelectorAll('.hero-suggestion').forEach(btn => {
+    this.updateHeroState();
+    this.hideError();
+  },
+
+  _switchToDocuments() {
+    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector('.sidebar-tab[data-tab="documents"]').classList.add('active');
+    document.getElementById('view-chat').classList.add('hidden');
+    document.getElementById('view-documents').classList.remove('hidden');
+    DocumentsPanel.load();
+  },
+
+  _bindHeroCards() {
+    document.querySelectorAll('.hero-card[data-q]').forEach(btn => {
       btn.addEventListener('click', () => {
         const q = btn.dataset.q;
         if (q) {
@@ -584,7 +625,61 @@ const ChatPanel = {
         }
       });
     });
-    this.hideError();
+    document.querySelectorAll('.hero-card[data-action="upload"]').forEach(btn => {
+      btn.addEventListener('click', () => this._switchToDocuments());
+    });
+  },
+
+  async updateHeroState() {
+    const cardsEl = document.getElementById('hero-cards');
+    const stepsEl = document.getElementById('hero-steps');
+    if (!cardsEl || !stepsEl) return;
+
+    const checkIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    const uploadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`;
+    const summaryIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
+    const linkIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+    const conflictIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+
+    let hasDocs = false;
+    try {
+      const data = await API.getDocuments();
+      hasDocs = (data.documents || []).some(d => d.status === 'ingested');
+    } catch (_) {}
+
+    const steps = stepsEl.querySelectorAll('.hero-step');
+    const lines = stepsEl.querySelectorAll('.hero-step-line');
+
+    if (hasDocs) {
+      steps[0].className = 'hero-step done';
+      steps[0].querySelector('.hero-step-num').innerHTML = checkIcon;
+      lines[0].className = 'hero-step-line done';
+
+      cardsEl.innerHTML = `
+        <button class="hero-card" data-q="帮我总结这个知识库的核心内容">
+          <div class="hero-card-icon">${summaryIcon}</div>
+          <div class="hero-card-title">总结核心内容</div>
+        </button>
+        <button class="hero-card" data-q="这些文档之间有什么关联？">
+          <div class="hero-card-icon">${linkIcon}</div>
+          <div class="hero-card-title">分析文档关联</div>
+        </button>
+        <button class="hero-card" data-q="有没有互相矛盾的说法？">
+          <div class="hero-card-icon">${conflictIcon}</div>
+          <div class="hero-card-title">检测矛盾说法</div>
+        </button>`;
+    } else {
+      steps[0].className = 'hero-step';
+      steps[0].querySelector('.hero-step-num').textContent = '1';
+      lines[0].className = 'hero-step-line';
+
+      cardsEl.innerHTML = `
+        <button class="hero-card" data-action="upload">
+          <div class="hero-card-icon">${uploadIcon}</div>
+          <div class="hero-card-title">上传文档开始</div>
+        </button>`;
+    }
+    this._bindHeroCards();
   },
 
   loadMessages(messages) {
@@ -623,14 +718,30 @@ const HistoryPanel = {
       this.listEl.innerHTML = '<div class="history-empty">暂无记录</div>';
       return;
     }
+
+    // Group sessions by date
+    let lastDateKey = '';
     sessions.forEach(s => {
+      const dateKey = getDateKey(s.created_at);
+      if (dateKey !== lastDateKey) {
+        lastDateKey = dateKey;
+        const sep = document.createElement('div');
+        sep.className = 'history-date-separator';
+        sep.innerHTML = `
+          <span class="timeline-line"></span>
+          <span class="timeline-node"></span>
+          <span class="timeline-label">${escapeHtml(formatDateSeparator(s.created_at))}</span>
+        `;
+        this.listEl.appendChild(sep);
+      }
+
       const btn = document.createElement('button');
       btn.className = 'history-item' + (s.session_id === this.activeId ? ' active' : '');
       btn.setAttribute('role', 'listitem');
       btn.innerHTML = `
         <div class="history-item-preview">${escapeHtml(s.first_message)}</div>
         <div class="history-item-bottom">
-          <div class="history-item-time">${formatDate(s.created_at)}</div>
+          <div class="history-item-time">${formatTime(s.created_at)}</div>
           <span class="history-item-delete" role="button" tabindex="0" title="删除" aria-label="删除会话">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
           </span>
@@ -1011,6 +1122,7 @@ const DocumentsPanel = {
         this._ingestHandled = true;
         this.setIngestBtnState('done');
         await this.refreshList();
+        ChatPanel.updateHeroState();
       } else if (status.status === 'failed') {
         this.stopPolling();
         if (this._ingestModal) {
@@ -1104,18 +1216,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('beforeunload', () => DocumentsPanel.stopPolling());
-
-  // Hero suggestions
-  document.querySelectorAll('.hero-suggestion').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const q = btn.dataset.q;
-      if (q) {
-        ChatPanel.textareaEl.value = q;
-        ChatPanel.textareaEl.dispatchEvent(new Event('input'));
-        ChatPanel.formEl.requestSubmit();
-      }
-    });
-  });
 });
 
 // Hero canvas removed — Apple HIG uses clean whitespace
