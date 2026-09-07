@@ -43,3 +43,4 @@ eval/reports/*.json
 
 # Node (if any future frontend deps)
 node_modules/
+/.workbuddy
