@@ -15,7 +15,13 @@ from backend.infrastructure.milvus import check_milvus_available, canonical_sour
 logger = logging.getLogger("ragmate")
 
 # ── 检索质量指标（线程本地，供 confidence 计算） ──────────────────────────────
-_metrics = threading.local()
+class _MetricsLocal(threading.local):
+    """带默认值的线程本地存储，新线程无需先赋值即可读取。"""
+
+    last: dict | None = None
+
+
+_metrics = _MetricsLocal()
 
 
 def calculate_confidence(metrics_list: list[dict]) -> dict | None:
@@ -46,7 +52,18 @@ def calculate_confidence(metrics_list: list[dict]) -> dict | None:
 
 def get_retrieval_metrics() -> dict | None:
     """获取最近一次检索的质量指标。"""
-    return getattr(_metrics, "last", None)
+    return _metrics.last
+
+
+def reset_retrieval_metrics():
+    """清空当前线程的检索指标。
+
+    必须在每次 retrieve() 开始前调用：asyncio.to_thread 会复用线程池中的线程，
+    若本次检索提前返回而未覆盖 last，读取到的会是上一次（可能是别的请求）的指标，
+    导致 confidence 虚高。
+    """
+    _metrics.last = None
+
 
 _CONTEXTUALIZE_PROMPT = """根据以下对话历史，将用户的最新问题改写为一个独立、完整的搜索查询。
 要求：
@@ -358,6 +375,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
     """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
     if k is None:
         k = settings.FINAL_CONTEXT_K
+
+    # 先清空本线程的指标，保证后续所有 return / raise 路径都不会残留旧数据
+    reset_retrieval_metrics()
 
     try:
         client = init_milvus()

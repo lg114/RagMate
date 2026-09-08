@@ -31,6 +31,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+    # 检索置信度：{"level": "high|medium|low", "score": float, "chunks": int}
+    # 无检索发生（如简单查询直连 LLM）或检索失败时为 None
+    confidence: dict | None = None
 
 
 class IngestRequest(BaseModel):

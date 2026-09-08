@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- `core/retriever.py` — `retrieve()` 在入口调用 `reset_retrieval_metrics()` 清空本线程的检索指标。此前 "collection 不存在 / 无候选 / 过滤后为空" 三条提前 return 分支不会覆盖 `_metrics.last`，而 `asyncio.to_thread` 会复用线程池中的线程，导致下一次无结果的检索读到上一次（可能是别的请求）的分数，confidence 虚报为 high。
+- `domain/schemas.py` + `api/chat.py` — `ChatResponse` 增加 `confidence` 字段并透传。此前非流式 `POST /chat` 已经算出置信度，却被 Pydantic 的响应模型静默丢弃。
+
+### Changed
+- `core/retriever.py` — `_metrics` 改为带默认值的 `threading.local` 子类 `_MetricsLocal`，新线程无需先赋值即可安全读取；`get_retrieval_metrics()` 不再依赖 `getattr` 兜底。
+
 ## Prototype 12 — 2026-05-18
 
 ### Added

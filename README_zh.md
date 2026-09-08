@@ -248,6 +248,8 @@ data: {"error": "..."}                               // 终止性错误
 
 空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence` 和 `unsupported_claims` 只出现在 `done` 事件中；`unsupported_claims` 仅在开启 `FAITHFULNESS_CHECK` 且存在未通过校验的声明时出现。
 
+非流式的 `POST /chat` 会在 JSON 响应体中返回同样的 `confidence` 对象；未发生检索时（例如寒暄类问题直连 LLM）该字段为 `null`。
+
 ---
 
 ## 配置

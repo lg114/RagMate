@@ -23,7 +23,11 @@ router = APIRouter()
 async def chat_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
     result = await chat(body.message, body.session_id, replace_last=body.replace_last)
-    return ChatResponse(response=result["response"], session_id=result["session_id"])
+    return ChatResponse(
+        response=result["response"],
+        session_id=result["session_id"],
+        confidence=result.get("confidence"),
+    )
 
 
 @router.post("/chat/stream")
