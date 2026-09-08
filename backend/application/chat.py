@@ -176,6 +176,42 @@ def _classify_error(e: Exception) -> str:
     return f"{_ERROR_SENTINEL}处理请求时出错，请稍后重试"
 
 
+async def _pop_retrieval_signals(
+    session_id: str, response_text: str, is_error: bool
+) -> tuple[dict | None, list[dict] | None]:
+    """取出本次问答的检索数据，计算置信度与（可选的）无依据声明。
+
+    一次问答只能调用一次：pop_retrieval_data 会清除该 session 的 agent 上下文。
+
+    Returns:
+        (confidence, unsupported_claims)，两者都可能为 None。
+        confidence 为 None 表示本次没有发生检索；
+        unsupported_claims 为 None 表示未做校验或全部通过。
+    """
+    from backend.core.agent import pop_retrieval_data
+    from backend.core.retriever import calculate_confidence, check_faithfulness
+
+    rdata = pop_retrieval_data(session_id)
+    if not rdata:
+        return None, None
+
+    confidence = calculate_confidence(rdata.get("metrics", []))
+
+    unsupported = None
+    if not is_error and rdata.get("texts"):
+        # check_faithfulness 内部是同步 LLM 调用，必须挪到线程里，
+        # 否则会阻塞整个事件循环
+        claims = await asyncio.to_thread(check_faithfulness, response_text, rdata["texts"])
+        if claims:
+            unsupported = [c for c in claims if not c.get("supported")] or None
+            if unsupported:
+                logger.warning(
+                    f"Faithfulness: {len(unsupported)} unsupported claims in session={session_id[:8]}"
+                )
+
+    return confidence, unsupported
+
+
 def _strip_last_turn(history: list[dict]) -> list[dict]:
     """移除历史中最后一轮 user/assistant（用于重试/重新生成）。"""
     if not history:
@@ -265,15 +301,12 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
 
     resp = {"response": _strip_error_sentinel(response_text), "session_id": session_id}
 
-    # 从 agent 上下文中取出检索数据，计算置信度
-    from backend.core.agent import pop_retrieval_data
-    from backend.core.retriever import calculate_confidence
-    
-    rdata = pop_retrieval_data(session_id)
-    if rdata:
-        confidence = calculate_confidence(rdata.get("metrics", []))
-        if confidence:
-            resp["confidence"] = confidence
+    # 从 agent 上下文中取出检索数据，计算置信度与无依据声明
+    confidence, unsupported = await _pop_retrieval_signals(session_id, response_text, is_error)
+    if confidence:
+        resp["confidence"] = confidence
+    if unsupported:
+        resp["unsupported_claims"] = unsupported
 
     return resp
 
@@ -372,23 +405,8 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     is_error = _is_error_response(response_text)
     elapsed = time.monotonic() - t0
 
-    # 从 agent 上下文中取出检索数据
-    from backend.core.agent import pop_retrieval_data
-    rdata = pop_retrieval_data(session_id)
-
-    # 计算置信度
-    from backend.core.retriever import calculate_confidence
-    confidence = calculate_confidence(rdata.get("metrics", []) if rdata else None)
-
-    # 忠诚度校验（可选，增加一次 LLM 调用）
-    faithfulness = None
-    if not is_error and rdata and rdata.get("texts"):
-        from backend.core.retriever import check_faithfulness
-        faithfulness = check_faithfulness(response_text, rdata["texts"])
-        if faithfulness:
-            unsupported = [c for c in faithfulness if not c.get("supported")]
-            if unsupported:
-                logger.warning(f"Faithfulness: {len(unsupported)} unsupported claims in session={session_id[:8]}")
+    # 从 agent 上下文中取出检索数据，计算置信度与无依据声明
+    confidence, unsupported = await _pop_retrieval_signals(session_id, response_text, is_error)
 
     if is_error:
         logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
@@ -405,8 +423,6 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     done_event = {"done": True, "session_id": session_id}
     if confidence:
         done_event["confidence"] = confidence
-    if faithfulness:
-        unsupported = [c for c in faithfulness if not c.get("supported")]
-        if unsupported:
-            done_event["unsupported_claims"] = unsupported
+    if unsupported:
+        done_event["unsupported_claims"] = unsupported
     yield done_event

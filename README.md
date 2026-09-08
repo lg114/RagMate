@@ -248,7 +248,7 @@ data: {"error": "..."}                                 // terminal error
 
 Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence` and `unsupported_claims` appear only on the `done` event; `unsupported_claims` is present only when `FAITHFULNESS_CHECK` is enabled and some claim failed verification.
 
-The non-streaming `POST /chat` returns the same `confidence` object in its JSON body, and `null` when no retrieval took place (for example, a greeting routed straight to the LLM).
+The non-streaming `POST /chat` returns the same `confidence` and `unsupported_claims` values in its JSON body. Both are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
 ---
 

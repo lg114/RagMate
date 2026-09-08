@@ -5,10 +5,12 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Fixed
+- `application/chat.py` — 非流式 `chat()` 此前完全不做忠实度校验，开启 `FAITHFULNESS_CHECK` 时只有流式链路会返回 `unsupported_claims`。现在两条链路共用 `_pop_retrieval_signals()`，行为一致。
 - `core/retriever.py` — `retrieve()` 在入口调用 `reset_retrieval_metrics()` 清空本线程的检索指标。此前 "collection 不存在 / 无候选 / 过滤后为空" 三条提前 return 分支不会覆盖 `_metrics.last`，而 `asyncio.to_thread` 会复用线程池中的线程，导致下一次无结果的检索读到上一次（可能是别的请求）的分数，confidence 虚报为 high。
-- `domain/schemas.py` + `api/chat.py` — `ChatResponse` 增加 `confidence` 字段并透传。此前非流式 `POST /chat` 已经算出置信度，却被 Pydantic 的响应模型静默丢弃。
+- `domain/schemas.py` + `api/chat.py` — `ChatResponse` 增加 `confidence` 与 `unsupported_claims` 字段并透传。此前非流式 `POST /chat` 已经算出置信度，却被 Pydantic 的响应模型静默丢弃。
 
 ### Changed
+- `application/chat.py` — 抽出 `async _pop_retrieval_signals()`，统一负责取出 agent 检索数据、计算 confidence 与 unsupported_claims；`check_faithfulness` 改为 `asyncio.to_thread` 调用，避免同步 LLM 请求阻塞事件循环。
 - `core/retriever.py` — `_metrics` 改为带默认值的 `threading.local` 子类 `_MetricsLocal`，新线程无需先赋值即可安全读取；`get_retrieval_metrics()` 不再依赖 `getattr` 兜底。
 
 ## Prototype 12 — 2026-05-18

@@ -34,6 +34,9 @@ class ChatResponse(BaseModel):
     # 检索置信度：{"level": "high|medium|low", "score": float, "chunks": int}
     # 无检索发生（如简单查询直连 LLM）或检索失败时为 None
     confidence: dict | None = None
+    # 忠实度校验未通过的声明：[{"claim": str, "supported": false}, ...]
+    # 仅当 FAITHFULNESS_CHECK 开启且确实存在无依据声明时出现
+    unsupported_claims: list[dict] | None = None
 
 
 class IngestRequest(BaseModel):
