@@ -9,6 +9,7 @@ from starlette.responses import StreamingResponse
 
 from backend.api.deps import get_client_ip
 from backend.application.chat import chat, chat_stream
+from backend.infrastructure.config import settings
 from backend.infrastructure.database import async_session
 from backend.domain.models import ChatHistory
 from backend.infrastructure.rate_limiter import check_rate_limit
@@ -34,7 +35,6 @@ async def chat_endpoint(body: ChatRequest, request: Request):
 async def chat_stream_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
 
-    _HEARTBEAT_INTERVAL = 15  # 秒
     _SENTINEL = object()
 
     async def event_generator():
@@ -54,7 +54,7 @@ async def chat_stream_endpoint(body: ChatRequest, request: Request):
         try:
             while True:
                 try:
-                    chunk = await asyncio.wait_for(queue.get(), _HEARTBEAT_INTERVAL)
+                    chunk = await asyncio.wait_for(queue.get(), settings.HEARTBEAT_INTERVAL)
                 except asyncio.TimeoutError:
                     yield ":heartbeat\n\n"
                     continue

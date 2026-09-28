@@ -1,8 +1,6 @@
-"""Redis 频率限制：每 IP 每分钟最多 30 次。基于固定窗口计数器，多 Worker 共享。"""
+"""Redis 频率限制：每 IP 每窗口最多 N 次。基于固定窗口计数器，多 Worker 共享。"""
 from backend.domain.errors import ValidationError
-
-_RATE_LIMIT_MAX = 30
-_RATE_LIMIT_WINDOW = 60  # 秒
+from backend.infrastructure.config import settings
 
 # Lua 脚本：原子 INCR + 首次请求设置 EXPIRE（真正固定窗口，非滑动窗口）
 # KEYS[1]: 限流 key, ARGV[1]: 窗口秒数, ARGV[2]: 最大请求数
@@ -24,6 +22,6 @@ async def check_rate_limit(ip: str):
 
     key = f"ragmate:rate:{ip}"
     r = await get_redis()
-    allowed = await r.eval(_RATE_LIMIT_SCRIPT, 1, key, _RATE_LIMIT_WINDOW, _RATE_LIMIT_MAX)
+    allowed = await r.eval(_RATE_LIMIT_SCRIPT, 1, key, settings.RATE_LIMIT_WINDOW, settings.RATE_LIMIT_MAX)
     if not allowed:
         raise ValidationError("请求过于频繁，请稍后重试")

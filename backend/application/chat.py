@@ -9,20 +9,19 @@ from sqlalchemy import delete, select
 
 from backend.core.agent import run_agent, run_agent_streaming, extract_text_content
 from backend.infrastructure.database import async_session
+from backend.infrastructure.config import settings
 from backend.domain.models import ChatHistory
 from backend.infrastructure.redis_client import load_session, save_session
 
 logger = logging.getLogger("ragmate")
 
-# 上下文窗口限制：保留最近 N 轮对话（每轮 = user + assistant）
-_MAX_HISTORY_TURNS = 10
-
 
 def _trim_history(history: list[dict]) -> list[dict]:
     """截断历史到最近 N 轮，避免 prompt 膨胀。"""
-    if len(history) <= _MAX_HISTORY_TURNS * 2:
+    max_turns = settings.MAX_HISTORY_TURNS
+    if len(history) <= max_turns * 2:
         return history
-    return history[-(_MAX_HISTORY_TURNS * 2):]
+    return history[-(max_turns * 2):]
 
 
 def extract_text(response: dict) -> str:
@@ -72,8 +71,6 @@ async def _delete_last_persisted_turn(session_id: str):
             await session.execute(delete(ChatHistory).where(ChatHistory.id.in_(ids_to_delete)))
             await session.commit()
 
-
-AGENT_TIMEOUT = 120  # Agent 调用超时（秒）
 
 # ── 查询路由：明显的非 RAG 查询，跳过 agent 直接回复 ─────────────────────────
 _NON_RAG_RE = re.compile(
@@ -274,7 +271,7 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(run_agent, history, session_id),
-            timeout=AGENT_TIMEOUT,
+            timeout=settings.AGENT_TIMEOUT,
         )
         response_text = normalize_citations(extract_text(result))
     except asyncio.TimeoutError:

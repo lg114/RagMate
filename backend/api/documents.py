@@ -21,8 +21,8 @@ async def list_documents():
 @router.post("/documents/upload")
 async def upload_document(request: Request, file: UploadFile = File(...)):
     await check_rate_limit(get_client_ip(request))
-    if file.size and file.size > 50 * 1024 * 1024:
-        raise HTTPException(413, "文件不能超过 50MB")
+    if file.size and file.size > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(413, f"文件不能超过 {settings.MAX_UPLOAD_SIZE // (1024*1024)}MB")
     content = await file.read()
     async with async_session() as session:
         return await document_service.save_document(

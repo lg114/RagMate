@@ -120,7 +120,6 @@ def create_app() -> FastAPI:
 
     # 上传大小限制中间件：包装 ASGI receive，流式检查实际 body 大小
     # 不依赖 Content-Length 头（可伪造），而是检查实际接收的字节数
-    MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
     class _PayloadTooLarge(Exception):
         pass
@@ -136,7 +135,7 @@ def create_app() -> FastAPI:
                 msg = await original_receive()
                 if msg.get("type") == "http.request":
                     received += len(msg.get("body", b""))
-                    if received > MAX_UPLOAD_SIZE:
+                    if received > settings.MAX_UPLOAD_SIZE:
                         raise _PayloadTooLarge()
                 return msg
 
@@ -149,9 +148,10 @@ def create_app() -> FastAPI:
                     msg = await original_receive()
                     if msg.get("type") != "http.request" or not msg.get("more_body"):
                         break
+                max_mb = settings.MAX_UPLOAD_SIZE // (1024 * 1024)
                 return JSONResponse(
                     status_code=413,
-                    content={"code": "PAYLOAD_TOO_LARGE", "detail": "File exceeds 50MB limit"},
+                    content={"code": "PAYLOAD_TOO_LARGE", "detail": f"File exceeds {max_mb}MB limit"},
                 )
 
         return await call_next(request)

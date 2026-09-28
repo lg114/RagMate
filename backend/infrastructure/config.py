@@ -90,6 +90,24 @@ class Settings(BaseSettings):
 
     # Agent
     AGENT_RECURSION_LIMIT: int = Field(default=30, gt=0)
+    AGENT_TIMEOUT: int = Field(default=120, gt=0)  # Agent 调用超时（秒）
+
+    # Chat & Session
+    MAX_HISTORY_TURNS: int = Field(default=10, gt=0)  # 上下文窗口保留最近 N 轮对话
+    MAX_SESSION_MESSAGES: int = Field(default=200, gt=0)  # 单 session 最大消息数
+    SESSION_TTL: int = Field(default=86400, gt=0)  # Session Redis TTL（秒），默认 24h
+    HEARTBEAT_INTERVAL: int = Field(default=15, gt=0)  # SSE 心跳间隔（秒）
+
+    # Rate Limiting
+    RATE_LIMIT_MAX: int = Field(default=30, gt=0)  # 每窗口最大请求数
+    RATE_LIMIT_WINDOW: int = Field(default=60, gt=0)  # 限流窗口（秒）
+
+    # Upload
+    MAX_UPLOAD_SIZE: int = Field(default=50 * 1024 * 1024, gt=0)  # 上传文件大小上限（字节）
+
+    # Ingest
+    INGEST_LOCK_TTL: int = Field(default=600, gt=0)  # 入库分布式锁 TTL（秒）
+    INGEST_STATUS_TTL: int = Field(default=7200, gt=0)  # 入库状态 TTL（秒）
 
     # Documents
     DOCUMENTS_DIR: str = str(_BACKEND_DIR / "documents")

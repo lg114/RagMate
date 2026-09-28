@@ -14,8 +14,6 @@ _sync_redis: redis.Redis | None = None
 _redis_lock: asyncio.Lock | None = None
 _sync_redis_lock = threading.Lock()
 
-MAX_SESSION_MESSAGES = 200  # 单 session 最大消息数，超出则截断旧消息
-
 
 async def get_redis() -> aioredis.Redis:
     global _redis, _redis_lock
@@ -58,22 +56,21 @@ async def load_session(session_id: str) -> list[dict]:
     try:
         messages = json.loads(data)
         # 截断超长 session，防止内存和传输开销
-        return messages[-MAX_SESSION_MESSAGES:] if len(messages) > MAX_SESSION_MESSAGES else messages
+        max_msgs = settings.MAX_SESSION_MESSAGES
+        return messages[-max_msgs:] if len(messages) > max_msgs else messages
     except json.JSONDecodeError:
         return []
 
 
-async def save_session(session_id: str, messages: list[dict], ttl: int = 86400):
+async def save_session(session_id: str, messages: list[dict], ttl: int | None = None):
     r = await get_redis()
-    await r.setex(_session_key(session_id), ttl, json.dumps(messages, ensure_ascii=False))
+    await r.setex(_session_key(session_id), ttl or settings.SESSION_TTL, json.dumps(messages, ensure_ascii=False))
 
 
 # ── Ingest distributed lock ──
 
 INGEST_LOCK_KEY = "ragmate:ingest:lock"
 INGEST_STATUS_KEY = "ragmate:ingest:status"
-INGEST_LOCK_TTL = 600   # 锁 10 分钟自动过期，崩溃时自动释放
-INGEST_STATUS_TTL = 7200  # 状态 2 小时过期，避免大规模入库时状态丢失
 
 # Lua 脚本：仅当 value 匹配 token 时才删除 key（防止误删他人锁）
 _RELEASE_LOCK_SCRIPT = """
@@ -98,7 +95,7 @@ async def acquire_ingest_lock() -> str | None:
     """获取入库分布式锁。返回 token 表示获取成功，返回 None 表示失败。"""
     r = await get_redis()
     token = uuid.uuid4().hex
-    ok = await r.set(INGEST_LOCK_KEY, token, nx=True, ex=INGEST_LOCK_TTL)
+    ok = await r.set(INGEST_LOCK_KEY, token, nx=True, ex=settings.INGEST_LOCK_TTL)
     return token if ok else None
 
 
@@ -117,7 +114,7 @@ async def force_release_ingest_lock():
 async def renew_ingest_lock(token: str):
     """续期入库锁（原子操作，仅 token 匹配时才续期）。"""
     r = await get_redis()
-    await r.eval(_RENEW_LOCK_SCRIPT, 1, INGEST_LOCK_KEY, token, INGEST_LOCK_TTL)
+    await r.eval(_RENEW_LOCK_SCRIPT, 1, INGEST_LOCK_KEY, token, settings.INGEST_LOCK_TTL)
 
 
 async def get_ingest_status() -> dict:
@@ -134,11 +131,11 @@ async def get_ingest_status() -> dict:
 async def set_ingest_status(data: dict):
     payload = {**data, "last_ingest": datetime.now(timezone.utc).isoformat()}
     r = await get_redis()
-    await r.setex(INGEST_STATUS_KEY, INGEST_STATUS_TTL, json.dumps(payload, default=str))
+    await r.setex(INGEST_STATUS_KEY, settings.INGEST_STATUS_TTL, json.dumps(payload, default=str))
 
 
 def set_ingest_status_sync(data: dict):
     """同步版本，供 ingest 后台任务使用"""
     payload = {**data, "last_ingest": datetime.now(timezone.utc).isoformat()}
     r = get_sync_redis()
-    r.setex(INGEST_STATUS_KEY, INGEST_STATUS_TTL, json.dumps(payload, default=str))
+    r.setex(INGEST_STATUS_KEY, settings.INGEST_STATUS_TTL, json.dumps(payload, default=str))

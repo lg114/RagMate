@@ -22,8 +22,6 @@ _WIN_RESERVED = frozenset({
     *(f"LPT{i}" for i in range(1, 10)),
 })
 
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 文件大小上限
-
 _PATH_SEPARATORS = {os.sep}
 if os.altsep:
     _PATH_SEPARATORS.add(os.altsep)
@@ -125,7 +123,7 @@ async def save_document(
         raise ValidationError(f"File '{name}' already exists", status_code=409)
 
     size_bytes = len(content)
-    if size_bytes > MAX_FILE_SIZE:
+    if size_bytes > settings.MAX_UPLOAD_SIZE:
         raise ValidationError("File exceeds 50MB limit")
 
     # 2. 写临时文件（不直接写目标路径，避免崩溃后产生与 DB 不一致的孤立文件）
