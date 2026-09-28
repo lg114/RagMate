@@ -1,0 +1,52 @@
+/* ── Reset ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* ── Base ──────────────────────────────────────────────── */
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+}
+#main, #panel-chat { height: 100%; }
+#panel-chat { display: flex; flex-direction: column; }
+
+html[lang="zh-CN"] {
+  text-rendering: optimizeLegibility;
+  word-break: break-word;
+}
+
+/* ── App Layout ────────────────────────────────────────── */
+.app-layout { display: flex; flex: 1; min-height: 0; }
+
+/* ── Content Area ──────────────────────────────────────── */
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: var(--bg);
+}
+.view { display: none; flex: 1; flex-direction: column; min-height: 0; }
+.view:not(.hidden) { display: flex; }
+
+/* ── Hidden ────────────────────────────────────────────── */
+[hidden], .hidden { display: none; }
+
+/* ── Reduced Motion ────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
