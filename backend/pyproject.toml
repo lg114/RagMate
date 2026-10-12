@@ -5,11 +5,14 @@ description = "RAG application with agentic workflow"
 requires-python = ">=3.12"
 dependencies = [
     # ── LangChain ecosystem ──
-    "langchain-core>=0.2.0,<1.0.0",
-    "langchain-openai>=0.2.0,<0.4.0",
-    "langchain-community>=0.2.0,<0.4.0",
-    "langchain-huggingface>=0.1.0,<1.0.0",
-    "langchain-text-splitters>=0.2.0,<1.0.0",
+    # 上限必须放到 1.x：deepagents>=0.5.0 硬性要求 langchain-core>=1.2.27，
+    # 而旧约束（core<1.0.0 / openai<0.4.0 / community<0.4.0 / ...）与之不可调和，
+    # 会让 `pip install -e .` 直接以 ResolutionImpossible 失败。
+    "langchain-core>=1.2.27,<2.0.0",
+    "langchain-openai>=1.0.0,<2.0.0",
+    "langchain-community>=0.4.0,<1.0.0",
+    "langchain-huggingface>=1.0.0,<2.0.0",
+    "langchain-text-splitters>=1.0.0,<2.0.0",
     # ── Agent framework ──
     "deepagents>=0.5.0",
     # ── Vector DB ──
@@ -38,6 +41,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ⚠️ 已知问题：ragas 在 import 时会执行
+#     from langchain_community.chat_models.vertexai import ChatVertexAI
+# 而该模块在 langchain-community 0.4.x 中已被移除（迁移至 langchain-google-vertexai）。
+# 回退到 langchain-community 0.3.x 又要求 langchain-core<1.0，与 deepagents 的
+# langchain-core>=1.2.27 冲突。因此在本项目的依赖组合下 ragas 无法导入，
+# 需要评测时请使用独立环境单独安装 ragas 及其兼容的 langchain 版本，
+# 不要与主依赖装在同一环境。实测 ragas 0.3.1 与 0.4.3 均受影响。
 eval = [
     "ragas>=0.2.0",
     "tqdm>=4.65.0",

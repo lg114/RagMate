@@ -43,4 +43,7 @@ eval/reports/*.json
 
 # Node (if any future frontend deps)
 node_modules/
+
+# Agent workspace（本地数据，不入版本库）
 /.workbuddy
+/.workbuddy-ai/

@@ -5,6 +5,13 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Fixed
+- `pyproject.toml` — **修正过时的 LangChain 依赖约束，此前按 README 执行 `pip install -e .` 必然失败**。
+  `deepagents>=0.5.0` 要求 `langchain-core>=1.2.27`，而原约束把五个 langchain 包全部锁在 `<1.0.0`
+  （core / openai / community / huggingface / text-splitters），两者不可调和，pip 直接报
+  `ResolutionImpossible`——任何首次搭建环境的人都会撞上。现已放开到 1.x 上限。
+  附带记录：`ragas` 无法与本项目的依赖组合共存（见 `pyproject.toml` 中 `eval` 依赖处的说明）。
+- `.gitignore` — 补上 `/.workbuddy-ai/`。原有规则是 `/.workbuddy`，少了 `-ai` 后缀，
+  与实际目录名不匹配，导致 agent 工作目录一直被 git 报为未跟踪文件。
 - `core/retriever.py` — **修复父子分块（small-to-big）在检索侧完全失效**。`parent_text` 一直由
   `milvus.py::insert_chunks` 作为独立字段写入 Milvus，但 `_do_search` 的 `output_fields` 从未请求它，
   `_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到
