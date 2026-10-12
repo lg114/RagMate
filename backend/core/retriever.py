@@ -160,7 +160,7 @@ def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
             reqs=[dense_req, sparse_req],
             ranker=RRFRanker(),
             limit=over_fetch,
-            output_fields=["text", "metadata"],
+            output_fields=["text", "parent_text", "metadata"],
         )
     else:
         return client.search(
@@ -169,25 +169,33 @@ def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
             anns_field="dense",
             param={"metric_type": "IP", "params": {}},
             limit=over_fetch,
-            output_fields=["text", "metadata"],
+            output_fields=["text", "parent_text", "metadata"],
         )
 
 
 def _extract_candidates(results) -> list[dict]:
     """从 Milvus 结果中提取候选。
-    
+
+    每个候选保留两份文本，对应 small-to-big 的两侧：
+      - text：小片段，用于 rerank 打分、阈值判断与来源去重
+      - context：父片段，最终交付给 LLM
+
+    父片段必须在 _do_search 的 output_fields 中显式请求，否则取不到。
+
     Args:
         results: Milvus 搜索结果
-        
+
     Returns:
-        候选文档列表，每个包含 text, metadata, top_score
+        候选文档列表，每个包含 text, context, source, page, chunk_index
     """
     candidates = []
     for hit in results[0]:
         entity = hit["entity"]
         meta = entity.get("metadata", {})
+        small = entity["text"]
         candidates.append({
-            "text": entity.get("parent_text") or entity["text"],
+            "text": small,
+            "context": entity.get("parent_text") or small,
             "source": meta.get("source", ""),
             "page": meta.get("page"),
             "chunk_index": meta.get("chunk_index"),
@@ -213,6 +221,25 @@ def _rerank_and_score(query: str, candidates: list[dict]) -> tuple[list[dict], f
         c["score"] = _sigmoid(float(logit))
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates, candidates[0]["score"]
+
+
+# ── Parent Expansion ────────────────────────────────────────────────────────
+
+def _expand_to_parent(candidates: list[dict]) -> list[dict]:
+    """把交付文本从小片段替换为父片段（small-to-big 的 "big" 一侧）。
+
+    `_extract_candidates` 为每个候选保留两份文本：用于打分的小片段（text）与
+    用于交付的父片段（context）。这里只替换交付内容，score / source / page /
+    chunk_index 原样保留，因此不影响已经完成的阈值判断与来源去重。
+
+    无父片段的场景（如 Excel 表格未设 parent_text）保持原文本不变。
+    """
+    for c in candidates:
+        parent = c.get("context")
+        if parent and parent != c["text"]:
+            c["text"] = parent
+            c["expanded"] = True
+    return candidates
 
 
 # ── Contextual Compression ──────────────────────────────────────────────────
@@ -372,7 +399,11 @@ def check_faithfulness(response: str, source_texts: list[str]) -> list[dict] | N
 # ── Public API ─────────────────────────────────────────────────────────────
 
 def retrieve(query: str, k: int = None) -> list[dict]:
-    """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。"""
+    """混合检索 + Reranking。返回 [{text, source, page, score}, ...]。
+
+    返回的 text 是父片段（small-to-big 的 "big" 一侧）；打分、阈值判断与来源
+    去重用的都是小片段，两者在 _extract_candidates 中分别存于 text / context。
+    """
     if k is None:
         k = settings.FINAL_CONTEXT_K
 
@@ -393,10 +424,8 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")
             return []
 
+        # 打分用小片段：阈值、断崖、压缩门槛都是在片段粒度上校准的
         candidates, top_score = _rerank_and_score(query, candidates)
-
-        # 上下文压缩：rerank 后、过滤前，压缩 chunk 内无关句子
-        candidates = _compress_chunks(query, candidates)
 
         threshold = settings.RERANK_SCORE_THRESHOLD
         result = _filter_and_dedup(candidates, threshold, k)
@@ -404,6 +433,11 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         if not result:
             logger.info(f"Retrieval: len={len(query)} → top_score={top_score:.3f} < {threshold}")
             return []
+
+        # 先裁到最终要交付的片段，再换成父片段，最后压缩。
+        # 压缩的目标是"减少传给 LLM 的噪声"，因此必须作用在交付内容上；
+        # 放在过滤之后还省掉了对必然被丢弃的候选的 reranker 调用。
+        result = _compress_chunks(query, _expand_to_parent(result))
 
         logger.info(
             f"Retrieval: len={len(query)} → top_score={top_score:.3f}, "

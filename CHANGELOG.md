@@ -5,11 +5,28 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Fixed
+- `core/retriever.py` — **修复父子分块（small-to-big）在检索侧完全失效**。`parent_text` 一直由
+  `milvus.py::insert_chunks` 作为独立字段写入 Milvus，但 `_do_search` 的 `output_fields` 从未请求它，
+  `_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到
+  小片段——README 宣称的「用小片段检索，把更大的父片段交给 LLM」实际退化为纯小片段检索。
+  现在 `_do_search` 显式请求 `parent_text`；`_extract_candidates` 分别保存打分文本（`text`）与交付文本
+  （`context`）；新增 `_expand_to_parent()` 在过滤后完成展开。rerank 与阈值判断仍使用小片段，因此
+  `RERANK_SCORE_THRESHOLD` / `DYNAMIC_THRESHOLD_RATIO` / `SCORE_GAP_THRESHOLD` 的既有校准不受影响。
+  注意：修复后交给 LLM 的上下文会显著变长（`FINAL_CONTEXT_K=15` 时约 10k token），token 成本相应上升。
 - `application/chat.py` — 非流式 `chat()` 此前完全不做忠实度校验，开启 `FAITHFULNESS_CHECK` 时只有流式链路会返回 `unsupported_claims`。现在两条链路共用 `_pop_retrieval_signals()`，行为一致。
 - `core/retriever.py` — `retrieve()` 在入口调用 `reset_retrieval_metrics()` 清空本线程的检索指标。此前 "collection 不存在 / 无候选 / 过滤后为空" 三条提前 return 分支不会覆盖 `_metrics.last`，而 `asyncio.to_thread` 会复用线程池中的线程，导致下一次无结果的检索读到上一次（可能是别的请求）的分数，confidence 虚报为 high。
 - `domain/schemas.py` + `api/chat.py` — `ChatResponse` 增加 `confidence` 与 `unsupported_claims` 字段并透传。此前非流式 `POST /chat` 已经算出置信度，却被 Pydantic 的响应模型静默丢弃。
+- `docker-compose.yml` — MinIO 镜像改用 `milvusdb/minio:RELEASE.2024-12-18T13-15-44Z`。MinIO 社区版已于
+  2026-09-11 从 Docker Hub 撤下（`minio/minio` 与 `minio/mc` 全部 tag 失效），quay.io 上的同名仓库随后
+  也不再支持匿名拉取——实测任何 tag 与 `tags/list` 均返回 401，而 quay 上 etcd / node-exporter 等仓库
+  返回 200，可确认是 MinIO 侧关闭而非 registry 故障。改用 Milvus 官方自托管的同源镜像，环境变量、端口与
+  启动命令与原配置一致；healthcheck 从 `curl` 改为镜像自带的 `mc ready local`（新版 MinIO 不再内置 curl）。
+  同一次失败中被中断的其他镜像（postgres / redis / milvus / attu）属级联现象，无需改动。
 
 ### Changed
+- `core/retriever.py` — 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩的目标是
+  「减少传给 LLM 的噪声」，此前作用在用于打分的小片段上，与展开后的交付内容不一致；改为在展开之后执行。
+  位置同时移到过滤之后，省掉了对必然被丢弃的候选的 reranker 调用。
 - `application/chat.py` — 抽出 `async _pop_retrieval_signals()`，统一负责取出 agent 检索数据、计算 confidence 与 unsupported_claims；`check_faithfulness` 改为 `asyncio.to_thread` 调用，避免同步 LLM 请求阻塞事件循环。
 - `core/retriever.py` — `_metrics` 改为带默认值的 `threading.local` 子类 `_MetricsLocal`，新线程无需先赋值即可安全读取；`get_retrieval_metrics()` 不再依赖 `getattr` 兜底。
 
