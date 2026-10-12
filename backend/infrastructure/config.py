@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_API_BASE_URL: str = ""
     LLM_TEMPERATURE: float = Field(default=0.01, ge=0.0, le=2.0)
+    # 思考型模型（本地 Qwen3 等）默认把推理过程写进 reasoning 字段、让 content 为空，
+    # 导致上层拿到空回复。设为 "none" 可关闭思考。留空则不传该参数，
+    # 对不支持它的服务商（如 OpenAI 官方）没有任何影响。
+    LLM_REASONING_EFFORT: str = ""
 
     # Embedding
     EMBEDDING_PROVIDER: str = "huggingface"

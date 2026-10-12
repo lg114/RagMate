@@ -5,6 +5,14 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Fixed
+- `infrastructure/config.py` + `infrastructure/streaming_llm.py` — 新增 `LLM_REASONING_EFFORT` 配置项，
+  在 `ChatOpenAICompatible.__init__` 中统一注入 `reasoning_effort`（所有 LLM 实例含 RAGAS 的 `EvalLLM`
+  都经过这里，改一处即覆盖全部调用方）。**背景**：Qwen3 等思考型模型把推理过程写入 `reasoning` 字段、
+  让 `content` 保持为空，而 `extract_text_content()` 只读 `content`，上层会拿到空回复。
+  实测 Ollama 的 OpenAI 兼容端点**不认** `think` 参数（只有原生 `/api/chat` 认），
+  prompt 里的 `/no_think` 软开关与 Modelfile 的 `PARAMETER think false`（`unknown parameter`）均无效，
+  **只有 `reasoning_effort: "none"` 能通过 OpenAI 协议关闭思考**。默认留空不传该参数，
+  对不支持它的服务商（如 OpenAI 官方）无影响。
 - `pyproject.toml` — **修正过时的 LangChain 依赖约束，此前按 README 执行 `pip install -e .` 必然失败**。
   `deepagents>=0.5.0` 要求 `langchain-core>=1.2.27`，而原约束把五个 langchain 包全部锁在 `<1.0.0`
   （core / openai / community / huggingface / text-splitters），两者不可调和，pip 直接报

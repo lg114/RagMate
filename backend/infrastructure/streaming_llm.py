@@ -14,7 +14,19 @@ class ChatOpenAICompatible(ChatOpenAI):
     - 自动捕获 reasoning_content（DeepSeek 等 thinking mode）
     - 自动在后续请求中回传 reasoning_content
     - 通用设计：任何 additional_kwargs 中的自定义字段都会被自动处理
+    - 按 LLM_REASONING_EFFORT 配置统一注入 reasoning_effort
+      （本地 Qwen3 等思考型模型必须设为 "none"，否则 content 恒为空）
     """
+
+    def __init__(self, **kwargs):
+        # 所有 LLM 实例（含 RAGAS 的 EvalLLM）都经过这里，
+        # 因此在这一处注入即可覆盖全部调用方，无需逐个改造。
+        from backend.infrastructure.config import settings
+
+        effort = settings.LLM_REASONING_EFFORT
+        if effort and "reasoning_effort" not in kwargs:
+            kwargs["reasoning_effort"] = effort
+        super().__init__(**kwargs)
 
     def _get_request_payload(self, input_: LanguageModelInput, *, stop=None, **kwargs) -> dict:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
