@@ -9,7 +9,10 @@ All notable changes to this project are documented here.
   `deepagents>=0.5.0` 要求 `langchain-core>=1.2.27`，而原约束把五个 langchain 包全部锁在 `<1.0.0`
   （core / openai / community / huggingface / text-splitters），两者不可调和，pip 直接报
   `ResolutionImpossible`——任何首次搭建环境的人都会撞上。现已放开到 1.x 上限。
-  附带记录：`ragas` 无法与本项目的依赖组合共存（见 `pyproject.toml` 中 `eval` 依赖处的说明）。
+  其中 `langchain-community` 例外地钉在 `>=0.3.31,<0.4.0`：0.4.0 起移除了
+  `langchain_community.chat_models.vertexai`，而 `ragas` 在 import 阶段硬依赖该模块（无 try/except 兜底）。
+  0.3.31 允许 `langchain-core>=0.3.78,<2.0.0`，与 deepagents 的要求兼容——这是同时满足
+  主应用与评测依赖的唯一版本区间。
 - `.gitignore` — 补上 `/.workbuddy-ai/`。原有规则是 `/.workbuddy`，少了 `-ai` 后缀，
   与实际目录名不匹配，导致 agent 工作目录一直被 git 报为未跟踪文件。
 - `core/retriever.py` — **修复父子分块（small-to-big）在检索侧完全失效**。`parent_text` 一直由
