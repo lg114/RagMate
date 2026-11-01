@@ -2,7 +2,7 @@
 
 # RagMate
 
-**Self-hosted RAG knowledge management for searchable documents and cited answers.**
+**Self-hosted RAG system for searchable documents and cited answers.**
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
