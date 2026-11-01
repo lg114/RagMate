@@ -39,6 +39,9 @@ documents/
 volumes/
 eval/testsets/*.json
 eval/reports/*.json
+# 例外：精选小测试集与基线报告入仓（见 eval/README.md）
+!eval/testsets/sample/*.json
+!eval/reports/baseline/*.json
 *.log
 
 # Node (if any future frontend deps)
