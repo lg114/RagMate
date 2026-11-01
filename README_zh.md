@@ -2,7 +2,7 @@
 
 # RagMate
 
-**面向文档检索与引用式问答的自托管 RAG 知识管理系统。**
+**面向文档检索与引用式问答的自托管 RAG 系统。**
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
