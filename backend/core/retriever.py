@@ -250,6 +250,33 @@ def _extract_candidates(results) -> list[dict]:
     return candidates
 
 
+_RRF_K = 60  # RRF 常数：只用名次不用原始分数，与 Milvus 混合检索内部的 RRFRanker 思路一致
+
+
+def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
+    """多路检索 + RRF 融合。
+
+    每个 query 变体独立做一次混合检索，候选按 (source, page, chunk_index) 去重；
+    同一片段在越多路结果中出现、排名越靠前，融合分越高。融合后截断到
+    over_fetch 个再交给 reranker 精排，因此 reranker 的调用量与单路时相同。
+    """
+    fused: dict[tuple, dict] = {}
+    fused_scores: dict[tuple, float] = {}
+    for q in queries:
+        dense_vec, sparse_vec = encode_query(q)
+        results = _do_search(client, dense_vec, sparse_vec, over_fetch)
+        for rank, cand in enumerate(_extract_candidates(results)):
+            key = (cand["source"], cand.get("page"), cand.get("chunk_index"))
+            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
+            fused.setdefault(key, cand)
+    ordered = sorted(
+        fused.values(),
+        key=lambda c: fused_scores[(c["source"], c.get("page"), c.get("chunk_index"))],
+        reverse=True,
+    )
+    return ordered[:over_fetch]
+
+
 # ── Reranking + Filtering ──────────────────────────────────────────────────
 
 def _sigmoid(x: float) -> float:
@@ -463,8 +490,12 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
-        dense_vec, sparse_vec = encode_query(query)
-        candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
+        queries = expand_queries(query)
+        if len(queries) == 1:
+            dense_vec, sparse_vec = encode_query(query)
+            candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
+        else:
+            candidates = _search_multi(client, queries, over_fetch)
 
         if not candidates:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")
