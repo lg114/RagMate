@@ -130,6 +130,45 @@ def get_reranker() -> CrossEncoder:
         return _reranker
 
 
+_MULTI_QUERY_PROMPT = """为同一个问题生成 {count} 个语义相同但表述不同的检索查询变体，用于从文档库中多角度召回。
+要求：
+- 每行一个变体，不要编号、不要引号、不要任何解释
+- 变体之间尽量使用不同的关键词与句式
+- 保持与原始问题相同的语言
+
+原始问题：{query}"""
+
+_NUM_PREFIX_RE = re.compile(r"^\s*\d+[.、)）]\s*")
+
+
+def expand_queries(query: str) -> list[str]:
+    """多查询扩展：返回 [原 query] + LLM 生成的改写变体（去重、限量）。
+
+    MULTI_QUERY_ENABLED 关闭、或 LLM 调用失败/无有效变体时，只返回 [query]，
+    检索行为与未扩展时完全一致。
+    """
+    if not settings.MULTI_QUERY_ENABLED:
+        return [query]
+    try:
+        from backend.infrastructure.model_factory import get_llm
+
+        llm = get_llm()
+        prompt = _MULTI_QUERY_PROMPT.format(count=settings.MULTI_QUERY_COUNT, query=query)
+        response = llm.invoke(prompt)
+        variants: list[str] = []
+        for line in response.content.splitlines():
+            v = _NUM_PREFIX_RE.sub("", line).strip().strip('"').strip("\u201c\u201d").strip("'")
+            if v and v != query and v not in variants:
+                variants.append(v)
+        variants = variants[: settings.MULTI_QUERY_COUNT]
+        if variants:
+            logger.info(f"Multi-query: '{query}' → {variants}")
+            return [query] + variants
+    except Exception as e:
+        logger.warning(f"Multi-query expansion failed, using original only: {e}")
+    return [query]
+
+
 # ── Reranker 打分（本地 / 远程 API 两种 provider） ─────────────────────────────
 
 def _api_rerank_scores(query: str, texts: list[str]) -> list[float]:
