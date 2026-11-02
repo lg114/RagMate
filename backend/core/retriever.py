@@ -1,8 +1,10 @@
 """检索管线：Milvus 混合检索 + Reranking + 动态过滤。"""
+import json
 import logging
 import math
 import re
 import threading
+import urllib.request
 
 from pymilvus import AnnSearchRequest, RRFRanker
 from sentence_transformers import CrossEncoder
@@ -128,43 +130,49 @@ def get_reranker() -> CrossEncoder:
         return _reranker
 
 
-_MULTI_QUERY_PROMPT = """为同一个问题生成 {count} 个语义相同但表述不同的检索查询变体，用于从文档库中多角度召回。
-要求：
-- 每行一个变体，不要编号、不要引号、不要任何解释
-- 变体之间尽量使用不同的关键词与句式
-- 保持与原始问题相同的语言
+# ── Reranker 打分（本地 / 远程 API 两种 provider） ─────────────────────────────
 
-原始问题：{query}"""
+def _api_rerank_scores(query: str, texts: list[str]) -> list[float]:
+    """调用远程 /rerank 接口（Jina、硅基流动等兼容格式），返回与 texts 对齐的概率分。
 
-_NUM_PREFIX_RE = re.compile(r"^\s*\d+[.、)）]\s*")
-
-
-def expand_queries(query: str) -> list[str]:
-    """多查询扩展：返回 [原 query] + LLM 生成的改写变体（去重、限量）。
-
-    MULTI_QUERY_ENABLED 关闭、或 LLM 调用失败/无有效变体时，只返回 [query]，
-    检索行为与未扩展时完全一致。
+    请求：POST {RERANKER_API_BASE_URL}/rerank，体为 {model, query, documents, top_n}；
+    响应：{results: [{index, relevance_score}, ...]}，relevance_score 已是 [0, 1] 概率。
+    响应缺失的下标按 0.0 计（等同于被阈值过滤）。
     """
-    if not settings.MULTI_QUERY_ENABLED:
-        return [query]
-    try:
-        from backend.infrastructure.model_factory import get_llm
+    url = settings.RERANKER_API_BASE_URL.rstrip("/") + "/rerank"
+    payload = json.dumps({
+        "model": settings.RERANKER_MODEL,
+        "query": query,
+        "documents": texts,
+        "top_n": len(texts),
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if settings.RERANKER_API_KEY:
+        req.add_header("Authorization", f"Bearer {settings.RERANKER_API_KEY}")
+    with urllib.request.urlopen(req, timeout=settings.RERANKER_API_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    scores = [0.0] * len(texts)
+    for item in data.get("results", []):
+        idx = item.get("index")
+        if isinstance(idx, int) and 0 <= idx < len(texts):
+            scores[idx] = float(item.get("relevance_score", 0.0))
+    return scores
 
-        llm = get_llm()
-        prompt = _MULTI_QUERY_PROMPT.format(count=settings.MULTI_QUERY_COUNT, query=query)
-        response = llm.invoke(prompt)
-        variants: list[str] = []
-        for line in response.content.splitlines():
-            v = _NUM_PREFIX_RE.sub("", line).strip().strip('"').strip("\u201c\u201d").strip("'")
-            if v and v != query and v not in variants:
-                variants.append(v)
-        variants = variants[: settings.MULTI_QUERY_COUNT]
-        if variants:
-            logger.info(f"Multi-query: '{query}' → {variants}")
-            return [query] + variants
-    except Exception as e:
-        logger.warning(f"Multi-query expansion failed, using original only: {e}")
-    return [query]
+
+def score_pairs(query: str, texts: list[str]) -> list[float]:
+    """对 (query, text) 逐对打分，统一返回 [0, 1] 概率分（与 texts 等长、顺序对齐）。
+
+    local：本地 CrossEncoder 的 logits 经 sigmoid 转换（与历史行为一致）；
+    api：远程接口直接返回的概率分。调用方无需关心 provider 差异。
+    """
+    if not texts:
+        return []
+    if settings.RERANKER_PROVIDER == "api":
+        return _api_rerank_scores(query, texts)
+    reranker = get_reranker()
+    logits = reranker.predict([(query, t) for t in texts])
+    return [_sigmoid(float(l)) for l in logits]
 
 
 # ── Search ──────────────────────────────────────────────────────────────────
@@ -280,11 +288,9 @@ def _rerank_and_score(query: str, candidates: list[dict]) -> tuple[list[dict], f
     """Rerank 候选，logits 经 sigmoid 转为概率后返回 (scored_list, top_score)。"""
     if not candidates:
         return [], 0.0
-    reranker = get_reranker()
-    pairs = [(query, c["text"]) for c in candidates]
-    logits = reranker.predict(pairs)
-    for c, logit in zip(candidates, logits):
-        c["score"] = _sigmoid(float(logit))
+    scores = score_pairs(query, [c["text"] for c in candidates])
+    for c, sc in zip(candidates, scores):
+        c["score"] = sc
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates, candidates[0]["score"]
 
@@ -319,8 +325,6 @@ def _compress_chunks(query: str, candidates: list[dict]) -> list[dict]:
     if not settings.CONTEXTUAL_COMPRESSION:
         return candidates
 
-    reranker = get_reranker()
-
     for c in candidates:
         text = c["text"]
         # 短 chunk 不压缩
@@ -331,10 +335,13 @@ def _compress_chunks(query: str, candidates: list[dict]) -> list[dict]:
         if len(sentences) <= 2:
             continue
 
-        # 对每个句子做 reranker 评分
-        pairs = [(query, s) for s in sentences]
-        logits = reranker.predict(pairs)
-        scored_sentences = list(zip(sentences, [_sigmoid(float(l)) for l in logits]))
+        # 对每个句子做 reranker 评分；打分失败时保留原 chunk（压缩只是优化，不值得让整次检索失败）
+        try:
+            probs = score_pairs(query, sentences)
+        except Exception as e:
+            logger.warning(f"Compression scoring failed, keeping chunk as-is: {e}")
+            continue
+        scored_sentences = list(zip(sentences, probs))
 
         # 保留超过阈值的句子，至少保留 top-1
         threshold = settings.COMPRESSION_SCORE_THRESHOLD

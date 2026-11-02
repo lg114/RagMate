@@ -118,6 +118,26 @@ def create_app() -> FastAPI:
         max_age=3600,
     )
 
+    # 可选 API Token 鉴权中间件：API_AUTH_TOKEN 为空时不启用（默认）。
+    # 启用后，/chat、/documents、/ingest 下的接口必须带
+    # Authorization: Bearer <token> 或 X-API-Key: <token>，否则 401。
+    # 健康检查与前端静态资源不拦（探针与页面本身没有 token）。
+    _PROTECTED_PREFIXES = ("/chat", "/documents", "/ingest")
+
+    @app.middleware("http")
+    async def _require_api_token(request, call_next):
+        token = settings.API_AUTH_TOKEN
+        path = request.url.path
+        if token and any(path == p or path.startswith(p + "/") for p in _PROTECTED_PREFIXES):
+            auth = request.headers.get("authorization", "")
+            api_key = request.headers.get("x-api-key", "")
+            if auth != f"Bearer {token}" and api_key != token:
+                return JSONResponse(
+                    status_code=401,
+                    content={"code": "UNAUTHORIZED", "detail": "Missing or invalid API token"},
+                )
+        return await call_next(request)
+
     # 上传大小限制中间件：包装 ASGI receive，流式检查实际 body 大小
     # 不依赖 Content-Length 头（可伪造），而是检查实际接收的字节数
 
