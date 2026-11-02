@@ -128,6 +128,45 @@ def get_reranker() -> CrossEncoder:
         return _reranker
 
 
+_MULTI_QUERY_PROMPT = """为同一个问题生成 {count} 个语义相同但表述不同的检索查询变体，用于从文档库中多角度召回。
+要求：
+- 每行一个变体，不要编号、不要引号、不要任何解释
+- 变体之间尽量使用不同的关键词与句式
+- 保持与原始问题相同的语言
+
+原始问题：{query}"""
+
+_NUM_PREFIX_RE = re.compile(r"^\s*\d+[.、)）]\s*")
+
+
+def expand_queries(query: str) -> list[str]:
+    """多查询扩展：返回 [原 query] + LLM 生成的改写变体（去重、限量）。
+
+    MULTI_QUERY_ENABLED 关闭、或 LLM 调用失败/无有效变体时，只返回 [query]，
+    检索行为与未扩展时完全一致。
+    """
+    if not settings.MULTI_QUERY_ENABLED:
+        return [query]
+    try:
+        from backend.infrastructure.model_factory import get_llm
+
+        llm = get_llm()
+        prompt = _MULTI_QUERY_PROMPT.format(count=settings.MULTI_QUERY_COUNT, query=query)
+        response = llm.invoke(prompt)
+        variants: list[str] = []
+        for line in response.content.splitlines():
+            v = _NUM_PREFIX_RE.sub("", line).strip().strip('"').strip("\u201c\u201d").strip("'")
+            if v and v != query and v not in variants:
+                variants.append(v)
+        variants = variants[: settings.MULTI_QUERY_COUNT]
+        if variants:
+            logger.info(f"Multi-query: '{query}' → {variants}")
+            return [query] + variants
+    except Exception as e:
+        logger.warning(f"Multi-query expansion failed, using original only: {e}")
+    return [query]
+
+
 # ── Search ──────────────────────────────────────────────────────────────────
 
 def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
@@ -201,6 +240,33 @@ def _extract_candidates(results) -> list[dict]:
             "chunk_index": meta.get("chunk_index"),
         })
     return candidates
+
+
+_RRF_K = 60  # RRF 常数：只用名次不用原始分数，与 Milvus 混合检索内部的 RRFRanker 思路一致
+
+
+def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
+    """多路检索 + RRF 融合。
+
+    每个 query 变体独立做一次混合检索，候选按 (source, page, chunk_index) 去重；
+    同一片段在越多路结果中出现、排名越靠前，融合分越高。融合后截断到
+    over_fetch 个再交给 reranker 精排，因此 reranker 的调用量与单路时相同。
+    """
+    fused: dict[tuple, dict] = {}
+    fused_scores: dict[tuple, float] = {}
+    for q in queries:
+        dense_vec, sparse_vec = encode_query(q)
+        results = _do_search(client, dense_vec, sparse_vec, over_fetch)
+        for rank, cand in enumerate(_extract_candidates(results)):
+            key = (cand["source"], cand.get("page"), cand.get("chunk_index"))
+            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
+            fused.setdefault(key, cand)
+    ordered = sorted(
+        fused.values(),
+        key=lambda c: fused_scores[(c["source"], c.get("page"), c.get("chunk_index"))],
+        reverse=True,
+    )
+    return ordered[:over_fetch]
 
 
 # ── Reranking + Filtering ──────────────────────────────────────────────────
@@ -417,8 +483,12 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
-        dense_vec, sparse_vec = encode_query(query)
-        candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
+        queries = expand_queries(query)
+        if len(queries) == 1:
+            dense_vec, sparse_vec = encode_query(query)
+            candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
+        else:
+            candidates = _search_multi(client, queries, over_fetch)
 
         if not candidates:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")

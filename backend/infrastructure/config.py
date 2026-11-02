@@ -90,6 +90,8 @@ class Settings(BaseSettings):
 
     # Query processing
     QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
+    MULTI_QUERY_ENABLED: bool = False  # 多查询扩展：LLM 生成改写变体，多路检索后 RRF 融合（默认关，开启前应先过评测对比）
+    MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 改写变体数量（不含原始 query）
     QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过 agent 直接回复
 
     # Agent
