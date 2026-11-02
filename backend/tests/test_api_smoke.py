@@ -4,12 +4,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 
+class _AsyncSessionCM:
+    """供 `async with async_session()` 使用的异步上下文管理器 mock。"""
+
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 @pytest.fixture
 def mock_infrastructure():
     """Mock 所有基础设施依赖。"""
     with patch("backend.app.init_db", new_callable=AsyncMock) as mock_init_db, \
          patch("backend.infrastructure.redis_client.get_redis", new_callable=AsyncMock) as mock_redis, \
          patch("backend.infrastructure.database.async_session") as mock_session, \
+         patch("backend.api.documents.async_session") as mock_documents_session, \
          patch("backend.infrastructure.milvus.check_milvus_available") as mock_milvus:
 
         # Redis mock
@@ -17,13 +31,19 @@ def mock_infrastructure():
         redis_instance.exists = AsyncMock(return_value=False)
         mock_redis.return_value = redis_instance
 
-        # Database session mock
+        # Database session mock（路由层用 `async with`，需异步上下文协议）
+        # 默认查询结果为空列表：service 用 result.scalars().all() 取数，
+        # 不预置的话 execute 返回的默认 MagicMock 会让 scalars() 拿到协程对象而报错。
         session_instance = MagicMock()
-        session_instance.__enter__ = MagicMock(return_value=session_instance)
-        session_instance.__exit__ = MagicMock(return_value=None)
-        session_instance.execute = AsyncMock()
+        default_result = MagicMock()
+        default_result.scalars.return_value.all.return_value = []
+        session_instance.execute = AsyncMock(return_value=default_result)
         session_instance.commit = AsyncMock()
         mock_session.return_value = session_instance
+        # 关键：api/documents.py 在 import 时就把 async_session 绑到了自己模块名下，
+        # 只 patch 定义处（backend.infrastructure.database）不会影响路由实际用的引用，
+        # 请求会真去连 Postgres。必须同时 patch 路由模块里的名字。
+        mock_documents_session.side_effect = lambda: _AsyncSessionCM(session_instance)
 
         # Milvus mock
         mock_milvus.return_value = True
@@ -67,10 +87,10 @@ class TestDocumentsEndpoints:
 
     def test_list_documents(self, client, mock_infrastructure):
         """GET /documents 应返回文档列表。"""
-        # Mock 数据库查询返回空列表
+        # Mock 数据库查询返回空列表：service 用 result.scalars().all() 取数
         mock_session = mock_infrastructure["session"].return_value
         mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
+        mock_result.scalars.return_value.all.return_value = []
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         response = client.get("/documents")
@@ -112,11 +132,11 @@ class TestIngestEndpoints:
 class TestErrorHandling:
     """测试错误处理。"""
 
-    def test_not_found_endpoint(self, client):
-        """访问不存在的路由应返回 404。"""
+    def test_unknown_path_serves_frontend(self, client):
+        """未知路径由前端静态资源兜底返回首页（SPA fallback），不是 404。"""
         response = client.get("/nonexistent-endpoint")
-        # FastAPI 默认返回 404
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
 
     def test_invalid_json(self, client):
         """发送无效 JSON 应返回 422。"""
@@ -132,13 +152,19 @@ class TestCORS:
     """测试 CORS 配置。"""
 
     def test_cors_headers_present(self, client):
-        """响应应包含 CORS 头。"""
+        """CORS 预检请求应返回 200 并带上 allow-origin 头。"""
+        # 预检必须带 Access-Control-Request-Method，否则不是预检请求，
+        # 路由没有 OPTIONS 方法会直接 405。
         response = client.options(
             "/health",
-            headers={"Origin": "http://localhost:8000"},
+            headers={
+                "Origin": "http://localhost:8000",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type",
+            },
         )
-        # CORS 预检请求
         assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:8000"
 
 
 class TestRateLimiting:
