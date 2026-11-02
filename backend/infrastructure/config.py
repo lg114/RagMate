@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     SESSION_TTL: int = Field(default=86400, gt=0)  # Session Redis TTL（秒），默认 24h
     HEARTBEAT_INTERVAL: int = Field(default=15, gt=0)  # SSE 心跳间隔（秒）
 
+    # Auth（可选）：为空时不鉴权（默认，单机/内网部署无感）；设置后见 app.py 的 _require_api_token
+    API_AUTH_TOKEN: str = ""
+
     # Rate Limiting
     RATE_LIMIT_MAX: int = Field(default=30, gt=0)  # 每窗口最大请求数
     RATE_LIMIT_WINDOW: int = Field(default=60, gt=0)  # 限流窗口（秒）
