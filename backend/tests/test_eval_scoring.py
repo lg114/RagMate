@@ -5,7 +5,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from backend.eval.metrics import probe_judge, validate_scores
+from backend.eval.metrics import compute_metrics, probe_judge, validate_scores
 from backend.eval.report import cases_from_report, write_raw_checkpoint
 
 
@@ -84,3 +84,42 @@ def test_cases_from_report_skips_empty_contexts():
     cases = cases_from_report(report)
     assert len(cases) == 1
     assert cases[0]["retrieved_contexts"] == ["c"]
+
+
+def test_compute_metrics_disables_ragas_wait_for_timeout(monkeypatch):
+    """打分必须绕开 ragas 的 wait_for 超时：3.14 下它让全部任务秒灭。
+
+    只验证接线（run_config.timeout is None），不跑真实 judge：把
+    ragas.evaluate 换成捕获参数的假实现，judge/向量换成不联网的桩。
+    """
+    ragas = pytest.importorskip("ragas")
+    from langchain_core.embeddings.fake import DeterministicFakeEmbedding
+    from langchain_openai import ChatOpenAI
+    from ragas.llms.base import LangchainLLMWrapper
+
+    captured = {}
+
+    class _FakeResult:
+        scores = [{"faithfulness": 0.9, "answer_relevancy": 0.8}]
+
+    def fake_evaluate(dataset=None, metrics=None, **kwargs):
+        captured.update(kwargs)
+        return _FakeResult()
+
+    monkeypatch.setattr(ragas, "evaluate", fake_evaluate)
+    monkeypatch.setattr(
+        "backend.eval.metrics.build_judge_llm",
+        lambda judge_model=None: LangchainLLMWrapper(
+            ChatOpenAI(model="stub", api_key="stub", base_url="http://127.0.0.1:9/v1")
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.model_factory.get_embeddings",
+        lambda: DeterministicFakeEmbedding(size=8),
+    )
+
+    result = compute_metrics(
+        [{"user_input": "q", "response": "a", "retrieved_contexts": ["c"], "reference": "r"}]
+    )
+    assert result.scores == _FakeResult.scores
+    assert captured["run_config"].timeout is None

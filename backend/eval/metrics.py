@@ -140,6 +140,7 @@ def validate_scores(scores_list) -> None:
 def compute_metrics(test_cases: list[dict], judge_model: str = None):
     """Compute RAGAS metrics on evaluated test cases."""
     from ragas import evaluate
+    from ragas.run_config import RunConfig
     from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall
     from ragas.dataset_schema import SingleTurnSample, EvaluationDataset
     from ragas.embeddings.base import LangchainEmbeddingsWrapper
@@ -173,6 +174,15 @@ def compute_metrics(test_cases: list[dict], judge_model: str = None):
     ]
 
     dataset = EvaluationDataset(samples)
-    result = evaluate(dataset=dataset, metrics=metrics)
+    # 注意（Python 3.14）：ragas 0.4.3 会把每次打分包进
+    # asyncio.wait_for(..., timeout=run_config.timeout)，而 wait_for 内部
+    # 进入 asyncio.timeout()；3.14 对此检查更严，执行器里会报
+    # "Timeout should be used inside a task"，250 个任务瞬间全灭、分数
+    # 全 NaN（3.12 上复现不出来）。timeout=None 时 wait_for 直接 await，
+    # 不再进 timeout 上下文；单次调用的超时仍由 HTTP 客户端默认兜底
+    #（OpenAI 客户端默认 read 10 分钟），不会无限挂起。
+    result = evaluate(
+        dataset=dataset, metrics=metrics, run_config=RunConfig(timeout=None)
+    )
     validate_scores(getattr(result, "scores", None))
     return result

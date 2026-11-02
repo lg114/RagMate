@@ -26,3 +26,6 @@
 - 评测在算分前会把未打分的管线结果写成 `<report>.raw.json`（不入仓）；算分失败时
   用 `ragmate-eval rescore --report <raw 文件>` 只重算分，不重跑管线。跑评测前 CLI
   会先探一下 judge 能不能返回可解析的 JSON，探不过就直接停，不浪费一轮管线。
+- Python 3.14 注意：ragas 0.4.3 的打分超时（`asyncio.wait_for`）在 3.14 下会让全部
+  打分任务秒灭（`Timeout should be used inside a task`），`compute_metrics` 因此传
+  `RunConfig(timeout=None)` 绕开；单次调用的超时由 HTTP 客户端默认兜底。3.12 不受影响。
