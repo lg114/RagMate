@@ -23,3 +23,6 @@
 - 样本量小（10 题）的结论只适用于回归对比，不外推为普遍效果。
 - 生成侧指标（faithfulness / answer relevancy / factual correctness）依赖 LLM judge，
   解读 delta 前先量噪声带宽：同配置重复跑两次，极差即噪声。
+- 评测在算分前会把未打分的管线结果写成 `<report>.raw.json`（不入仓）；算分失败时
+  用 `ragmate-eval rescore --report <raw 文件>` 只重算分，不重跑管线。跑评测前 CLI
+  会先探一下 judge 能不能返回可解析的 JSON，探不过就直接停，不浪费一轮管线。

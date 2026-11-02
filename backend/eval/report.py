@@ -1,5 +1,49 @@
 """评估报告构建和打印。"""
+import json
+from pathlib import Path
+
 from .utils import clean_score
+
+
+def write_raw_checkpoint(report_path, meta: dict, test_cases: list[dict]) -> Path:
+    """Write unscored pipeline results next to the report, before scoring.
+
+    Scoring can fail after a long pipeline run (RAGAS swallows per-row
+    failures as NaN); the checkpoint preserves the retrieval+generation work
+    so only scoring has to be redone (see `rescore`). Checkpoints are
+    git-ignored (`*.raw.json`).
+    """
+    raw_path = Path(str(report_path)).with_suffix(".raw.json")
+    checkpoint_meta = dict(meta)
+    checkpoint_meta["raw_checkpoint"] = True
+    details = [
+        {
+            "user_input": tc["user_input"],
+            "reference": tc.get("reference", ""),
+            "response": tc.get("response", ""),
+            "contexts": tc.get("retrieved_contexts", []),
+        }
+        for tc in test_cases
+        if tc.get("response") and tc.get("retrieved_contexts")
+    ]
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(raw_path, "w", encoding="utf-8") as f:
+        json.dump({"meta": checkpoint_meta, "details": details}, f, ensure_ascii=False, indent=2)
+    return raw_path
+
+
+def cases_from_report(report: dict) -> list[dict]:
+    """Rebuild scoring inputs from a saved report (or raw checkpoint)."""
+    cases = []
+    for detail in report.get("details", []):
+        if detail.get("response") and detail.get("contexts"):
+            cases.append({
+                "user_input": detail["user_input"],
+                "reference": detail.get("reference", ""),
+                "response": detail["response"],
+                "retrieved_contexts": detail["contexts"],
+            })
+    return cases
 
 
 def build_report(meta: dict, test_cases: list[dict], ragas_result) -> dict:
@@ -47,10 +91,10 @@ def print_report(report: dict):
     summary = report["summary"]
 
     print("\n=== RAGAS Evaluation Report ===")
-    print(f"Test cases: {meta['test_cases']}")
-    print(f"Mode: {meta['mode']}")
-    print(f"Top-k: {meta['top_k']}")
-    print(f"Judge model: {meta['judge_model']}")
+    print(f"Test cases: {meta.get('test_cases', len(report.get('details', [])))}")
+    print(f"Mode: {meta.get('mode', '-')}")
+    print(f"Top-k: {meta.get('top_k', '-')}")
+    print(f"Judge model: {meta.get('judge_model', '-')}")
     print()
 
     if summary:
