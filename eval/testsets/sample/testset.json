@@ -1,1 +1,202 @@
-[{"reference":"web 服务将容器内的 8000 端口映射到宿主机的 8000 端口，端口映射为 8000:8000，浏览器访问 http://localhost:8000 即可打开前端页面。","user_input":"docker-compose 里 web 服务把容器的哪个端口映射到了宿主机的哪个端口？"},{"reference":"健康检查每 10 秒检查一次，单次超时 5 秒，连续失败 5 次判定为不健康，容器启动后有 30 秒宽限期，宽限期内失败不计入重试。","user_input":"db 服务的健康检查里，pg_isready 的检查间隔、超时时间和重试次数分别是多少？"},{"reference":"work_mem 的默认值是 4MB，它是每个排序或哈希操作可用的内存，不是全局上限；排序数据量超过 work_mem 时会改用磁盘上的外部归并排序，把它调大（如 64MB）可以让排序改回内存中的快速排序。","user_input":"PostgreSQL 的 work_mem 默认值是多少？把它调大主要影响哪类操作？"},{"reference":"部分索引只对满足 WHERE 条件的行建立索引，例如只对 status = 'active' 的行按 uploaded_at DESC 建索引；查询条件必须与索引的 WHERE 谓词一致才能用上它，索引更小、维护成本更低。","user_input":"什么是部分索引？举例说明它在什么条件下建立。"},{"reference":"缓存雪崩是大量 key 在同一时刻过期，请求同时打到数据库导致数据库被压垮。缓解办法：一是过期时间加 0–60 秒随机抖动，把过期时刻打散；二是加一层进程内本地缓存做多级缓存，Redis 层失效时仍能挡住一部分读请求。","user_input":"缓存雪崩是怎么发生的？文档给出的两种缓解办法是什么？"},{"reference":"推荐用互斥锁：只有一个请求能拿到锁去回源重建缓存，其余请求等待锁释放后重新读缓存或返回旧值；锁用 SET NX 加锁、30 秒自动过期，防止持有锁的进程崩溃后死锁。","user_input":"热点 key 过期导致缓存击穿时，推荐用什么机制挡住并发回源？"},{"reference":"TaskGroup 中任何一个任务抛异常，会取消组内其余所有任务并等待它们全部结束，退出 async with 块时把第一个异常重新抛出；gather 默认第一个异常会传播，但其他任务继续运行不会被取消，只有传 return_exceptions=True 时才会收集全部结果。","user_input":"asyncio.TaskGroup 和 asyncio.gather 在任务出错时的行为有什么不同？"},{"reference":"关键写法是 asyncio.Semaphore(10)，在 async with sem: 块内发请求；最多 10 个协程同时持有许可，第 11 个协程在 async with sem 处等待，直到有协程释放许可。","user_input":"想用信号量把并发请求数限制在 10 以内，文档里的关键写法是什么？"},{"reference":"GIN 索引适合全文检索、JSONB 与数组包含查询，例如 to_tsvector 全文检索和 metadata @> 包含查询；B-tree 索引适合等值查询、范围查询与排序，例如按 uploaded_at 范围过滤和按 uploaded_at DESC 排序取最新记录。","user_input":"GIN 索引适合哪类查询？B-tree 索引适合哪类查询？"},{"reference":"提供的文档中没有 Kubernetes 相关内容，无法依据语料回答这个问题。","user_input":"Kubernetes 的 HPA 如何根据 CPU 使用率自动扩缩容？"}]
+[
+  {
+    "reference": "web 服务将容器内的 8000 端口映射到宿主机的 8000 端口，端口映射为 8000:8000，浏览器访问 http://localhost:8000 即可打开前端页面。",
+    "user_input": "docker-compose 里 web 服务把容器的哪个端口映射到了宿主机的哪个端口？"
+  },
+  {
+    "reference": "健康检查每 10 秒检查一次，单次超时 5 秒，连续失败 5 次判定为不健康，容器启动后有 30 秒宽限期，宽限期内失败不计入重试。",
+    "user_input": "db 服务的健康检查里，pg_isready 的检查间隔、超时时间和重试次数分别是多少？"
+  },
+  {
+    "reference": "work_mem 的默认值是 4MB，它是每个排序或哈希操作可用的内存，不是全局上限；排序数据量超过 work_mem 时会改用磁盘上的外部归并排序，把它调大（如 64MB）可以让排序改回内存中的快速排序。",
+    "user_input": "PostgreSQL 的 work_mem 默认值是多少？把它调大主要影响哪类操作？"
+  },
+  {
+    "reference": "部分索引只对满足 WHERE 条件的行建立索引，例如只对 status = 'active' 的行按 uploaded_at DESC 建索引；查询条件必须与索引的 WHERE 谓词一致才能用上它，索引更小、维护成本更低。",
+    "user_input": "什么是部分索引？举例说明它在什么条件下建立。"
+  },
+  {
+    "reference": "缓存雪崩是大量 key 在同一时刻过期，请求同时打到数据库导致数据库被压垮。缓解办法：一是过期时间加 0–60 秒随机抖动，把过期时刻打散；二是加一层进程内本地缓存做多级缓存，Redis 层失效时仍能挡住一部分读请求。",
+    "user_input": "缓存雪崩是怎么发生的？文档给出的两种缓解办法是什么？"
+  },
+  {
+    "reference": "推荐用互斥锁：只有一个请求能拿到锁去回源重建缓存，其余请求等待锁释放后重新读缓存或返回旧值；锁用 SET NX 加锁、30 秒自动过期，防止持有锁的进程崩溃后死锁。",
+    "user_input": "热点 key 过期导致缓存击穿时，推荐用什么机制挡住并发回源？"
+  },
+  {
+    "reference": "TaskGroup 中任何一个任务抛异常，会取消组内其余所有任务并等待它们全部结束，退出 async with 块时把第一个异常重新抛出；gather 默认第一个异常会传播，但其他任务继续运行不会被取消，只有传 return_exceptions=True 时才会收集全部结果。",
+    "user_input": "asyncio.TaskGroup 和 asyncio.gather 在任务出错时的行为有什么不同？"
+  },
+  {
+    "reference": "关键写法是 asyncio.Semaphore(10)，在 async with sem: 块内发请求；最多 10 个协程同时持有许可，第 11 个协程在 async with sem 处等待，直到有协程释放许可。",
+    "user_input": "想用信号量把并发请求数限制在 10 以内，文档里的关键写法是什么？"
+  },
+  {
+    "reference": "GIN 索引适合全文检索、JSONB 与数组包含查询，例如 to_tsvector 全文检索和 metadata @> 包含查询；B-tree 索引适合等值查询、范围查询与排序，例如按 uploaded_at 范围过滤和按 uploaded_at DESC 排序取最新记录。",
+    "user_input": "GIN 索引适合哪类查询？B-tree 索引适合哪类查询？"
+  },
+  {
+    "reference": "提供的文档中没有 Kubernetes 相关内容，无法依据语料回答这个问题。",
+    "user_input": "Kubernetes 的 HPA 如何根据 CPU 使用率自动扩缩容？"
+  },
+  {
+    "user_input": "Cache-Control 里 max-age=3600 是什么意思？",
+    "reference": "max-age=3600 表示该响应在 3600 秒内是新鲜的，浏览器直接用缓存，不向服务器发任何请求。"
+  },
+  {
+    "user_input": "no-cache 和 no-store 有什么区别？",
+    "reference": "no-cache 是响应可以存进缓存，但每次使用前必须先向服务器验证，服务器返回 304 才能用缓存；no-store 是请求与响应完全不写入任何缓存，根本不存。"
+  },
+  {
+    "user_input": "ETag 协商缓存的流程是怎样的？",
+    "reference": "服务器给响应生成内容指纹 ETag，浏览器下次请求带上 If-None-Match；指纹一致服务器返回 304 Not Modified 且不带响应体，浏览器用缓存；指纹不一致则返回 200 与新响应。"
+  },
+  {
+    "user_input": "s-maxage 和 max-age 有什么区别？",
+    "reference": "s-maxage 只对共享缓存（CDN、代理）生效，会覆盖 max-age；私有缓存（浏览器）忽略 s-maxage。例如 max-age=60、s-maxage=3600 时，CDN 按 3600 秒缓存，浏览器按 60 秒缓存。"
+  },
+  {
+    "user_input": "CDN 回源发生在什么时候？",
+    "reference": "CDN 节点没有缓存、或缓存过期时，向源站拉取内容，称为回源；源站返回的 Cache-Control 决定 CDN 节点缓存多久。"
+  },
+  {
+    "user_input": "JWT 由哪几部分组成？各部分是什么？",
+    "reference": "JWT 由 header、payload、signature 三部分组成，用点号分隔；header 声明类型与签名算法，payload 是声明（如 sub、exp、iat），signature 是对前两段的签名；三段都用 Base64URL 编码。"
+  },
+  {
+    "user_input": "HS256 和 RS256 签名方式有什么区别？",
+    "reference": "HS256 是对称签名，签发与验签用同一个密钥；RS256 是非对称签名，私钥签发、公钥验签，适合一个签发方、多个验签方的架构，公钥泄露不影响安全。"
+  },
+  {
+    "user_input": "为什么 access token 有效期要短、refresh token 有效期要长？",
+    "reference": "access token 每次调用都带，有效期 15 分钟，泄露后影响窗口小；refresh token 有效期 7 天，只在换取新 access token 时用，泄露后在服务端吊销即可，旧 access token 最多再用 15 分钟。"
+  },
+  {
+    "user_input": "PKCE 解决什么问题？它的校验机制是怎样的？",
+    "reference": "PKCE 解决没有后端存 client_secret 的公开客户端上授权码被拦截的问题：客户端生成 code_verifier，算出 code_challenge = BASE64URL(SHA256(code_verifier)) 随授权请求发送；换 token 时带上原始 code_verifier，授权服务器用 S256 重新计算并比对 code_challenge，一致才发 token。"
+  },
+  {
+    "user_input": "JWT 一旦签发，能不能主动让它失效？",
+    "reference": "不能。JWT 在 exp 到期前验签都会通过，服务端无法单方面让已签发的 token 立即失效，除非维护黑名单或吊销列表查库；实际做法是 access token 短有效期加 refresh token 可吊销的组合。"
+  },
+  {
+    "user_input": "SIGTERM 和 SIGKILL 的根本区别是什么？",
+    "reference": "SIGTERM（15）是礼貌通知，进程可以捕获它做完清理再退出；SIGKILL（9）不可捕获、不可忽略，内核立即终止进程，不给清理机会。"
+  },
+  {
+    "user_input": "僵尸进程是怎么产生的？",
+    "reference": "子进程退出后，父进程没有调用 wait() 回收，子进程的进程表项残留，状态为 Z，只占一个表项、不占内存；堆积过多会耗尽 PID 数量。"
+  },
+  {
+    "user_input": "fork 之后父子进程的内存是什么关系？",
+    "reference": "写时复制：fork 的瞬间父子共享同一批物理页，任何一方写入某个页时内核才为写入方复制该页，只读数据整个生命周期都共享。"
+  },
+  {
+    "user_input": "nice 值的范围是什么？值越大优先级越高还是越低？",
+    "reference": "nice 值范围是 -20 到 19，值越小优先级越高；普通用户只能把自己进程的 nice 值调大（降低优先级），调小需要 root 或 CAP_SYS_NICE 能力。"
+  },
+  {
+    "user_input": "OOM killer 按什么标准选择要杀的进程？",
+    "reference": "按 oom_score 评分选择，评分综合占用内存大小、运行时间、是否为 root 进程等因素，占用内存多、运行时间短的进程分数高，优先被杀。"
+  },
+  {
+    "user_input": "Git 的四种对象分别存什么内容？",
+    "reference": "blob 存文件内容，不含文件名；tree 存目录快照，记录条目名字、模式与指向的 blob 或子 tree 的哈希；commit 存提交元数据，包括指向的根 tree 哈希、父 commit 哈希、作者与提交者信息、时间戳与提交说明；tag 附注标签是指向某个 commit 的独立对象，轻量标签只是引用。"
+  },
+  {
+    "user_input": "rebase 和 merge 整合历史的关键区别是什么？",
+    "reference": "merge 保留分叉并产生一个合并提交，已有 commit 的哈希不变；rebase 把提交一个个重放到目标分支顶端，历史变线性，但每个被重放的提交都会生成新对象、哈希全变，已推送到公共分支的历史不要 rebase。"
+  },
+  {
+    "user_input": "reflog 是干什么的？默认保留多久？",
+    "reference": "reflog 记录 HEAD 每次移动的位置，误删分支、reset 过头、rebase 改错都可以从中找到旧 commit 哈希恢复；条目默认保留 90 天，过期后由 git gc 清理，且只存在本地，不随 push/fetch 同步。"
+  },
+  {
+    "user_input": "什么是 detached HEAD 状态？",
+    "reference": "HEAD 直接指向某个 commit 哈希而不是分支，新提交不在任何分支上；一旦 checkout 到别的分支，那些提交只能靠 reflog 找回，久了会被 gc 清理，长期工作应先建分支。"
+  },
+  {
+    "user_input": "SHA-1 在 Git 里起什么作用？",
+    "reference": "内容寻址：对象名就是内容的 SHA-1 哈希，内容相同则哈希相同、对象相同，内容有任何一个字节变化则哈希完全不同；同时保证完整性，内容被篡改后重新计算的哈希与对象名对不上，git fsck 能检出。"
+  },
+  {
+    "user_input": "docker-compose 里 env_file 和 environment 同时指定同一个变量，谁优先？",
+    "reference": "environment 里的值优先；env_file 与 environment 同时指定同一个变量时，environment 里的值会覆盖 env_file 的值。"
+  },
+  {
+    "user_input": "docker compose down 和 docker compose down -v 有什么区别？",
+    "reference": "docker compose down 停止并删除容器与网络，保留 pgdata 数据卷；docker compose down -v 会连同 pgdata 卷一起删除，执行前必须确认已经备份数据库。"
+  },
+  {
+    "user_input": "deploy.resources.limits.memory 设为 2G，容器超过会怎样？",
+    "reference": "limits 是硬上限，容器超过 2G 内存会被 OOM 杀掉；reservations 只是调度预留。"
+  },
+  {
+    "user_input": "EXPLAIN 输出里的 cost 是什么单位？",
+    "reference": "cost 是优化器内部的代价估算，不是时间单位，数值越大表示优化器认为代价越高，单位与磁盘页读取的代价相关，不直接对应毫秒。"
+  },
+  {
+    "user_input": "PgBouncer 事务级池模式下，哪些会话级特性不能用？",
+    "reference": "会话级 advisory lock、SET 的会话级配置、预编译语句跨事务复用都不能用；事务级模式下客户端连接只在事务期间占用服务端连接，事务结束即归还。"
+  },
+  {
+    "user_input": "log_min_duration_statement 设为 1000 是什么意思？",
+    "reference": "执行超过 1000 毫秒的语句记入慢查询日志，附带执行计划的用 auto_explain 模块，慢查询的完整计划直接进日志。"
+  },
+  {
+    "user_input": "Redis appendfsync 选 everysec，崩溃时最多丢失多少数据？",
+    "reference": "最多丢失 1 秒的写命令；everysec 每秒刷盘一次，是性能与安全的折中，always 每条命令都刷盘，no 则完全交给操作系统。"
+  },
+  {
+    "user_input": "缓存场景为什么不要用 noeviction 淘汰策略？",
+    "reference": "noeviction 策略下内存达到上限时写入新 key 直接报错；缓存场景常用 allkeys-lru，淘汰最近最少使用的 key。"
+  },
+  {
+    "user_input": "为什么生产环境禁止用 KEYS *？应该用什么代替？",
+    "reference": "KEYS * 会阻塞单线程直到扫完整个 key 空间，key 数量上万时能让服务停顿数秒；改用 SCAN 游标分批返回，每次一小批 key 与下一个游标，游标回到 0 表示扫完一轮。"
+  },
+  {
+    "user_input": "在已有运行中事件循环的线程里调用 asyncio.run() 会怎样？",
+    "reference": "会报 RuntimeError: asyncio.run() cannot be called from a running event loop；那种场景改用 await 直接调用。"
+  },
+  {
+    "user_input": "queue.join() 和 task_done() 是什么关系？",
+    "reference": "queue.join() 等待所有已 put 的任务都被 task_done() 标记完成；处理函数抛异常时也要在 finally 里调 task_done()，否则 join() 永远等下去。"
+  },
+  {
+    "user_input": "asyncio.shield() 的作用是什么？它能保护整个任务吗？",
+    "reference": "shield() 只保护被包裹的那一次 await 不受外层取消影响，让清理通知类调用完成；它不保护整个任务，任务本身在 shield() 返回后仍然是已取消状态，CancelledError 会继续传播。"
+  },
+  {
+    "user_input": "Vary: Accept-Encoding 响应头是干什么的？",
+    "reference": "它告诉缓存响应内容随 Accept-Encoding 请求头变化，压缩版与未压缩版是两个不同的缓存条目，不能互相混用；漏写时 CDN 可能把 gzip 版发给不支持 gzip 的客户端导致页面乱码。"
+  },
+  {
+    "user_input": "浏览器处理一次请求的缓存顺序是怎样的？",
+    "reference": "先看强制缓存：max-age 未过期直接用缓存不发请求；强制缓存过期后看协商缓存，带 If-None-Match 或 If-Modified-Since 发请求，304 用缓存、200 用新响应；没有任何缓存信息则直接发请求取新响应。"
+  },
+  {
+    "user_input": "授权码流程里，code 是怎么换成 token 的？",
+    "reference": "前端拿到 code 后，由后端拿 code 加 client_secret 向授权服务器的 token 端点换取 access token 与 refresh token；client_secret 只存在后端，绝不出现在前端代码里，code 只能用一次、有效期很短。"
+  },
+  {
+    "user_input": "refresh token 泄露后应该怎么处理？",
+    "reference": "在服务端吊销该 refresh token；轮换机制下旧 refresh token 再被使用说明可能被盗用，应吊销该用户名下全部 refresh token，强制重新登录，已签发的 access token 靠 15 分钟短有效期自然过期。"
+  },
+  {
+    "user_input": "父进程先退出了，子进程会怎样？",
+    "reference": "子进程成为孤儿进程，立即被 PID 1（init/systemd）收养，由 PID 1 负责在它退出时 wait() 回收；孤儿进程继续正常运行。"
+  },
+  {
+    "user_input": "kill -l 命令是干什么的？",
+    "reference": "列出全部信号名与编号，例如 1) SIGHUP、2) SIGINT、9) SIGKILL、15) SIGTERM。"
+  },
+  {
+    "user_input": "git gc 是干什么的？",
+    "reference": "git gc 负责仓库定期整理：把松散对象打包成 packfile并增量压缩去重，清理没有任何引用指向的 unreachable 对象，并修剪过期的 reflog 条目；默认由 Git 按需自动触发。"
+  },
+  {
+    "user_input": "如何用 Terraform 的 remote state 后端配置 S3 锁表？",
+    "reference": "提供的文档中没有 Terraform 相关内容，无法依据语料回答这个问题。"
+  }
+]
