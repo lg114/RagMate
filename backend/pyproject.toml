@@ -52,6 +52,7 @@ dependencies = [
 eval = [
     "ragas>=0.2.0",
     "tqdm>=4.65.0",
+    "pillow>=10.0",
 ]
 test = [
     "pytest>=8.0",
