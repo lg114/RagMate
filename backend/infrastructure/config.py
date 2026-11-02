@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_PROVIDER: str = "local"  # local=本地 CrossEncoder；api=远程 /rerank 接口（Jina、硅基流动等兼容格式），免本地加载模型
+    RERANKER_API_BASE_URL: str = ""   # RERANKER_PROVIDER=api 时必填，如 https://api.jina.ai/v1
+    RERANKER_API_KEY: str = ""        # 远程 rerank 接口的密钥（可选，部分自建服务不需要）
+    RERANKER_API_TIMEOUT: float = Field(default=30.0, gt=0)  # 远程 rerank 请求超时（秒）
     RERANK_CANDIDATES: int = Field(default=30, gt=0)
     FINAL_CONTEXT_K: int = Field(default=15, gt=0)
     RERANK_SCORE_THRESHOLD: float = Field(default=0.3, gt=0.0, lt=1.0)
@@ -148,6 +152,11 @@ class Settings(BaseSettings):
         
         if self.MIN_PER_SOURCE > self.MAX_PER_SOURCE:
             raise ValueError(f"MIN_PER_SOURCE ({self.MIN_PER_SOURCE}) must be <= MAX_PER_SOURCE ({self.MAX_PER_SOURCE})")
+
+        if self.RERANKER_PROVIDER not in ("local", "api"):
+            raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")
+        if self.RERANKER_PROVIDER == "api" and not self.RERANKER_API_BASE_URL:
+            raise ValueError("RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api")
         return self
 
 
