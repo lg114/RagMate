@@ -70,6 +70,10 @@ class Settings(BaseSettings):
 
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
+    # 融合：rrf=倒数排名融合（默认）；weighted=稠密/稀疏原始分加权（需归一化）
+    FUSION_MODE: str = "rrf"
+    RRF_K: int = Field(default=60, ge=1, le=200)  # RRF 常数；越小越偏向「两边都靠前」的交集
+    FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)  # weighted 模式稠密权重，稀疏=1-该值
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RERANKER_PROVIDER: str = "local"  # local=本地 CrossEncoder；api=远程 /rerank 接口（Jina、硅基流动等兼容格式），免本地加载模型
     RERANKER_API_BASE_URL: str = ""   # RERANKER_PROVIDER=api 时必填，如 https://api.jina.ai/v1
@@ -102,6 +106,11 @@ class Settings(BaseSettings):
     MULTI_QUERY_ENABLED: bool = False  # 多查询扩展：LLM 生成改写变体，多路检索后 RRF 融合（默认关，开启前应先过评测对比）
     MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 改写变体数量（不含原始 query）
     QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过 agent 直接回复
+
+    # 评测生成（evaluate / patch-raw）：短超时 + 有限重试，避免 503 干等半小时
+    EVAL_LLM_TIMEOUT: float = Field(default=60.0, gt=0)  # 单次生成 HTTP 超时（秒）
+    EVAL_LLM_RETRIES: int = Field(default=2, ge=0, le=5)  # 瞬时错误额外重试次数（不含首次）
+    EVAL_LLM_RETRY_BACKOFF: float = Field(default=2.0, gt=0)  # 重试间隔基数（秒），第 n 次等 n*backoff
 
     # Agent
     AGENT_RECURSION_LIMIT: int = Field(default=30, gt=0)

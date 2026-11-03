@@ -22,13 +22,39 @@
 
 - 样本量小（10 题）的结论只适用于回归对比，不外推为普遍效果。
 - 生成侧指标（faithfulness / answer relevancy / factual correctness）依赖 LLM judge，
-  解读 delta 前先量噪声带宽：同配置重复跑两次，极差即噪声。
-- 评测在算分前会把未打分的管线结果写成 `<report>.raw.json`（不入仓）；算分失败时
-  用 `ragmate-eval rescore --report <raw 文件>` 只重算分，不重跑管线。跑评测前 CLI
-  会先探一下 judge 能不能返回可解析的 JSON，探不过就直接停，不浪费一轮管线。
+  解读 delta 前先量噪声带宽：用 `--score-repeats 3`，报告 `meta.score_spread` 即极差。
 - Python 3.14 注意：ragas 0.4.3 的打分超时（`asyncio.wait_for`）在 3.14 下会让全部
   打分任务秒灭（`Timeout should be used inside a task`），`compute_metrics` 因此传
   `RunConfig(timeout=None)` 绕开；单次调用的超时由 HTTP 客户端默认兜底。3.12 不受影响。
+
+## 生成与打分分离（P1）
+
+生成结果是不可变 artifact；打分只读它，不再跑检索/生成：
+
+```bash
+# 1) 只生成 → <report>.raw.json（已存在则拒绝覆盖，除非 --force-raw）
+ragmate-eval evaluate --testset eval/testsets/sample/testset.json \
+  --report eval/reports/run.json --generate-only
+
+# 2) 只打分（默认 temperature=0；解析失败整表重试；可选 3 遍看噪声）
+ragmate-eval rescore --report eval/reports/run.raw.json \
+  --output eval/reports/run.json \
+  --judge-temperature 0 --parse-retries 2 --score-repeats 3
+```
+
+- raw meta 钉死：`generator_model`、answer prompt sha、`judge_model` /
+  `judge_temperature` / metric pack sha。
+- 解析失败经 `--parse-retries` 仍空的格子 → `status: unscored`，不进均值；
+  `meta.n_scored` / `n_partial` / `n_unscored` 可查。
+- `rescore` 读 `.raw.json` 时默认写到同名 `.json`，**不会改写 raw**。
+- 旧的一键 `evaluate`（不带 `--generate-only`）仍可用：先落 raw 再打分。
+- 生成侧 `EVAL_LLM_TIMEOUT`（默认 60s）+ `EVAL_LLM_RETRIES`：503/429/超时有限重试，
+  避免干等半小时。若仍有缺口：
+
+```bash
+ragmate-eval patch-raw --raw eval/reports/run.raw.json \
+  --testset eval/testsets/sample/testset.json
+```
 
 ## 确定性检索评测（tier-1，不经过 LLM）
 
@@ -63,6 +89,18 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
   检索排序是确定的）。极差非 0 时先修不确定性来源，再比 A/B。
 - judge 层：同配置重复跑，极差即噪声；50 题时 1 题占 2 分，<5 题的
   翻转不算赢（95% 区间约 ±11 分）。
+
+## 融合调参（P2，离线扫参）
+
+用已有 `.retrieval.json` 的 dense/sparse 排序重算 RRF / 加权融合，不重跑检索：
+
+```bash
+python -m backend.eval.fusion_sweep \
+  --checkpoint eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.retrieval.json
+```
+
+生产开关：`FUSION_MODE`（`rrf`|`weighted`）、`RRF_K`（默认 60）、`FUSION_DENSE_WEIGHT`。
+扫完若相对 k=60 没有稳定题型收益，保持默认，避免 98 题过拟合。
 
 ## 切块策略（title_path 默认）
 

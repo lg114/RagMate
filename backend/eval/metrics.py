@@ -1,11 +1,23 @@
-"""RAGAS 指标计算。"""
+"""RAGAS 指标计算：judge 钉死、可重复打分、解析失败重试后标 unscored。"""
+import hashlib
 import json
 import logging
 import math
+from dataclasses import dataclass, field
 
 from backend.infrastructure.streaming_llm import ChatOpenAICompatible
 
 logger = logging.getLogger("ragmate")
+
+DEFAULT_JUDGE_TEMPERATURE = 0.0
+DEFAULT_PARSE_RETRIES = 2
+METRIC_PACK = (
+    "Faithfulness",
+    "AnswerRelevancy",
+    "ContextPrecision",
+    "ContextRecall",
+    "FactualCorrectness",
+)
 
 
 class EvalLLM(ChatOpenAICompatible):
@@ -16,18 +28,78 @@ class EvalLLM(ChatOpenAICompatible):
         return payload
 
 
-def build_judge_llm(judge_model: str = None):
-    """Build the RAGAS judge LLM wrapper (the construction compute_metrics uses)."""
+@dataclass
+class JudgePin:
+    """钉死的 judge 配置，写入 raw / 报告 meta，便于 rescore 复现。"""
+    model: str
+    temperature: float
+    metric_pack: str
+    metric_pack_sha256: str
+    ragas_version: str | None = None
+
+    def as_meta(self) -> dict:
+        return {
+            "judge_model": self.model,
+            "judge_temperature": self.temperature,
+            "judge_metric_pack": self.metric_pack,
+            "judge_metric_pack_sha256": self.metric_pack_sha256,
+            "ragas_version": self.ragas_version,
+        }
+
+
+@dataclass
+class ScoreMatrix:
+    """一次或多次打分的结果矩阵（与 test_cases 对齐）。"""
+    runs: list[list[dict]] = field(default_factory=list)  # [run][case][metric] -> float|None
+    pin: JudgePin | None = None
+
+    @property
+    def primary(self) -> list[dict]:
+        """报告主分数：多遍独立打分用均值，单遍（含解析重试合并）原样。"""
+        if len(self.runs) > 1:
+            return mean_score_runs(self.runs)
+        return merge_score_runs(self.runs)
+
+
+def _ragas_version() -> str | None:
+    try:
+        import ragas
+        return getattr(ragas, "__version__", None)
+    except Exception:
+        return None
+
+
+def build_judge_pin(judge_model: str | None = None, temperature: float | None = None) -> JudgePin:
+    from backend.infrastructure.config import settings
+
+    model = judge_model or settings.LLM_MODEL
+    temp = DEFAULT_JUDGE_TEMPERATURE if temperature is None else float(temperature)
+    pack = "+".join(METRIC_PACK)
+    digest = hashlib.sha256(pack.encode("utf-8")).hexdigest()[:16]
+    return JudgePin(
+        model=model,
+        temperature=temp,
+        metric_pack=pack,
+        metric_pack_sha256=digest,
+        ragas_version=_ragas_version(),
+    )
+
+
+def build_judge_llm(judge_model: str = None, temperature: float | None = None):
+    """Build the RAGAS judge LLM wrapper with pinned temperature."""
     from ragas.llms.base import LangchainLLMWrapper
     from backend.infrastructure.model_factory import get_llm
     from backend.infrastructure.streaming_llm import create_llm
     from backend.infrastructure.config import settings
+
+    temp = DEFAULT_JUDGE_TEMPERATURE if temperature is None else float(temperature)
 
     if judge_model:
         base_llm = create_llm(
             model=judge_model,
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_API_BASE_URL,
+            temperature=temp,
         )
     else:
         base_llm = get_llm()
@@ -36,6 +108,7 @@ def build_judge_llm(judge_model: str = None):
         model=base_llm.model_name,
         api_key=base_llm.openai_api_key,
         base_url=base_llm.openai_api_base,
+        temperature=temp,
     ))
 
 
@@ -90,17 +163,24 @@ def probe_judge(wrapper, model_name: str = "") -> None:
         )
 
 
-def probe_judge_llm(judge_model: str = None):
+def probe_judge_llm(judge_model: str = None, temperature: float | None = None):
     """Build the judge wrapper and probe it. Returns the wrapper."""
     from backend.infrastructure.config import settings
 
-    wrapper = build_judge_llm(judge_model)
+    wrapper = build_judge_llm(judge_model, temperature=temperature)
     probe_judge(wrapper, model_name=judge_model or settings.LLM_MODEL)
     return wrapper
 
 
 def _is_missing(value) -> bool:
     return value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value)))
+
+
+def _clean_row(row: dict) -> dict:
+    from .utils import clean_score
+    if not isinstance(row, dict):
+        return {}
+    return {k: clean_score(v) for k, v in row.items()}
 
 
 def validate_scores(scores_list) -> None:
@@ -137,8 +217,7 @@ def validate_scores(scores_list) -> None:
         logger.warning("RAGAS scoring missing %d/%d scores: %s", missing, total, bad)
 
 
-def compute_metrics(test_cases: list[dict], judge_model: str = None):
-    """Compute RAGAS metrics on evaluated test cases."""
+def _run_ragas_once(test_cases: list[dict], judge_model: str | None, temperature: float) -> list[dict]:
     from ragas import evaluate
     from ragas.run_config import RunConfig
     from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall
@@ -146,8 +225,7 @@ def compute_metrics(test_cases: list[dict], judge_model: str = None):
     from ragas.embeddings.base import LangchainEmbeddingsWrapper
     from backend.infrastructure.model_factory import get_embeddings
 
-    judge_llm = build_judge_llm(judge_model)
-
+    judge_llm = build_judge_llm(judge_model, temperature=temperature)
     embeddings = LangchainEmbeddingsWrapper(get_embeddings())
 
     metrics = [
@@ -156,7 +234,6 @@ def compute_metrics(test_cases: list[dict], judge_model: str = None):
         ContextPrecision(llm=judge_llm),
         ContextRecall(llm=judge_llm),
     ]
-
     try:
         from ragas.metrics import FactualCorrectness
         metrics.append(FactualCorrectness(llm=judge_llm))
@@ -172,7 +249,6 @@ def compute_metrics(test_cases: list[dict], judge_model: str = None):
         )
         for tc in test_cases
     ]
-
     dataset = EvaluationDataset(samples)
     # 注意（Python 3.14）：ragas 0.4.3 会把每次打分包进
     # asyncio.wait_for(..., timeout=run_config.timeout)，而 wait_for 内部
@@ -184,5 +260,138 @@ def compute_metrics(test_cases: list[dict], judge_model: str = None):
     result = evaluate(
         dataset=dataset, metrics=metrics, run_config=RunConfig(timeout=None)
     )
-    validate_scores(getattr(result, "scores", None))
-    return result
+    raw_scores = getattr(result, "scores", None) or []
+    return [_clean_row(row) for row in raw_scores]
+
+
+def merge_score_runs(runs: list[list[dict]]) -> list[dict]:
+    """多趟打分按「首次非空」合并到每个 case 的每个指标（解析重试用）。"""
+    if not runs:
+        return []
+    n = max(len(run) for run in runs)
+    merged = []
+    for i in range(n):
+        out: dict = {}
+        for run in runs:
+            if i >= len(run):
+                continue
+            for name, value in run[i].items():
+                if name not in out or out[name] is None:
+                    if value is not None:
+                        out[name] = value
+                    else:
+                        out.setdefault(name, None)
+        merged.append(out)
+    return merged
+
+
+def mean_score_runs(runs: list[list[dict]]) -> list[dict]:
+    """多趟独立打分：每个 case 每个指标取非空均值（噪声分布的点估计）。"""
+    if not runs:
+        return []
+    if len(runs) == 1:
+        return [dict(row) for row in runs[0]]
+    n = max(len(run) for run in runs)
+    names = sorted({k for run in runs for row in run for k in row.keys()})
+    out = []
+    for i in range(n):
+        row = {}
+        for name in names:
+            vals = [
+                run[i][name]
+                for run in runs
+                if i < len(run) and run[i].get(name) is not None
+            ]
+            row[name] = round(sum(vals) / len(vals), 4) if vals else None
+        out.append(row)
+    return out
+
+
+def _row_has_missing(row: dict) -> bool:
+    return (not row) or any(v is None for v in row.values())
+
+
+def compute_metrics(
+    test_cases: list[dict],
+    judge_model: str = None,
+    *,
+    temperature: float | None = None,
+    parse_retries: int = DEFAULT_PARSE_RETRIES,
+) -> ScoreMatrix:
+    """Compute RAGAS metrics; retry full passes to fill parse failures.
+
+    解析失败在 RAGAS 里表现为 NaN→None。整表重跑最多 parse_retries 次，
+    按指标「首次非空」合并；仍空的格子在报告里标 unscored，不进均值。
+    """
+    pin = build_judge_pin(judge_model, temperature)
+    temp = pin.temperature
+    attempts = max(1, 1 + int(parse_retries))
+    runs: list[list[dict]] = []
+
+    for attempt in range(attempts):
+        logger.info(
+            "RAGAS scoring pass %d/%d (judge=%s temp=%s)",
+            attempt + 1, attempts, pin.model, temp,
+        )
+        rows = _run_ragas_once(test_cases, pin.model, temp)
+        runs.append(rows)
+        merged = merge_score_runs(runs)
+        if merged and not any(_row_has_missing(r) for r in merged):
+            break
+        if attempt + 1 < attempts:
+            missing = sum(
+                1 for r in merged for v in r.values() if v is None
+            )
+            logger.warning(
+                "Scoring pass %d still has %d missing cells; retrying",
+                attempt + 1, missing,
+            )
+
+    merged = merge_score_runs(runs)
+    validate_scores(merged)
+    # ScoreMatrix.runs 对「解析重试」只保留合并结果作为单次主跑，
+    # 真正的噪声分布由 score_with_repeats 的外层 repeats 负责。
+    return ScoreMatrix(runs=[merged], pin=pin)
+
+
+def score_with_repeats(
+    test_cases: list[dict],
+    judge_model: str = None,
+    *,
+    temperature: float | None = None,
+    parse_retries: int = DEFAULT_PARSE_RETRIES,
+    score_repeats: int = 1,
+) -> ScoreMatrix:
+    """独立打分 score_repeats 遍，供噪声带宽（每遍内部仍可 parse_retries）。"""
+    repeats = max(1, int(score_repeats))
+    pin = build_judge_pin(judge_model, temperature)
+    all_runs: list[list[dict]] = []
+    for r in range(repeats):
+        logger.info("Score repeat %d/%d", r + 1, repeats)
+        matrix = compute_metrics(
+            test_cases,
+            judge_model=pin.model,
+            temperature=pin.temperature,
+            parse_retries=parse_retries,
+        )
+        all_runs.extend(matrix.runs)
+    return ScoreMatrix(runs=all_runs, pin=pin)
+
+
+def summary_spread(runs: list[list[dict]]) -> dict:
+    """各次 run 的 per-metric 均值极差（噪声带宽）。"""
+    if len(runs) < 2:
+        return {}
+    per_run_means = []
+    for run in runs:
+        means = {}
+        if not run:
+            per_run_means.append(means)
+            continue
+        names = set().union(*(row.keys() for row in run))
+        for name in names:
+            vals = [row[name] for row in run if row.get(name) is not None]
+            means[name] = round(sum(vals) / len(vals), 4) if vals else None
+        per_run_means.append(means)
+    from .deterministic_metrics import metric_spread
+    return metric_spread(per_run_means)

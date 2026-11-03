@@ -9,6 +9,8 @@ __pycache__/
 dist/
 build/
 .eggs/
+.pytest_cache/
+pytest-of-*/
 
 # Virtual environments
 .venv/
@@ -54,3 +56,5 @@ node_modules/
 # Agent workspace（本地数据，不入版本库）
 /.workbuddy
 /.workbuddy-ai/
+/eval/reports
+/eval/reports

@@ -72,15 +72,33 @@ class ChatOpenAICompatible(ChatOpenAI):
         return generation_chunk
 
 
-def create_llm(model: str, api_key: str, base_url: str, temperature: float = None) -> ChatOpenAICompatible:
-    """创建 LLM 实例，支持任意 OpenAI 兼容 API。"""
+def create_llm(
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float = None,
+    *,
+    timeout: float | None = None,
+    max_retries: int | None = None,
+    streaming: bool = True,
+) -> ChatOpenAICompatible:
+    """创建 LLM 实例，支持任意 OpenAI 兼容 API。
+
+    timeout / max_retries 供评测生成等需要短超时、自管重试的路径使用；
+    默认不传，保持原先 ChatOpenAI 行为。
+    """
     from backend.infrastructure.config import settings
     if temperature is None:
         temperature = settings.LLM_TEMPERATURE
-    return ChatOpenAICompatible(
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=temperature,
-        streaming=True,
-    )
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": api_key,
+        "base_url": base_url,
+        "temperature": temperature,
+        "streaming": streaming,
+    }
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if max_retries is not None:
+        kwargs["max_retries"] = max_retries
+    return ChatOpenAICompatible(**kwargs)

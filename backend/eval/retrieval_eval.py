@@ -17,9 +17,10 @@ import json
 import logging
 from pathlib import Path
 
-from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest
 from tqdm import tqdm
 
+from backend.core.fusion import make_milvus_ranker
 from backend.core.retriever import score_pairs
 from backend.infrastructure.config import settings
 from backend.infrastructure.encoding import encode_query
@@ -124,7 +125,7 @@ def _search_fused(client, dense_vec, sparse_vec, over_fetch):
     return client.hybrid_search(
         collection_name=settings.MILVUS_COLLECTION,
         reqs=[dense_req, sparse_req],
-        ranker=RRFRanker(),
+        ranker=make_milvus_ranker(),
         limit=over_fetch,
         output_fields=["text", "parent_text", "metadata"],
     )

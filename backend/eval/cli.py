@@ -13,9 +13,24 @@ from .utils import DEFAULT_TESTSETS_DIR, DEFAULT_REPORTS_DIR, resolve_path
 from .document_loader import load_langchain_docs
 from .testset_gen import generate_testset
 from .retrieval import retrieve_contexts
-from .response_gen import generate_response
-from .metrics import compute_metrics, probe_judge_llm
-from .report import build_report, cases_from_report, print_report, write_raw_checkpoint
+from .response_gen import answer_prompt_fingerprint, generate_response
+from .metrics import (
+    DEFAULT_JUDGE_TEMPERATURE,
+    DEFAULT_PARSE_RETRIES,
+    build_judge_pin,
+    probe_judge_llm,
+    score_with_repeats,
+)
+from .report import (
+    build_report,
+    cases_from_report,
+    load_raw_checkpoint,
+    merge_into_raw,
+    print_report,
+    questions_missing_from_raw,
+    save_raw_checkpoint,
+    write_raw_checkpoint,
+)
 from .manifest import build_manifest
 from .retrieval_eval import (
     STAGES,
@@ -76,8 +91,33 @@ def cmd_generate(args):
     print("Review and edit the test set before running evaluate.")
 
 
+def _resolve_judge_args(args, meta: dict | None = None):
+    """CLI / raw meta → 钉死的 judge 配置。"""
+    from backend.infrastructure.config import settings
+
+    meta = meta or {}
+    judge_model = (
+        getattr(args, "judge_model", None)
+        or meta.get("judge_model")
+        or settings.LLM_MODEL
+    )
+    if getattr(args, "judge_temperature", None) is not None:
+        temperature = float(args.judge_temperature)
+    elif meta.get("judge_temperature") is not None:
+        temperature = float(meta["judge_temperature"])
+    else:
+        temperature = DEFAULT_JUDGE_TEMPERATURE
+    parse_retries = (
+        args.parse_retries
+        if getattr(args, "parse_retries", None) is not None
+        else DEFAULT_PARSE_RETRIES
+    )
+    score_repeats = getattr(args, "score_repeats", None) or 1
+    return judge_model, temperature, int(parse_retries), int(score_repeats)
+
+
 def cmd_evaluate(args):
-    """Evaluate RAG pipeline against a test set."""
+    """Run RAG pipeline (± optional scoring). Prefer --generate-only then rescore."""
     from backend.infrastructure.config import settings
 
     testset_path = resolve_path(args.testset)
@@ -91,31 +131,40 @@ def cmd_evaluate(args):
     print(f"Loaded {len(test_cases)} test cases from {testset_path}")
 
     top_k = args.top_k or settings.FINAL_CONTEXT_K
-    judge_model = args.judge_model or settings.LLM_MODEL
     mode = args.mode
+    generate_only = bool(getattr(args, "generate_only", False))
+    judge_model, temperature, parse_retries, score_repeats = _resolve_judge_args(args)
 
-    print(f"Config: mode={mode}, top_k={top_k}, judge_model={judge_model}")
+    print(f"Config: mode={mode}, top_k={top_k}, generate_only={generate_only}")
+    if not generate_only:
+        print(
+            f"Judge: model={judge_model}, temperature={temperature}, "
+            f"parse_retries={parse_retries}, score_repeats={score_repeats}"
+        )
+        print("\nChecking judge model responds with parseable JSON...")
+        try:
+            probe_judge_llm(judge_model, temperature=temperature)
+        except RuntimeError as e:
+            print(f"Error: judge check failed, not running the pipeline: {e}")
+            sys.exit(1)
+        print("Judge check passed.")
 
-    print("\nChecking judge model responds with parseable JSON...")
-    try:
-        probe_judge_llm(judge_model)
-    except RuntimeError as e:
-        print(f"Error: judge check failed, not running the pipeline: {e}")
-        sys.exit(1)
-    print("Judge check passed.")
-
-    print("\nRunning RAG pipeline for each test case...")
+    print(
+        f"\nRunning RAG pipeline for each test case "
+        f"(timeout={settings.EVAL_LLM_TIMEOUT}s, retries={settings.EVAL_LLM_RETRIES})..."
+    )
     errors = 0
-    for tc in tqdm(test_cases, desc="Evaluating"):
+    for tc in tqdm(test_cases, desc="Generating"):
         question = tc["user_input"]
         try:
             contexts = retrieve_contexts(question, top_k=top_k)
             tc["retrieved_contexts"] = contexts
-
             response = generate_response(question, contexts)
             tc["response"] = response
+            tc.pop("error", None)
         except Exception as e:
             logger.error(f"Failed for question '{question[:50]}': {e}")
+            print(f"Failed for question '{question[:50]}': {e}")
             tc["response"] = ""
             tc["retrieved_contexts"] = []
             tc["error"] = str(e)
@@ -123,16 +172,20 @@ def cmd_evaluate(args):
 
     if errors:
         print(f"\nWarning: {errors}/{len(test_cases)} cases failed")
+        print("Patch later with: ragmate-eval patch-raw --raw <run.raw.json> --testset <testset>")
 
     valid_cases = [tc for tc in test_cases if tc.get("response") and tc.get("retrieved_contexts")]
     if not valid_cases:
         print("Error: No valid test cases to evaluate")
         sys.exit(1)
 
-    print(f"\nComputing RAGAS metrics on {len(valid_cases)} valid cases...")
+    report_path = str(
+        resolve_path(args.report)
+        if args.report
+        else DEFAULT_REPORTS_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
 
-    report_path = str(resolve_path(args.report) if args.report else DEFAULT_REPORTS_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-
+    pin = build_judge_pin(judge_model, temperature)
     meta = {
         "timestamp": datetime.now().isoformat(),
         "testset": str(testset_path),
@@ -141,30 +194,60 @@ def cmd_evaluate(args):
         "failed_cases": errors,
         "mode": mode,
         "top_k": top_k,
-        "judge_model": judge_model,
+        "generator_model": settings.LLM_MODEL,
         "retriever_config": {
             "hybrid_search": settings.HYBRID_SEARCH_ENABLED,
             "reranker": settings.RERANKER_MODEL,
             "score_threshold": settings.RERANK_SCORE_THRESHOLD,
+            "chunking_strategy": settings.CHUNKING_STRATEGY,
+            "final_context_k": settings.FINAL_CONTEXT_K,
         },
         "report_path": report_path,
+        **answer_prompt_fingerprint(),
+        **pin.as_meta(),
     }
 
-    # Checkpoint the pipeline work before scoring: if scoring fails, only
-    # scoring has to be redone (see `rescore`).
-    raw_path = write_raw_checkpoint(report_path, meta, valid_cases)
-    print(f"Raw pipeline results checkpointed to {raw_path}")
-
     try:
-        ragas_result = compute_metrics(valid_cases, judge_model=judge_model)
+        # Pass full test_cases so failed_questions land in raw meta for patch-raw.
+        raw_path = write_raw_checkpoint(
+            report_path, meta, test_cases, force=bool(getattr(args, "force_raw", False)),
+        )
+    except FileExistsError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    print(f"Raw pipeline results checkpointed to {raw_path}")
+    if errors:
+        print(f"Recorded {errors} failed question(s) in raw meta for patch-raw.")
+
+    if generate_only:
+        print(
+            "Generate-only done. Score later with:\n"
+            f"  ragmate-eval rescore --report {raw_path} "
+            f"--output {report_path} --score-repeats {score_repeats}"
+        )
+        if errors:
+            print(
+                "Fill gaps first:\n"
+                f"  ragmate-eval patch-raw --raw {raw_path} --testset {testset_path}"
+            )
+        return
+
+    print(f"\nComputing RAGAS metrics on {len(valid_cases)} valid cases...")
+    try:
+        matrix = score_with_repeats(
+            valid_cases,
+            judge_model=judge_model,
+            temperature=temperature,
+            parse_retries=parse_retries,
+            score_repeats=score_repeats,
+        )
     except RuntimeError as e:
         print(f"\nError: scoring failed: {e}")
         print(f"Pipeline results are preserved in {raw_path}. Fix the judge, then re-score only with:")
         print(f"  ragmate-eval rescore --report {raw_path}")
         sys.exit(1)
 
-    report = build_report(meta, valid_cases, ragas_result)
-
+    report = build_report(meta, valid_cases, matrix)
     report_output = Path(report_path)
     report_output.parent.mkdir(parents=True, exist_ok=True)
     with open(report_output, "w", encoding="utf-8") as f:
@@ -181,13 +264,79 @@ def cmd_evaluate(args):
             print(f"\nPASSED: Overall score {overall:.2f} >= threshold {args.threshold}")
 
 
-def cmd_rescore(args):
-    """Recompute RAGAS metrics from a saved report (or raw checkpoint).
+def cmd_patch_raw(args):
+    """Re-generate only questions missing from an existing raw checkpoint."""
+    from backend.infrastructure.config import settings
 
-    No retrieval or generation is re-run: the saved responses and contexts
-    are scored again. Use this after a scoring failure, or to re-score an
-    old run with a different judge model.
-    """
+    raw_path = resolve_path(args.raw)
+    if not raw_path.exists():
+        print(f"Error: Raw checkpoint not found: {raw_path}")
+        sys.exit(1)
+    testset_path = resolve_path(args.testset)
+    if not testset_path.exists():
+        print(f"Error: Test set not found: {testset_path}")
+        sys.exit(1)
+
+    with open(testset_path, "r", encoding="utf-8") as f:
+        testset = json.load(f)
+    if not isinstance(testset, list):
+        print("Error: Test set must be a JSON list")
+        sys.exit(1)
+
+    try:
+        raw = load_raw_checkpoint(raw_path)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    missing = questions_missing_from_raw(testset, raw)
+    if not missing:
+        print(f"Nothing to patch: all {len(testset)} testset questions are in {raw_path}")
+        return
+
+    top_k = args.top_k or raw.get("meta", {}).get("top_k") or settings.FINAL_CONTEXT_K
+    print(
+        f"Patching {len(missing)} missing question(s) into {raw_path} "
+        f"(timeout={settings.EVAL_LLM_TIMEOUT}s, retries={settings.EVAL_LLM_RETRIES}, top_k={top_k})"
+    )
+
+    still_failed = 0
+    for tc in tqdm(missing, desc="Patching"):
+        question = tc["user_input"]
+        try:
+            contexts = retrieve_contexts(question, top_k=top_k)
+            tc["retrieved_contexts"] = contexts
+            tc["response"] = generate_response(question, contexts)
+            tc.pop("error", None)
+        except Exception as e:
+            logger.error(f"Patch failed for '{question[:50]}': {e}")
+            print(f"Failed for question '{question[:50]}': {e}")
+            tc["response"] = ""
+            tc["retrieved_contexts"] = []
+            tc["error"] = str(e)
+            still_failed += 1
+
+    merged = merge_into_raw(raw, missing)
+    meta = merged["meta"]
+    meta["timestamp"] = datetime.now().isoformat()
+    meta["patched_at"] = meta["timestamp"]
+    meta["patched_from_testset"] = str(testset_path)
+    meta["test_cases"] = meta.get("test_cases") or len(testset)
+    save_raw_checkpoint(raw_path, merged)
+
+    ok = len(missing) - still_failed
+    print(
+        f"Patched {ok}/{len(missing)} question(s). "
+        f"raw now has {merged['meta']['valid_cases']} valid, "
+        f"{merged['meta']['failed_cases']} still failed."
+    )
+    if still_failed:
+        print("Re-run patch-raw after the LLM recovers.")
+        sys.exit(1)
+
+
+def cmd_rescore(args):
+    """Score-only: read immutable raw/report, never re-run retrieve/generate."""
     from backend.infrastructure.config import settings
 
     report_path = resolve_path(args.report)
@@ -200,36 +349,59 @@ def cmd_rescore(args):
 
     cases = cases_from_report(report)
     if not cases:
-        print(f"Error: No scored cases with responses and contexts in {report_path}")
+        print(f"Error: No cases with responses and contexts in {report_path}")
         sys.exit(1)
 
-    judge_model = args.judge_model or report.get("meta", {}).get("judge_model") or settings.LLM_MODEL
-    print(f"Re-scoring {len(cases)} cases from {report_path} with judge_model={judge_model}")
+    judge_model, temperature, parse_retries, score_repeats = _resolve_judge_args(
+        args, report.get("meta", {}),
+    )
+    print(
+        f"Re-scoring {len(cases)} cases from {report_path} "
+        f"(judge={judge_model}, temp={temperature}, "
+        f"parse_retries={parse_retries}, score_repeats={score_repeats})"
+    )
 
     print("\nChecking judge model responds with parseable JSON...")
     try:
-        probe_judge_llm(judge_model)
+        probe_judge_llm(judge_model, temperature=temperature)
     except RuntimeError as e:
         print(f"Error: judge check failed: {e}")
         sys.exit(1)
     print("Judge check passed.")
 
     try:
-        ragas_result = compute_metrics(cases, judge_model=judge_model)
+        matrix = score_with_repeats(
+            cases,
+            judge_model=judge_model,
+            temperature=temperature,
+            parse_retries=parse_retries,
+            score_repeats=score_repeats,
+        )
     except RuntimeError as e:
         print(f"\nError: scoring failed: {e}")
         sys.exit(1)
 
     output_path = resolve_path(args.output) if args.output else report_path
+    # 不覆盖 .raw.json：若 --report 本身是 raw，默认写到去 .raw 的报告路径
+    if output_path == report_path and report_path.name.endswith(".raw.json"):
+        output_path = report_path.with_name(
+            report_path.name.replace(".raw.json", ".json")
+        )
+        print(f"Raw input preserved; writing scored report to {output_path}")
+
     meta = dict(report.get("meta", {}))
+    meta.pop("raw_checkpoint", None)
     meta.update({
         "timestamp": datetime.now().isoformat(),
-        "judge_model": judge_model,
         "rescored": True,
+        "rescored_from": str(report_path),
         "report_path": str(output_path),
+        "generator_model": meta.get("generator_model") or settings.LLM_MODEL,
     })
+    if matrix.pin:
+        meta.update(matrix.pin.as_meta())
 
-    new_report = build_report(meta, cases, ragas_result)
+    new_report = build_report(meta, cases, matrix)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(new_report, f, ensure_ascii=False, indent=2)
@@ -530,18 +702,82 @@ def main():
     gen_parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     gen_parser.add_argument("--distributions", type=str, default=None, help="Test type distributions (JSON)")
 
-    eval_parser = subparsers.add_parser("evaluate", help="Evaluate RAG pipeline")
+    eval_parser = subparsers.add_parser(
+        "evaluate",
+        help="Run RAG pipeline; use --generate-only to stop after immutable raw checkpoint",
+    )
     eval_parser.add_argument("--testset", type=str, required=True, help="Test set JSON path")
     eval_parser.add_argument("--report", type=str, default=None, help="Report output path")
     eval_parser.add_argument("--top-k", type=int, default=None, help="Number of chunks to retrieve")
     eval_parser.add_argument("--threshold", type=float, default=None, help="Min overall score (exit non-zero if below)")
     eval_parser.add_argument("--judge-model", type=str, default=None, help="Judge LLM model name")
+    eval_parser.add_argument(
+        "--judge-temperature", type=float, default=None,
+        help=f"Judge temperature (default {DEFAULT_JUDGE_TEMPERATURE}; pinned in meta)",
+    )
+    eval_parser.add_argument(
+        "--parse-retries", type=int, default=DEFAULT_PARSE_RETRIES,
+        help="Extra full scoring passes to fill NaN/parse failures (default 2)",
+    )
+    eval_parser.add_argument(
+        "--score-repeats", type=int, default=1,
+        help="Independent scoring repeats for noise spread (default 1)",
+    )
+    eval_parser.add_argument(
+        "--generate-only", action="store_true",
+        help="Only retrieve+generate; write .raw.json and exit (score with rescore)",
+    )
+    eval_parser.add_argument(
+        "--force-raw", action="store_true",
+        help="Overwrite an existing .raw.json checkpoint",
+    )
     eval_parser.add_argument("--mode", type=str, choices=["single", "agent"], default="single", help="Evaluation mode")
 
-    rescore_parser = subparsers.add_parser("rescore", help="Re-score a saved report without re-running the pipeline")
-    rescore_parser.add_argument("--report", type=str, required=True, help="Saved report or raw checkpoint JSON path (overwritten unless --output is given)")
-    rescore_parser.add_argument("--output", type=str, default=None, help="Output path for the re-scored report")
-    rescore_parser.add_argument("--judge-model", type=str, default=None, help="Judge LLM model name (defaults to the one in the report)")
+    patch_parser = subparsers.add_parser(
+        "patch-raw",
+        help="Re-generate only questions missing from an existing .raw.json (after 503 gaps)",
+    )
+    patch_parser.add_argument(
+        "--raw", type=str, required=True,
+        help="Existing raw checkpoint path (.raw.json)",
+    )
+    patch_parser.add_argument(
+        "--testset", type=str, required=True,
+        help="Golden/test set used for the original generate run",
+    )
+    patch_parser.add_argument(
+        "--top-k", type=int, default=None,
+        help="Retrieve top-k (default: raw meta.top_k or FINAL_CONTEXT_K)",
+    )
+
+    rescore_parser = subparsers.add_parser(
+        "rescore",
+        help="Score-only from a raw checkpoint or report (never re-runs retrieve/generate)",
+    )
+    rescore_parser.add_argument(
+        "--report", type=str, required=True,
+        help="Raw checkpoint (.raw.json) or scored report JSON",
+    )
+    rescore_parser.add_argument(
+        "--output", type=str, default=None,
+        help="Scored report path (defaults beside raw; never overwrites .raw.json)",
+    )
+    rescore_parser.add_argument(
+        "--judge-model", type=str, default=None,
+        help="Judge LLM model (defaults to pinned meta / settings)",
+    )
+    rescore_parser.add_argument(
+        "--judge-temperature", type=float, default=None,
+        help=f"Judge temperature (default: pinned meta or {DEFAULT_JUDGE_TEMPERATURE})",
+    )
+    rescore_parser.add_argument(
+        "--parse-retries", type=int, default=DEFAULT_PARSE_RETRIES,
+        help="Extra full scoring passes to fill NaN/parse failures (default 2)",
+    )
+    rescore_parser.add_argument(
+        "--score-repeats", type=int, default=1,
+        help="Independent scoring repeats for noise spread (default 1; use 3 for P1)",
+    )
 
     retrieval_parser = subparsers.add_parser("retrieval", help="Deterministic retrieval evaluation (no LLM judge)")
     retrieval_parser.add_argument("--testset", type=str, required=True, help="Golden test set JSON path (must carry gold chunk IDs)")
@@ -613,6 +849,8 @@ def main():
         cmd_generate(args)
     elif args.command == "evaluate":
         cmd_evaluate(args)
+    elif args.command == "patch-raw":
+        cmd_patch_raw(args)
     elif args.command == "rescore":
         cmd_rescore(args)
     elif args.command == "retrieval":

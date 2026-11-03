@@ -78,4 +78,6 @@
 4. **两层打分（已做）：**  
    - 交付层：`ragmate-eval delivery` → `retrieval-baseline-98q-titlepath-delivery.md`——filter/dedup **0 题丢 gold**；主索引 parent==child。  
    - parent 重排：`retrieval-baseline-98q-parent-rerank.md`（c300）——parent 打分会改序（top1 flip 14%），确认生产应继续 child 打分再展开。  
-5. **查询改写：** 题 67 已被 title_path 缓解；改写优先级下降。下一件更划算的是 P1「生成/打分分离」或 P2 融合调参。
+5. **生成/打分分离（已做）：** `evaluate --generate-only` → 不可变 `.raw.json`；`rescore --score-repeats 3` 只打分、钉死 temperature/metric pack，解析失败 → unscored。见 `eval/README.md`。  
+6. **融合调参（P2 已做）：** `fusion_sweep` + live weighted0.4 —— RRF_k 无感；weighted 抬 fused multi-hop recall，但 reranked 已满 → **默认仍 rrf/k=60**。见 `retrieval-baseline-98q-fusion-sweep.md`。  
+7. **查询改写 / 上下文检索：** 下一件 P2；人工校准 judge 仍属 P1 尾巴。

@@ -5,8 +5,17 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from backend.eval.metrics import compute_metrics, probe_judge, validate_scores
-from backend.eval.report import cases_from_report, write_raw_checkpoint
+from backend.eval.metrics import (
+    ScoreMatrix,
+    build_judge_pin,
+    compute_metrics,
+    merge_score_runs,
+    probe_judge,
+    score_with_repeats,
+    summary_spread,
+    validate_scores,
+)
+from backend.eval.report import build_report, cases_from_report, write_raw_checkpoint
 
 
 class _StubWrapper:
@@ -75,6 +84,17 @@ def test_write_raw_checkpoint_and_cases_round_trip(tmp_path):
     assert cases_from_report(saved) == [cases[0]]
 
 
+def test_write_raw_checkpoint_refuses_overwrite(tmp_path):
+    meta = {"judge_model": "x"}
+    cases = [
+        {"user_input": "q", "reference": "r", "response": "a", "retrieved_contexts": ["c"]},
+    ]
+    write_raw_checkpoint(tmp_path / "r.json", meta, cases)
+    with pytest.raises(FileExistsError, match="already exists"):
+        write_raw_checkpoint(tmp_path / "r.json", meta, cases)
+    write_raw_checkpoint(tmp_path / "r.json", meta, cases, force=True)
+
+
 def test_cases_from_report_skips_empty_contexts():
     report = {"details": [
         {"user_input": "q1", "reference": "r", "response": "a", "contexts": ["c"]},
@@ -84,6 +104,48 @@ def test_cases_from_report_skips_empty_contexts():
     cases = cases_from_report(report)
     assert len(cases) == 1
     assert cases[0]["retrieved_contexts"] == ["c"]
+
+
+def test_merge_score_runs_prefers_first_non_null():
+    runs = [
+        [{"faithfulness": None, "context_recall": 0.5}],
+        [{"faithfulness": 0.9, "context_recall": 0.7}],
+    ]
+    merged = merge_score_runs(runs)
+    assert merged == [{"faithfulness": 0.9, "context_recall": 0.5}]
+
+
+def test_build_report_marks_unscored_and_spread():
+    cases = [
+        {"user_input": "q1", "reference": "r", "response": "a", "retrieved_contexts": ["c"]},
+        {"user_input": "q2", "reference": "r", "response": "a", "retrieved_contexts": ["c"]},
+    ]
+    matrix = ScoreMatrix(
+        runs=[
+            [{"faithfulness": 0.8}, {"faithfulness": None}],
+            [{"faithfulness": 0.9}, {"faithfulness": None}],
+        ],
+        pin=build_judge_pin("stub-model", 0.0),
+    )
+    report = build_report({"testset": "t"}, cases, matrix)
+    assert report["details"][0]["status"] == "scored"
+    assert report["details"][0]["scores"]["faithfulness"] == 0.85  # mean of repeats
+    assert report["details"][1]["status"] == "unscored"
+    assert report["meta"]["n_unscored"] == 1
+    assert report["meta"]["score_repeats"] == 2
+    assert "faithfulness" in report["meta"]["score_spread"]
+    assert report["meta"]["judge_temperature"] == 0.0
+    assert report["details"][0]["scores_runs"]
+
+
+def test_summary_spread_two_runs():
+    runs = [
+        [{"m": 0.5}, {"m": 0.7}],
+        [{"m": 0.9}, {"m": 0.8}],
+    ]
+    # means: (0.6) and (0.85) → spread 0.25
+    spread = summary_spread(runs)
+    assert spread["m"] == 0.25
 
 
 def test_compute_metrics_disables_ragas_wait_for_timeout(monkeypatch):
@@ -109,7 +171,7 @@ def test_compute_metrics_disables_ragas_wait_for_timeout(monkeypatch):
     monkeypatch.setattr(ragas, "evaluate", fake_evaluate)
     monkeypatch.setattr(
         "backend.eval.metrics.build_judge_llm",
-        lambda judge_model=None: LangchainLLMWrapper(
+        lambda judge_model=None, temperature=None: LangchainLLMWrapper(
             ChatOpenAI(model="stub", api_key="stub", base_url="http://127.0.0.1:9/v1")
         ),
     )
@@ -119,7 +181,69 @@ def test_compute_metrics_disables_ragas_wait_for_timeout(monkeypatch):
     )
 
     result = compute_metrics(
-        [{"user_input": "q", "response": "a", "retrieved_contexts": ["c"], "reference": "r"}]
+        [{"user_input": "q", "response": "a", "retrieved_contexts": ["c"], "reference": "r"}],
+        parse_retries=0,
     )
-    assert result.scores == _FakeResult.scores
+    assert isinstance(result, ScoreMatrix)
+    assert result.primary[0]["faithfulness"] == 0.9
     assert captured["run_config"].timeout is None
+
+
+def test_score_with_repeats_runs_n_times(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_compute(test_cases, judge_model=None, temperature=None, parse_retries=2):
+        calls["n"] += 1
+        return ScoreMatrix(
+            runs=[[{"faithfulness": 0.5 + calls["n"] * 0.1}]],
+            pin=build_judge_pin("stub", 0.0),
+        )
+
+    monkeypatch.setattr("backend.eval.metrics.compute_metrics", fake_compute)
+    matrix = score_with_repeats(
+        [{"user_input": "q", "response": "a", "retrieved_contexts": ["c"], "reference": "r"}],
+        score_repeats=3,
+        parse_retries=0,
+    )
+    assert calls["n"] == 3
+    assert len(matrix.runs) == 3
+
+
+def test_build_judge_llm_passes_temperature(monkeypatch):
+    import backend.eval.metrics as metrics_mod
+
+    captured_create = {}
+    captured_eval = {}
+
+    class _FakeLLM:
+        model_name = "m"
+        openai_api_key = "k"
+        openai_api_base = "http://x"
+
+    def fake_create_llm(**kwargs):
+        captured_create.update(kwargs)
+        return _FakeLLM()
+
+    class _CaptureEval:
+        def __init__(self, **kwargs):
+            captured_eval.update(kwargs)
+
+    monkeypatch.setattr(
+        "backend.infrastructure.streaming_llm.create_llm", fake_create_llm,
+    )
+    monkeypatch.setattr(metrics_mod, "EvalLLM", _CaptureEval)
+    monkeypatch.setattr(
+        "ragas.llms.base.LangchainLLMWrapper",
+        lambda llm: llm,
+    )
+
+    metrics_mod.build_judge_llm("my-judge", temperature=0.0)
+    assert captured_create.get("temperature") == 0.0
+    assert captured_eval.get("temperature") == 0.0
+
+
+def test_build_judge_pin_defaults_temp_zero():
+    pin = build_judge_pin("m", None)
+    assert pin.temperature == 0.0
+    assert "Faithfulness" in pin.metric_pack
+    assert pin.as_meta()["judge_temperature"] == 0.0

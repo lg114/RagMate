@@ -6,9 +6,10 @@ import re
 import threading
 import urllib.request
 
-from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest
 from sentence_transformers import CrossEncoder
 
+from backend.core.fusion import make_milvus_ranker
 from backend.domain.errors import AppError, ServiceUnavailableError
 from backend.infrastructure.config import settings
 from backend.infrastructure.encoding import encode_query
@@ -247,7 +248,7 @@ def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
         return client.hybrid_search(
             collection_name=settings.MILVUS_COLLECTION,
             reqs=[dense_req, sparse_req],
-            ranker=RRFRanker(),
+            ranker=make_milvus_ranker(),
             limit=over_fetch,
             output_fields=["text", "parent_text", "metadata"],
         )
@@ -295,9 +296,6 @@ def _extract_candidates(results) -> list[dict]:
     return candidates
 
 
-_RRF_K = 60  # RRF 常数：只用名次不用原始分数，与 Milvus 混合检索内部的 RRFRanker 思路一致
-
-
 def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
     """多路检索 + RRF 融合。
 
@@ -305,6 +303,7 @@ def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
     同一片段在越多路结果中出现、排名越靠前，融合分越高。融合后截断到
     over_fetch 个再交给 reranker 精排，因此 reranker 的调用量与单路时相同。
     """
+    rrf_k = settings.RRF_K
     fused: dict[tuple, dict] = {}
     fused_scores: dict[tuple, float] = {}
     for q in queries:
@@ -312,7 +311,7 @@ def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
         results = _do_search(client, dense_vec, sparse_vec, over_fetch)
         for rank, cand in enumerate(_extract_candidates(results)):
             key = (cand["source"], cand.get("page"), cand.get("chunk_index"))
-            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
+            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
             fused.setdefault(key, cand)
     ordered = sorted(
         fused.values(),
