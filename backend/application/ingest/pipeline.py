@@ -96,6 +96,27 @@ def _reconstruct_with_headers(doc):
     return doc.page_content
 
 
+def _title_path_from_metadata(metadata: dict) -> str:
+    """从 Header 1/2/3 metadata 拼出「H1 > H2 > H3」路径；无标题则空串。"""
+    parts = [metadata[k] for k in ("Header 1", "Header 2", "Header 3") if metadata.get(k)]
+    return " > ".join(parts)
+
+
+def _apply_title_path(body: str, title_path: str) -> str:
+    """把标题路径贴进块正文，供向量与 rerank 直接看见章节语境。"""
+    if not title_path:
+        return body
+    return f"标题路径: {title_path}\n\n{body}"
+
+
+def strip_title_path_prefix(text: str) -> str:
+    """去掉 title_path 策略写入的前缀，便于与旧 gold 正文做重叠比对。"""
+    if text.startswith("标题路径: "):
+        parts = text.split("\n\n", 1)
+        return parts[1] if len(parts) > 1 else text
+    return text
+
+
 def _get_text_splitter(ext: str):
     """根据文件扩展名返回对应的 text splitter。表格类返回 None（不切分）。"""
     if ext in (".xlsx", ".xls"):
@@ -108,6 +129,37 @@ def _get_text_splitter(ext: str):
         ".txt": (settings.CHUNK_SIZE_TXT, settings.CHUNK_OVERLAP_TXT),
     }.get(ext, (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP))
     return RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=overlap)
+
+
+def _split_markdown_section(section, ext: str) -> list:
+    """按 CHUNKING_STRATEGY 切一个 markdown 章节，CHUNK_SIZE 两边对齐。"""
+    splitter = _get_text_splitter(ext)
+    strategy = (settings.CHUNKING_STRATEGY or "title_path").strip().lower()
+    if strategy == "title_path":
+        title_path = _title_path_from_metadata(section.metadata)
+        # 先按与 parent_child 相同的 CHUNK_SIZE 切正文，再给每个子块贴路径，
+        # 避免路径字符挤占额度导致两边切块边界对不齐。
+        small_chunks = splitter.split_documents([section])
+        parent_body = section.page_content
+        parent_text = _apply_title_path(parent_body, title_path)
+        for c in small_chunks:
+            c.page_content = _apply_title_path(c.page_content, title_path)
+            c.metadata["parent_text"] = parent_text
+            c.metadata["title_path"] = title_path
+            c.metadata["chunking_strategy"] = "title_path"
+        return small_chunks
+
+    if strategy != "parent_child":
+        logger.warning(
+            "Unknown CHUNKING_STRATEGY=%r, falling back to parent_child",
+            settings.CHUNKING_STRATEGY,
+        )
+    small_chunks = splitter.split_documents([section])
+    parent_text = _reconstruct_with_headers(section)
+    for c in small_chunks:
+        c.metadata["parent_text"] = parent_text
+        c.metadata["chunking_strategy"] = "parent_child"
+    return small_chunks
 
 
 def _load_and_split(docs_dir, new_files, cancel_event=None):
@@ -144,12 +196,7 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
                     sections = md_splitter.split_text(doc.page_content)
                     for section in sections:
                         section.metadata.update({k: v for k, v in doc.metadata.items() if k not in section.metadata})
-                        splitter = _get_text_splitter(ext)
-                        small_chunks = splitter.split_documents([section])
-                        parent_text = _reconstruct_with_headers(section)
-                        for c in small_chunks:
-                            c.metadata["parent_text"] = parent_text
-                        chunks.extend(small_chunks)
+                        chunks.extend(_split_markdown_section(section, ext))
                 elif ext in (".xlsx", ".xls"):
                     chunks.append(doc)
                 else:
@@ -179,7 +226,10 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
         file_chunk_index[fname] += 1
         chunk.metadata["content_hash"] = hashlib.md5(chunk.page_content.encode("utf-8")).hexdigest()
 
-    logger.info(f"Split {len(new_files)} files into {len(chunks)} chunks")
+    logger.info(
+        f"Split {len(new_files)} files into {len(chunks)} chunks "
+        f"(strategy={settings.CHUNKING_STRATEGY})"
+    )
     return chunks, chunk_counter, failed_files
 
 

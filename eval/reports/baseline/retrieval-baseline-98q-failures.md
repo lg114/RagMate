@@ -73,6 +73,6 @@
 ## 建议的下一步（按这份清单）
 
 1. **先改评测读法：** multi-hop 主看「全部 gold 的 recall@5/10」，不要被 hit@5=1.0 骗过。  
-2. **生产截断：** 对多证据题，`FINAL_CONTEXT_K=5` 偏险（题 67）；15 更稳——可用同一 checkpoint 模拟不同最终 k，无需重跑检索。  
-3. **切块实验优先于扫 pool：** 题 67 指向「服务级/标题路径切块」，与 P1 标题路径项对齐。  
-4. **查询改写：** 只在题 67 类「多实体并列」上试，按题型拆开看，避免在已满分的 factoid 上空转。
+2. **生产截断：** 已用 checkpoint 扫过最终 k，见 `retrieval-baseline-98q-cutoff.md`：`reranked` 下 final_k=5 仍丢题 67；**k=10/15 全部 gold 齐**。当前默认 `FINAL_CONTEXT_K=15` 够兜住，不必为题 67 再加大；k=5 才危险。  
+3. **切块实验（已做）：** `title_path` 对比见 `retrieval-baseline-98q-titlepath-compare.md`——题 67 在 reranked@5 下三 gold 齐全；sparse multi-hop recall@5 0.88→1.00。  
+4. **查询改写：** 题 67 已被切块实验明显缓解；改写优先级下降，除非还有「多实体并列且同节」的新失败题。

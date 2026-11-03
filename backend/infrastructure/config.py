@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     CHUNK_SIZE_PARENT: int = Field(default=2500, gt=0)
     CHUNK_OVERLAP_PARENT: int = Field(default=300, ge=0)
 
+    # Chunking strategy for markdown:
+    #   title_path   — 按 CHUNK_SIZE 切子块，并把「H1 > H2 > H3」写入子块正文（默认；98q 上多跳更稳）
+    #   parent_child — 同切块边界，但不把标题路径写入检索正文，只放进 parent_text
+    CHUNKING_STRATEGY: str = "title_path"
+
     # Hybrid Search + Reranking
     HYBRID_SEARCH_ENABLED: bool = True
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"

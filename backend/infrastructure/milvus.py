@@ -45,6 +45,13 @@ def check_milvus_available() -> bool:
         return False
 
 
+def reset_collection_loaded_flag():
+    """切换 MILVUS_COLLECTION 后调用，迫使下次 init_milvus 重新 load。"""
+    global _collection_loaded
+    with _milvus_lock:
+        _collection_loaded = False
+
+
 def init_milvus():
     """确保 Milvus collection 已加载（线程安全）。collection 不存在时返回 None。"""
     global _collection_loaded

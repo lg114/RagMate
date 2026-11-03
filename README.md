@@ -40,7 +40,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 
 - **Hybrid retrieval** — BGE-M3 dense + sparse search fused with RRF in Milvus.
 - **Reranked, filtered context** — cross-encoder reranking, dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression.
-- **Parent-child chunking** — retrieve on small chunks, feed the LLM the larger parent passage.
+- **Title-path + parent-child chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees.
 - **Agentic chat** — Deep Agents workflow with multi-turn sessions, SSE streaming, and retrieval exposed as a tool.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) and optional faithfulness verification that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
@@ -189,7 +189,7 @@ flowchart LR
     A --> O[Answer with citations]
 ```
 
-**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware and parent-child chunking → content-hash deduplication against Milvus → BGE-M3 dense + sparse encoding → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
+**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against Milvus → BGE-M3 dense + sparse encoding → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
 **Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense + sparse ANN search with RRF fusion → cross-encoder reranking (logits converted with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → agent and LLM → citation normalization → optional faithfulness check.
 
@@ -290,7 +290,7 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 <details>
 <summary><strong>Full variable list</strong> — chunking, embedding, agent, and tracing</summary>
 
-**Chunking** — `CHUNK_SIZE` (`1000`), `CHUNK_OVERLAP` (`200`), `CHUNK_SIZE_PDF` (`600`), `CHUNK_OVERLAP_PDF` (`100`), `CHUNK_SIZE_DOCX` (`800`), `CHUNK_OVERLAP_DOCX` (`150`), `CHUNK_SIZE_TXT` (`1000`), `CHUNK_OVERLAP_TXT` (`200`), `CHUNK_SIZE_TABLE` (`1500`), `CHUNK_SIZE_PARENT` (`2500`), `CHUNK_OVERLAP_PARENT` (`300`).
+**Chunking** — `CHUNK_SIZE` (`1000`), `CHUNK_OVERLAP` (`200`), `CHUNK_SIZE_PDF` (`600`), `CHUNK_OVERLAP_PDF` (`100`), `CHUNK_SIZE_DOCX` (`800`), `CHUNK_OVERLAP_DOCX` (`150`), `CHUNK_SIZE_TXT` (`1000`), `CHUNK_OVERLAP_TXT` (`200`), `CHUNK_SIZE_TABLE` (`1500`), `CHUNK_SIZE_PARENT` (`2500`), `CHUNK_OVERLAP_PARENT` (`300`), `CHUNKING_STRATEGY` (`title_path`; set `parent_child` to keep header paths out of retrieval text).
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 

@@ -63,3 +63,23 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
   检索排序是确定的）。极差非 0 时先修不确定性来源，再比 A/B。
 - judge 层：同配置重复跑，极差即噪声；50 题时 1 题占 2 分，<5 题的
   翻转不算赢（95% 区间约 ±11 分）。
+
+## 切块策略（title_path 默认）
+
+Markdown 默认 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路径: H1 > H2 > H3`，
+`CHUNK_SIZE` 与 `parent_child` 对齐，98 题 gold 三元组可复用。对比数据见
+`reports/baseline/retrieval-baseline-98q-titlepath-compare.md`。改策略后必须重建
+Milvus 集合，否则检索正文与标注切块不一致。
+
+## 最终 k 截断模拟（不重跑检索）
+
+用已落盘的 `.retrieval.json`，把每阶段排序截到 `FINAL_CONTEXT_K` 候选值再算分：
+
+```bash
+ragmate-eval cutoff \
+  --checkpoint eval/reports/baseline/retrieval-baseline-98q.retrieval.json \
+  --final-ks 5 10 15
+```
+
+默认读 checkpoint manifest 里的题库路径；结果写 `<stem>-cutoff.json` / `.md`。
+98 题样例结论见 `reports/baseline/retrieval-baseline-98q-cutoff.md`。

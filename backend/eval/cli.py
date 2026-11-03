@@ -487,6 +487,31 @@ def main():
     check_gold_parser.add_argument("--corpus", type=str, default="eval/testsets/sample/corpus", help="Corpus directory used to reproduce chunking")
     check_gold_parser.add_argument("--live", action="store_true", help="Also verify gold chunks exist in the live Milvus index")
 
+    cutoff_parser = subparsers.add_parser(
+        "cutoff",
+        help="Simulate FINAL_CONTEXT_K cutoffs from a .retrieval.json checkpoint (no re-retrieval)",
+    )
+    cutoff_parser.add_argument(
+        "--checkpoint", type=str, required=True,
+        help="Path to <report>.retrieval.json ranked-list checkpoint",
+    )
+    cutoff_parser.add_argument(
+        "--testset", type=str, default=None,
+        help="Golden test set (defaults to path recorded in the checkpoint manifest)",
+    )
+    cutoff_parser.add_argument(
+        "--final-ks", type=int, nargs="+", default=[5, 10, 15],
+        help="Final context window sizes to simulate (default: 5 10 15)",
+    )
+    cutoff_parser.add_argument(
+        "--stages", type=str, default=None,
+        help="Comma-separated stages subset (default: stages in the checkpoint)",
+    )
+    cutoff_parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output JSON path (default: <checkpoint-stem>-cutoff.json)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -499,3 +524,5 @@ def main():
         cmd_retrieval(args)
     elif args.command == "check-gold":
         cmd_check_gold(args)
+    elif args.command == "cutoff":
+        cmd_cutoff(args)

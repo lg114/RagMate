@@ -210,10 +210,49 @@ def test_run_retrieval_eval_requires_existing_collection(monkeypatch):
 def test_shipped_golden_set_passes_schema_and_inventory():
     testset_path = resolve_path("eval/testsets/sample/testset.json")
     cases = load_golden_testset(testset_path)
-    assert len(cases) == 50
-    assert sum(1 for c in cases if c["gold_chunks"]) == 48
-    assert sum(1 for c in cases if not c["gold_chunks"]) == 2
+    assert len(cases) == 98
+    assert sum(1 for c in cases if c["gold_chunks"]) == 91
+    assert sum(1 for c in cases if not c["gold_chunks"]) == 7
     from backend.eval.retrieval_eval import build_chunk_inventory, verify_gold_in_inventory
     inventory = build_chunk_inventory(resolve_path("eval/testsets/sample/corpus"))
     assert len(inventory) == 67
     assert verify_gold_in_inventory(cases, inventory) == []
+
+
+def test_simulate_final_ks_truncation_exposes_missed_gold(tmp_path):
+    from backend.eval.retrieval_eval import simulate_final_ks, write_cutoff_report
+
+    # Three golds at ranks 2, 4, 6 — final_k=5 misses one; final_k=10 catches all.
+    records = [
+        {"rank": i, "source": "a.md", "page": None, "chunk_index": i,
+         "score": 1.0 - i * 0.01, "text_preview": f"c{i}"}
+        for i in range(1, 11)
+    ]
+    # Place golds at chunk_index 2, 4, 6 which sit at ranks 2, 4, 6
+    checkpoint = {
+        "manifest": {"harness": {"stages": ["reranked"]}},
+        "cases": [{"index": 0, "user_input": "q"}],
+        "stages": {"0": {"reranked": records}},
+    }
+    cases = [{
+        "user_input": "q",
+        "reference": "r",
+        "gold_chunks": [
+            {"source": "a.md", "page": None, "chunk_index": 2},
+            {"source": "a.md", "page": None, "chunk_index": 4},
+            {"source": "a.md", "page": None, "chunk_index": 6},
+        ],
+        "expected_claims": ["c"],
+        "question_type": "multi-hop",
+        "source_doc": "a.md",
+    }]
+    result = simulate_final_ks(checkpoint, cases, final_ks=(5, 10), stages=["reranked"])
+    at5 = result["by_final_k"]["5"]["reranked"]
+    at10 = result["by_final_k"]["10"]["reranked"]
+    assert at5["summary"]["recall"] == pytest.approx(2 / 3, abs=1e-4)
+    assert at5["n_incomplete"] == 1
+    assert at10["summary"]["recall"] == pytest.approx(1.0)
+    assert at10["n_incomplete"] == 0
+    out = write_cutoff_report(result, tmp_path / "x.retrieval.json", tmp_path / "x-cutoff.json")
+    assert out.exists()
+    assert out.with_suffix(".md").exists()

@@ -40,7 +40,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 
 - **混合检索** — BGE-M3 稠密 + 稀疏检索，在 Milvus 中用 RRF 融合。
 - **重排序与过滤后的上下文** — 交叉编码器重排序、动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。
-- **父子分块** — 用小片段检索，把更大的父片段交给 LLM。
+- **标题路径 + 父子分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。
 - **Agent 对话** — Deep Agents 工作流，支持多轮会话、SSE 流式输出，检索以工具形式暴露给 Agent。
 - **回答质量信号** — 检索置信度（`high` / `medium` / `low`），以及可选的忠实度校验，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
@@ -189,7 +189,7 @@ flowchart LR
     A --> O[带引用的回答]
 ```
 
-**入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分与父子分块 → 基于 content-hash 对 Milvus 去重 → BGE-M3 稠密 + 稀疏编码 → 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
+**入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 Milvus 去重 → BGE-M3 稠密 + 稀疏编码 → 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
 
 **查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 + 稀疏 ANN 检索并用 RRF 融合 → 交叉编码器重排序（logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → Agent 与 LLM → 引用规整 → 可选忠实度校验。
 
@@ -290,7 +290,7 @@ data: {"error": "..."}                               // 终止性错误
 <details>
 <summary><strong>完整配置项</strong> — 分块、嵌入、Agent 与链路追踪</summary>
 
-**分块** — `CHUNK_SIZE` (`1000`)、`CHUNK_OVERLAP` (`200`)、`CHUNK_SIZE_PDF` (`600`)、`CHUNK_OVERLAP_PDF` (`100`)、`CHUNK_SIZE_DOCX` (`800`)、`CHUNK_OVERLAP_DOCX` (`150`)、`CHUNK_SIZE_TXT` (`1000`)、`CHUNK_OVERLAP_TXT` (`200`)、`CHUNK_SIZE_TABLE` (`1500`)、`CHUNK_SIZE_PARENT` (`2500`)、`CHUNK_OVERLAP_PARENT` (`300`)。
+**分块** — `CHUNK_SIZE` (`1000`)、`CHUNK_OVERLAP` (`200`)、`CHUNK_SIZE_PDF` (`600`)、`CHUNK_OVERLAP_PDF` (`100`)、`CHUNK_SIZE_DOCX` (`800`)、`CHUNK_OVERLAP_DOCX` (`150`)、`CHUNK_SIZE_TXT` (`1000`)、`CHUNK_OVERLAP_TXT` (`200`)、`CHUNK_SIZE_TABLE` (`1500`)、`CHUNK_SIZE_PARENT` (`2500`)、`CHUNK_OVERLAP_PARENT` (`300`)、`CHUNKING_STRATEGY`（默认 `title_path`；改回 `parent_child` 则标题路径不进检索正文）。
 
 重叠长度必须小于对应分块大小，否则启动时会抛出校验错误。
 
