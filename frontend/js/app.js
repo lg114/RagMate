@@ -1,33 +1,88 @@
-import { on, emit } from './event-bus.js';
+import { on } from './event-bus.js';
+import { applyTheme, getThemeChoice } from './prefs.js';
+import { initModal } from './modal.js';
 import { ChatPanel } from './chat.js';
 import { HistoryPanel } from './history.js';
 import { DocumentsPanel } from './documents.js';
+import { SettingsPanel } from './settings.js';
+import { SourcePanel } from './sources.js';
 
-function switchView(tab) {
-  document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
-  document.querySelector(`.sidebar-tab[data-tab="${tab}"]`)?.classList.add('active');
-  document.getElementById('view-chat').classList.toggle('hidden', tab !== 'chat');
-  document.getElementById('view-documents').classList.toggle('hidden', tab !== 'documents');
-  if (tab === 'documents') {
-    DocumentsPanel.load();
-    DocumentsPanel.checkIngestStatus();
-  }
+const TITLES = { chat: '对话', documents: '文档', settings: '设置' };
+
+function setNavOpen(open) {
+  document.getElementById('shell').classList.toggle('nav-open', open);
+  document.getElementById('btn-nav-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  document.getElementById('nav-scrim').hidden = !open;
+}
+
+function switchView(name) {
+  if (!TITLES[name]) return;
+  Object.keys(TITLES).forEach((view) => {
+    const section = document.getElementById(`view-${view}`);
+    if (section) section.hidden = view !== name;
+    const tab = document.querySelector(`.nav-tab[data-view="${view}"]`);
+    if (!tab) return;
+    const active = view === name;
+    tab.classList.toggle('is-active', active);
+    if (active) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  });
+  document.getElementById('nav-sessions').hidden = name !== 'chat';
+  document.getElementById('view-title').textContent = TITLES[name];
+  document.getElementById('chat-context').hidden = name !== 'chat';
+  document.title = `RagMate · ${TITLES[name]}`;
+  setNavOpen(false);
+  if (name === 'documents') DocumentsPanel.onShow();
+  if (name === 'settings') SettingsPanel.onShow();
+  if (name === 'chat') ChatPanel.onShow();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  try { ChatPanel.init(); } catch (e) { console.error('ChatPanel init failed:', e); }
-  try { HistoryPanel.init(); } catch (e) { console.error('HistoryPanel init failed:', e); }
-  try { DocumentsPanel.init(); } catch (e) { console.error('DocumentsPanel init failed:', e); }
-
-  document.querySelectorAll('.sidebar-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const tabId = tab.dataset.tab;
-      switchView(tabId);
-      emit('view:switch', tabId);
-    });
+  applyTheme(getThemeChoice());
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  media.addEventListener?.('change', () => {
+    if (getThemeChoice() === 'system') applyTheme('system');
   });
 
-  on('view:switch', (tab) => switchView(tab));
+  initModal();
+  SourcePanel.init();
+  ChatPanel.init();
+  HistoryPanel.init();
+  DocumentsPanel.init();
+  SettingsPanel.init();
 
-  window.addEventListener('beforeunload', () => DocumentsPanel.stopPolling());
+  document.querySelectorAll('.nav-tab').forEach((tab) => {
+    tab.addEventListener('click', () => switchView(tab.dataset.view));
+  });
+  document.getElementById('btn-nav-toggle').addEventListener('click', () => {
+    const open = !document.getElementById('shell').classList.contains('nav-open');
+    setNavOpen(open);
+  });
+  document.getElementById('nav-scrim').addEventListener('click', () => setNavOpen(false));
+  document.getElementById('btn-ready').addEventListener('click', () => switchView('settings'));
+
+  on('view:switch', (name) => switchView(name));
+  on('shell:context', (text) => {
+    document.getElementById('chat-context').textContent = text || '新对话';
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (document.getElementById('confirm-dialog')?.open) return;
+      const sourceOpen = !document.getElementById('source-panel').hidden;
+      if (sourceOpen) return;
+      if (document.getElementById('shell').classList.contains('nav-open')) setNavOpen(false);
+      return;
+    }
+    if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+      const map = { 1: 'chat', 2: 'documents', 3: 'settings' };
+      if (map[event.key]) {
+        event.preventDefault();
+        switchView(map[event.key]);
+      }
+    }
+  });
+
+  window.setInterval(() => SettingsPanel.refreshReady({ quiet: true }), 30000);
+  window.addEventListener('beforeunload', () => clearTimeout(DocumentsPanel.pollTimer));
 });

@@ -136,10 +136,13 @@ uvicorn backend.app:app --reload --port 8000
 
 ## 首次使用
 
-1. 打开 **文档** 标签页，上传一个或多个支持的文件。
-2. 触发入库，等待状态变为 `success`。
+1. 打开 **文档**，上传一个或多个支持的文件。
+2. 入库未处理的文件，等页面上的进度条结束。
 3. 打开 **对话**，针对已索引文档提问。
-4. 通过返回的引用查看原始内容片段。
+4. 点击引用，查看来源文件、页码、入库状态；打开检索调试时还可以看到命中的片段。
+5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL、Redis、Milvus 是否就绪。
+
+界面仍是零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。
 
 支持格式：`.pdf`、`.docx`、`.xlsx`、`.xls`、`.txt`、`.md`。默认单文件上传上限为 50 MB。
 
@@ -160,7 +163,7 @@ RagMate/
 │   ├── infrastructure/     # config、database、redis、milvus、encoding、model_factory
 │   ├── eval/               # RAGAS 评测 CLI（可选依赖）
 │   └── tests/
-└── frontend/               # 零构建原生 HTML/CSS/JS，由 FastAPI 托管
+└── frontend/               # 零构建界面（对话 / 文档 / 设置），由 FastAPI 挂在 /
 ```
 
 ---
@@ -256,7 +259,7 @@ data: {"error": "..."}                               // 终止性错误
 
 非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
 
-只有请求带 `"debug": true` 时才会返回 `retrieval_debug`。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。对话页的「检索调试」开关会带上这个标志。平时关掉；preview 是文档原文片段。
+只有请求带 `"debug": true` 时才会返回 `retrieval_debug`。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。输入框和 **设置** 页共用「检索调试」开关，选择会记在浏览器里。平时关掉；preview 是文档原文片段。
 
 ---
 

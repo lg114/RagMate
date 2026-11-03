@@ -1,113 +1,160 @@
 import { API } from './api.js';
-import { escapeHtml, formatTime, getDateKey, formatDateSeparator } from './utils.js';
+import { formatTime, getDateKey, formatDateSeparator } from './utils.js';
 import { showConfirm } from './modal.js';
 import { on, emit } from './event-bus.js';
 import { ChatPanel } from './chat.js';
 
 export const HistoryPanel = {
-  listEl: document.getElementById('history-list'),
+  listEl: null,
+  searchEl: null,
+  sessions: [],
   activeId: null,
+  query: '',
 
   init() {
+    this.listEl = document.getElementById('history-list');
+    this.searchEl = document.getElementById('session-search');
     document.getElementById('btn-refresh-sessions').addEventListener('click', () => this.load());
-    this.load();
-
+    this.searchEl.addEventListener('input', () => {
+      this.query = this.searchEl.value.trim().toLowerCase();
+      this.render(this.sessions);
+    });
     on('history:refresh', () => this.load());
+    on('history:active', (id) => {
+      this.activeId = id;
+      this.render(this.sessions);
+    });
+    const stored = sessionStorage.getItem('ragmate_session_id');
+    if (stored) this.activeId = stored;
+    this.load();
   },
 
   async load() {
-    this.listEl.innerHTML = Array.from({length: 3}, () =>
-      `<div class="skeleton-history"><div class="skeleton skeleton-bar w-40"></div><div class="skeleton skeleton-bar w-20"></div></div>`
-    ).join('');
+    if (!this.sessions.length) {
+      this.listEl.replaceChildren();
+      this.listEl.append(skeletonLines(3));
+    }
     try {
       const data = await API.getSessions();
-      this.render(data.sessions || []);
+      this.sessions = data.sessions || [];
+      this.render(this.sessions);
     } catch (err) {
-      this.render([]);
+      this.listEl.replaceChildren();
+      const empty = document.createElement('p');
+      empty.className = 'history-empty';
+      empty.textContent = err.message || '会话加载失败';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-ghost';
+      retry.textContent = '重试';
+      retry.addEventListener('click', () => this.load());
+      this.listEl.append(empty, retry);
     }
   },
 
   render(sessions) {
-    this.listEl.innerHTML = '';
-    if (sessions.length === 0) {
-      this.listEl.innerHTML = '<div class="history-empty">暂无记录</div>';
+    const filtered = this.query
+      ? sessions.filter((session) => (session.first_message || '').toLowerCase().includes(this.query))
+      : sessions;
+    this.listEl.replaceChildren();
+    if (!sessions.length) {
+      const empty = document.createElement('p');
+      empty.className = 'history-empty';
+      empty.textContent = '还没有对话。提问之后会出现在这里。';
+      this.listEl.append(empty);
+      return;
+    }
+    if (!filtered.length) {
+      const empty = document.createElement('p');
+      empty.className = 'history-empty';
+      empty.textContent = '没有匹配的会话';
+      this.listEl.append(empty);
       return;
     }
 
-    let lastDateKey = '';
-    sessions.forEach(s => {
-      const dateKey = getDateKey(s.created_at);
-      if (dateKey !== lastDateKey) {
-        lastDateKey = dateKey;
+    let lastDate = '';
+    filtered.forEach((session) => {
+      const dateKey = getDateKey(session.created_at);
+      if (dateKey !== lastDate) {
+        lastDate = dateKey;
         const sep = document.createElement('div');
-        sep.className = 'history-date-separator';
-        sep.innerHTML = `
-          <span class="timeline-line"></span>
-          <span class="timeline-node"></span>
-          <span class="timeline-label">${escapeHtml(formatDateSeparator(s.created_at))}</span>
-        `;
-        this.listEl.appendChild(sep);
+        sep.className = 'history-date';
+        sep.textContent = formatDateSeparator(session.created_at);
+        this.listEl.append(sep);
       }
+      const item = document.createElement('div');
+      item.className = 'history-item';
+      item.setAttribute('role', 'listitem');
+      if (session.session_id === this.activeId) item.classList.add('is-active');
 
-      const btn = document.createElement('button');
-      btn.className = 'history-item' + (s.session_id === this.activeId ? ' active' : '');
-      btn.setAttribute('role', 'listitem');
-      btn.innerHTML = `
-        <div class="history-item-preview">${escapeHtml(s.first_message)}</div>
-        <div class="history-item-bottom">
-          <div class="history-item-time">${formatTime(s.created_at)}</div>
-          <span class="history-item-delete" role="button" tabindex="0" title="删除" aria-label="删除会话">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-          </span>
-        </div>
-      `;
-      btn.addEventListener('click', (e) => {
-        if (e.target.closest('.history-item-delete')) {
-          e.stopPropagation();
-          this.deleteSession(s.session_id);
-          return;
-        }
-        this.selectSession(s.session_id);
-      });
-      this.listEl.appendChild(btn);
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'history-open';
+      if (session.session_id === this.activeId) open.setAttribute('aria-current', 'true');
+      const preview = document.createElement('span');
+      preview.className = 'history-preview';
+      preview.textContent = session.first_message || '空对话';
+      const time = document.createElement('span');
+      time.className = 'history-time';
+      time.textContent = formatTime(session.created_at);
+      open.append(preview, time);
+      open.addEventListener('click', () => this.selectSession(session));
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'history-delete';
+      del.setAttribute('aria-label', `删除会话：${session.first_message || '空对话'}`);
+      del.textContent = '删除';
+      del.addEventListener('click', () => this.deleteSession(session.session_id));
+
+      item.append(open, del);
+      this.listEl.append(item);
     });
   },
 
   async deleteSession(sessionId) {
-    if (!await showConfirm('确定删除该会话？')) return;
+    const ok = await showConfirm('删除这个会话？对话记录会从服务器移除。', {
+      confirmLabel: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await API.deleteSession(sessionId);
-      const currentSessionId = sessionStorage.getItem('ragmate_session_id');
-      if (this.activeId === sessionId || currentSessionId === sessionId) {
+      const current = sessionStorage.getItem('ragmate_session_id');
+      if (this.activeId === sessionId || current === sessionId) {
         this.activeId = null;
-        ChatPanel.clear();
+        ChatPanel.startNew();
+        return;
       }
       this.load();
     } catch (err) {
-      ChatPanel.showError('删除失败: ' + (err.message || '未知错误'));
+      ChatPanel.showError(err.message || '删除失败');
     }
   },
 
-  async selectSession(sessionId) {
-    this.activeId = sessionId;
-    sessionStorage.setItem('ragmate_session_id', sessionId);
-    this.render(await this._fetchSessions());
-
-    try {
-      const data = await API.getHistory(sessionId);
-      ChatPanel.loadMessages(data.messages || []);
-    } catch (err) {
-      ChatPanel.showError('加载历史记录失败');
-    }
-
+  async selectSession(session) {
+    this.activeId = session.session_id;
+    sessionStorage.setItem('ragmate_session_id', session.session_id);
+    this.render(this.sessions);
     emit('view:switch', 'chat');
-  },
-
-  async _fetchSessions() {
     try {
-      return (await API.getSessions()).sessions || [];
+      const data = await API.getHistory(session.session_id);
+      emit('chat:load-messages', {
+        messages: data.messages || [],
+        title: session.first_message || '历史对话',
+      });
     } catch (err) {
-      return [];
+      ChatPanel.showError(err.message || '加载历史记录失败');
     }
-  }
+  },
 };
+
+function skeletonLines(count) {
+  const wrap = document.createDocumentFragment();
+  for (let i = 0; i < count; i += 1) {
+    const row = document.createElement('div');
+    row.className = 'skeleton-line';
+    wrap.append(row);
+  }
+  return wrap;
+}
