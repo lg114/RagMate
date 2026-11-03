@@ -75,11 +75,15 @@ def _extract_stage_records(results) -> list[dict]:
 
 
 def _search_dense(client, dense_vec, over_fetch):
+    # NOTE: MilvusClient.search takes the params as `search_params`, not
+    # `param` — it forwards `param=search_params` to the gRPC handler
+    # itself, so a `param=` kwarg here arrives twice and raises
+    # "got multiple values for keyword argument 'param'".
     return client.search(
         collection_name=settings.MILVUS_COLLECTION,
         data=[dense_vec],
         anns_field="dense",
-        param={"metric_type": "IP", "params": {}},
+        search_params={"metric_type": "IP", "params": {}},
         limit=over_fetch,
         output_fields=["text", "parent_text", "metadata"],
     )
@@ -90,7 +94,7 @@ def _search_sparse(client, sparse_vec, over_fetch):
         collection_name=settings.MILVUS_COLLECTION,
         data=[sparse_vec],
         anns_field="sparse",
-        param={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
+        search_params={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
         limit=over_fetch,
         output_fields=["text", "parent_text", "metadata"],
     )
