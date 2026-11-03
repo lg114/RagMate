@@ -35,11 +35,11 @@ class _FakeClient:
         self.calls = []
 
     def search(self, **kwargs):
-        self.calls.append(("search", kwargs.get("anns_field")))
+        self.calls.append(("search", kwargs))
         return [self._hits]
 
     def hybrid_search(self, **kwargs):
-        self.calls.append(("hybrid_search", None))
+        self.calls.append(("hybrid_search", kwargs))
         return [self._hits]
 
 
@@ -66,8 +66,39 @@ def test_run_stages_dense_sparse_fused_use_same_vectors(monkeypatch):
     out = run_stages(client, "q", ["dense", "sparse", "fused"], over_fetch=10)
     assert set(out) == {"dense", "sparse", "fused"}
     assert encoded == ["q"]
-    assert [c[1] for c in client.calls if c[0] == "search"] == ["dense", "sparse"]
-    assert ("hybrid_search", None) in client.calls
+    search_calls = [kw for kind, kw in client.calls if kind == "search"]
+    assert [kw["anns_field"] for kw in search_calls] == ["dense", "sparse"]
+    assert any(kind == "hybrid_search" for kind, _ in client.calls)
+
+
+def test_search_calls_use_search_params_not_param(monkeypatch):
+    """Regression: MilvusClient.search takes `search_params`; a `param=`
+    kwarg is forwarded twice by the client and raises TypeError."""
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    client = _FakeClient(HITS)
+    run_stages(client, "q", ["dense", "sparse"], over_fetch=10)
+    search_calls = [kw for kind, kw in client.calls if kind == "search"]
+    assert len(search_calls) == 2
+    for kw in search_calls:
+        assert "param" not in kw
+        assert kw["search_params"]["metric_type"] == "IP"
+    assert search_calls[0]["search_params"] == {"metric_type": "IP", "params": {}}
+    assert search_calls[1]["search_params"]["params"]["drop_ratio_search"] == 0.2
+
+
+def test_do_search_dense_branch_uses_search_params(override_settings):
+    """Same latent bug in the production dense-only path (hybrid off):
+    it must call client.search with `search_params`, not `param=`."""
+    from backend.core.retriever import _do_search
+
+    override_settings(HYBRID_SEARCH_ENABLED=False)
+    client = _FakeClient(HITS)
+    results = _do_search(client, [0.1], "sparse-vec", over_fetch=10)
+    assert results == [HITS]
+    assert len(client.calls) == 1
+    _, kw = client.calls[0]
+    assert "param" not in kw
+    assert kw["search_params"] == {"metric_type": "IP", "params": {}}
 
 
 def test_run_stages_reranked_reorders_by_score_pairs(monkeypatch):

@@ -249,11 +249,14 @@ def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
             output_fields=["text", "parent_text", "metadata"],
         )
     else:
+        # NOTE: MilvusClient.search takes `search_params`, not `param`
+        # (it forwards param= itself; a `param=` kwarg arrives twice and
+        # raises "got multiple values for keyword argument 'param'").
         return client.search(
             collection_name=settings.MILVUS_COLLECTION,
             data=[dense_vec],
             anns_field="dense",
-            param={"metric_type": "IP", "params": {}},
+            search_params={"metric_type": "IP", "params": {}},
             limit=over_fetch,
             output_fields=["text", "parent_text", "metadata"],
         )
