@@ -28,6 +28,9 @@ async def chat_endpoint(body: ChatRequest, request: Request):
         response=result["response"],
         session_id=result["session_id"],
         confidence=result.get("confidence"),
+        unsupported_claims=result.get("unsupported_claims"),
+        citations=result.get("citations"),
+        grounding=result.get("grounding"),
     )
 
 

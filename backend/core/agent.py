@@ -31,6 +31,34 @@ def pop_retrieval_data(session_id: str) -> dict | None:
         return _contexts.pop(session_id, None)
 
 
+def remember_retrieval(ctx: dict | None, results: list[dict], metrics: dict | None) -> None:
+    """把本次检索的指标、正文和引用记入 session 上下文。
+
+    空结果也会记一条指标（returned=0），这样上层能把「检索过但没有依据」
+    和「根本没检索」（寒暄直连 LLM）区分开。
+    """
+    if ctx is None:
+        return
+    if metrics:
+        ctx.setdefault("metrics", []).append(metrics)
+    elif not results:
+        ctx.setdefault("metrics", []).append({
+            "top_score": 0.0,
+            "returned": 0,
+            "candidates": 0,
+        })
+    if not results:
+        return
+    ctx.setdefault("texts", []).extend(r.get("text", "") for r in results)
+    citations = ctx.setdefault("citations", [])
+    for item in results:
+        citations.append({
+            "source": item.get("source") or "unknown",
+            "page": item.get("page"),
+            "chunk_index": item.get("chunk_index"),
+        })
+
+
 # ── System Prompt ───────────────────────────────────────────────────────────
 def _load_system_prompt() -> str:
     return (Path(__file__).parent / "prompts" / "researcher.md").read_text(encoding="utf-8")
@@ -70,16 +98,10 @@ def retrieval_tool(query: str) -> str:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
     except AppError:
         return "检索服务暂时不可用，请稍后重试"
+    from backend.core.retriever import get_retrieval_metrics
+    remember_retrieval(ctx, results, get_retrieval_metrics())
     if not results:
         return "未找到相关文档"
-
-    # 收集检索质量指标和结果（用于 confidence 和 faithfulness check）
-    from backend.core.retriever import get_retrieval_metrics
-    metrics = get_retrieval_metrics()
-    if ctx and metrics:
-        ctx["metrics"].append(metrics)
-    if ctx:
-        ctx["texts"].extend(r.get("text", "") for r in results)
 
     parts = []
     for r in results:

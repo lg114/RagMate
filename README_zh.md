@@ -42,7 +42,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - **重排序与过滤后的上下文** — 交叉编码器重排序、动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。
 - **标题路径 + 父子分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。
 - **Agent 对话** — Deep Agents 工作流，支持多轮会话、SSE 流式输出，检索以工具形式暴露给 Agent。
-- **回答质量信号** — 检索置信度（`high` / `medium` / `low`），以及可选的忠实度校验，标记缺乏依据的声明。
+- **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
 - **内置评测** — 可选 RAGAS CLI，支持测试集生成、打分和 CI 质量门禁。
 - **自托管设计** — PostgreSQL、Redis、Milvus、MinIO 全部通过 Docker Compose 运行。
@@ -191,7 +191,7 @@ flowchart LR
 
 **入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 Milvus 去重 → BGE-M3 稠密 + 稀疏编码 → 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
 
-**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 + 稀疏 ANN 检索并用 RRF 融合 → 交叉编码器重排序（logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → Agent 与 LLM → 引用规整 → 可选忠实度校验。
+**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 + 稀疏 ANN 检索并用 RRF 融合 → 交叉编码器重排序（logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → Agent 与 LLM → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。
 
 简单的寒暄类问题会绕过 Agent，直接路由到 LLM。
 
@@ -240,15 +240,18 @@ curl -X POST http://localhost:8000/chat \
 data: {"token": "检索增强生成..."}                     // 增量文本
 
 data: {"done": true, "session_id": "...",
+       "response": "落地后的回答…",
        "confidence": {"level": "high", "score": 0.87, "chunks": 6},
+       "citations": [{"source": "guide.pdf", "page": 3}],
+       "grounding": "grounded",
        "unsupported_claims": [{"claim": "...", "supported": false}]}
 
 data: {"error": "..."}                               // 终止性错误
 ```
 
-空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence` 和 `unsupported_claims` 只出现在 `done` 事件中；`unsupported_claims` 仅在开启 `FAITHFULNESS_CHECK` 且存在未通过校验的声明时出现。
+空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence`、`citations`、`grounding` 和 `unsupported_claims` 只出现在 `done` 事件中。该事件里的 `response` 是落地后的文本（拒答、低置信保留、以及真实来源行），客户端应用它替换已经流出的 token。`unsupported_claims` 在忠实度校验发现无依据声明时出现。`grounding` 取值为 `refused`、`hedged`、`grounded`；没有发生检索时省略。
 
-非流式的 `POST /chat` 会在 JSON 响应体中返回同样的 `confidence` 与 `unsupported_claims`；未发生检索时（例如寒暄类问题直连 LLM）这两个字段为 `null`。
+非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
 
 ---
 
@@ -285,7 +288,7 @@ data: {"error": "..."}                               // 终止性错误
 | `CONTEXTUAL_COMPRESSION` | `true` | 只保留片段内的相关句子 |
 | `QUERY_CONTEXTUALIZE` | `true` | 将追问改写为独立 query |
 | `QUERY_ROUTING_ENABLED` | `true` | 寒暄类问题跳过 Agent |
-| `FAITHFULNESS_CHECK` | `false` | 每次回答额外增加一次 LLM 调用 |
+| `FAITHFULNESS_CHECK` | `true` | 每次 RAG 回答额外一次 LLM 调用；校验失败时忽略，仍返回答案 |
 
 <details>
 <summary><strong>完整配置项</strong> — 分块、嵌入、Agent 与链路追踪</summary>

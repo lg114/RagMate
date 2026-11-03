@@ -129,6 +129,87 @@ def normalize_citations(text: str) -> str:
     return f"{cleaned}\n\n{source_line}" if cleaned else source_line
 
 
+def citation_label(citation: dict) -> str:
+    """把一条检索引用格式化成【文件名, 第N页】（页码从 1 开始）。"""
+    source = str(citation.get("source") or "unknown").replace("\\", "/")
+    name = source.rsplit("/", 1)[-1] or source
+    page = citation.get("page")
+    if isinstance(page, int) and not isinstance(page, bool):
+        return f"【{name}, 第{page + 1}页】"
+    return f"【{name}】"
+
+
+def public_citations(citations: list[dict] | None) -> list[dict]:
+    """整理对外引用：只保留文件名与从 1 开始的页码，不包含片段正文或分数。"""
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    for citation in citations or []:
+        source = str(citation.get("source") or "unknown").replace("\\", "/")
+        name = source.rsplit("/", 1)[-1] or source
+        page = citation.get("page")
+        page_out = page + 1 if isinstance(page, int) and not isinstance(page, bool) else None
+        key = (name, page_out)
+        if key in seen:
+            continue
+        seen.add(key)
+        item = {"source": name}
+        if page_out is not None:
+            item["page"] = page_out
+        out.append(item)
+    return out
+
+
+def attach_citations(text: str, citations: list[dict] | None) -> str:
+    """用实际检索到来源写「数据来源」行，覆盖模型自己编造的来源行。"""
+    labels: list[str] = []
+    seen: set[str] = set()
+    for citation in citations or []:
+        label = citation_label(citation)
+        if label not in seen:
+            seen.add(label)
+            labels.append(label)
+    if not labels:
+        return text
+    cleaned = _SOURCE_LINE_RE.sub("", text).strip()
+    source_line = "数据来源：" + "、".join(labels)
+    return f"{cleaned}\n\n{source_line}" if cleaned else source_line
+
+
+_LOW_CONFIDENCE_HEDGE = "检索置信度较低，以下内容可能不完整或不准确，请对照引用来源核对后再采信。"
+_NO_EVIDENCE_REFUSAL = "没有找到足够相关的资料，无法可靠回答这个问题。请换个问法，或确认相关文档已经入库。"
+_UNSUPPORTED_NOTE = "注意：部分说法未能在检索资料中找到依据，请以上方引用来源为准。"
+
+
+def apply_grounding(text: str, confidence: dict | None, citations: list[dict] | None) -> tuple[str, str | None]:
+    """按检索置信度收紧回答。
+
+    没有检索信号时原样返回。检索过但一个片段都没留下时拒答，
+    低置信但仍有片段时在答案前加明确保留，并始终附上真实引用。
+
+    Returns:
+        (回答文本, grounding)。grounding 为 "refused"、"hedged"、"grounded" 或 None。
+    """
+    if not confidence:
+        return text, None
+    level = confidence.get("level")
+    chunks = int(confidence.get("chunks") or 0)
+    if level == "low" and chunks <= 0:
+        return _NO_EVIDENCE_REFUSAL, "refused"
+    grounded = attach_citations(text, citations)
+    if level == "low":
+        if not grounded.startswith(_LOW_CONFIDENCE_HEDGE):
+            grounded = f"{_LOW_CONFIDENCE_HEDGE}\n\n{grounded}" if grounded else _LOW_CONFIDENCE_HEDGE
+        return grounded, "hedged"
+    return grounded, "grounded"
+
+
+def note_unsupported_claims(text: str, unsupported: list[dict] | None) -> str:
+    """有未通过忠实度校验的声明时，在答案末尾加一句可见的保留说明。"""
+    if not unsupported or _UNSUPPORTED_NOTE in text:
+        return text
+    return f"{text}\n\n{_UNSUPPORTED_NOTE}" if text else _UNSUPPORTED_NOTE
+
+
 def _is_error_response(text: str) -> bool:
     return text.startswith(_ERROR_SENTINEL)
 
@@ -175,27 +256,31 @@ def _classify_error(e: Exception) -> str:
 
 async def _pop_retrieval_signals(
     session_id: str, response_text: str, is_error: bool
-) -> tuple[dict | None, list[dict] | None]:
-    """取出本次问答的检索数据，计算置信度与（可选的）无依据声明。
+) -> tuple[dict | None, list[dict] | None, list[dict]]:
+    """取出本次问答的检索数据，计算置信度、引用与（可选的）无依据声明。
 
     一次问答只能调用一次：pop_retrieval_data 会清除该 session 的 agent 上下文。
 
     Returns:
-        (confidence, unsupported_claims)，两者都可能为 None。
+        (confidence, unsupported_claims, citations)。
         confidence 为 None 表示本次没有发生检索；
-        unsupported_claims 为 None 表示未做校验或全部通过。
+        unsupported_claims 为 None 表示未做校验或全部通过；
+        citations 为检索到的原始引用（可能为空列表）。
     """
     from backend.core.agent import pop_retrieval_data
     from backend.core.retriever import calculate_confidence, check_faithfulness
 
     rdata = pop_retrieval_data(session_id)
     if not rdata:
-        return None, None
+        return None, None, []
 
     confidence = calculate_confidence(rdata.get("metrics", []))
+    citations = list(rdata.get("citations") or [])
 
     unsupported = None
-    if not is_error and rdata.get("texts"):
+    # 没有任何留下的片段时回答会被拒答替换，不必再花一次 LLM 做忠实度校验
+    no_evidence = bool(confidence) and confidence.get("level") == "low" and int(confidence.get("chunks") or 0) <= 0
+    if not is_error and not no_evidence and rdata.get("texts"):
         # check_faithfulness 内部是同步 LLM 调用，必须挪到线程里，
         # 否则会阻塞整个事件循环
         claims = await asyncio.to_thread(check_faithfulness, response_text, rdata["texts"])
@@ -206,7 +291,33 @@ async def _pop_retrieval_signals(
                     f"Faithfulness: {len(unsupported)} unsupported claims in session={session_id[:8]}"
                 )
 
-    return confidence, unsupported
+    return confidence, unsupported, citations
+
+
+async def _ground_response(session_id: str, response_text: str, is_error: bool) -> tuple[str, dict]:
+    """弹出检索信号并按置信度改写回答。返回 (最终文本, 要并入 API 的附加字段)。"""
+    confidence, unsupported, citations = await _pop_retrieval_signals(session_id, response_text, is_error)
+    extra: dict = {}
+    if is_error:
+        if confidence:
+            extra["confidence"] = confidence
+        return response_text, extra
+
+    response_text, grounding = apply_grounding(response_text, confidence, citations)
+    if grounding == "refused":
+        unsupported = None
+    elif unsupported:
+        response_text = note_unsupported_claims(response_text, unsupported)
+    if confidence:
+        extra["confidence"] = confidence
+    if grounding:
+        extra["grounding"] = grounding
+    public = public_citations(citations) if grounding != "refused" else []
+    if public:
+        extra["citations"] = public
+    if unsupported:
+        extra["unsupported_claims"] = unsupported
+    return response_text, extra
 
 
 def _strip_last_turn(history: list[dict]) -> list[dict]:
@@ -282,30 +393,23 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
         response_text = _classify_error(e)
     elapsed = time.monotonic() - t0
 
-    # 4. 追加 assistant 消息 + 持久化（错误提示不写入历史，但用户消息需要保留）
+    # 4. 按检索置信度改写回答，再写入历史（错误提示不写入历史，但用户消息需要保留）
     is_error = _is_error_response(response_text)
+    response_text, extra = await _ground_response(session_id, response_text, is_error)
+    visible = _strip_error_sentinel(response_text)
     if is_error:
-        logger.warning(f"chat error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
+        logger.warning(f"chat error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={visible}")
     else:
-        history.append({"role": "assistant", "content": response_text})
-        logger.info(f"chat ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
+        history.append({"role": "assistant", "content": visible})
+        logger.info(f"chat ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(visible)} elapsed={elapsed:.1f}s")
     await save_session(session_id, history)
 
     msgs = [("user", message)]
     if not is_error:
-        msgs.append(("assistant", response_text))
+        msgs.append(("assistant", visible))
     await _persist_messages(session_id, msgs)
 
-    resp = {"response": _strip_error_sentinel(response_text), "session_id": session_id}
-
-    # 从 agent 上下文中取出检索数据，计算置信度与无依据声明
-    confidence, unsupported = await _pop_retrieval_signals(session_id, response_text, is_error)
-    if confidence:
-        resp["confidence"] = confidence
-    if unsupported:
-        resp["unsupported_claims"] = unsupported
-
-    return resp
+    return {"response": visible, "session_id": session_id, **extra}
 
 
 _SENTINEL = object()
@@ -402,24 +506,21 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     is_error = _is_error_response(response_text)
     elapsed = time.monotonic() - t0
 
-    # 从 agent 上下文中取出检索数据，计算置信度与无依据声明
-    confidence, unsupported = await _pop_retrieval_signals(session_id, response_text, is_error)
+    response_text, extra = await _ground_response(session_id, response_text, is_error)
+    visible = _strip_error_sentinel(response_text)
 
     if is_error:
-        logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
+        logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={visible}")
     else:
-        history.append({"role": "assistant", "content": response_text})
-        logger.info(f"chat_stream ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
+        history.append({"role": "assistant", "content": visible})
+        logger.info(f"chat_stream ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(visible)} elapsed={elapsed:.1f}s")
     await save_session(session_id, history)
 
     msgs = [("user", message)]
     if not is_error:
-        msgs.append(("assistant", response_text))
+        msgs.append(("assistant", visible))
     await _persist_messages(session_id, msgs)
 
-    done_event = {"done": True, "session_id": session_id}
-    if confidence:
-        done_event["confidence"] = confidence
-    if unsupported:
-        done_event["unsupported_claims"] = unsupported
-    yield done_event
+    # response 是落地后的文本：低置信拒答/保留、以及补上的引用，都以它为准。
+    # 流式 token 可能已经发出模型原稿，客户端应在 done 时用 response 替换。
+    yield {"done": True, "session_id": session_id, "response": visible, **extra}

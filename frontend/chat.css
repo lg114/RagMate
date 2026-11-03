@@ -471,6 +471,13 @@
 }
 .source-chip:hover { color: var(--ink); background: var(--border); }
 
+.citation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--sp-s);
+}
+
 /* Confidence badge */
 .confidence-badge {
   display: inline-block;
