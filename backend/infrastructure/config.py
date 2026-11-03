@@ -133,8 +133,10 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = Field(default=50 * 1024 * 1024, gt=0)  # 上传文件大小上限（字节）
 
     # Ingest
-    INGEST_LOCK_TTL: int = Field(default=600, gt=0)  # 入库分布式锁 TTL（秒）
-    INGEST_STATUS_TTL: int = Field(default=7200, gt=0)  # 入库状态 TTL（秒）
+    INGEST_LOCK_TTL: int = Field(default=600, gt=0)  # 入库分布式锁 TTL（秒），由心跳续期
+    INGEST_STATUS_TTL: int = Field(default=7200, gt=0)  # 入库状态 TTL（秒），进程重启后仍可读取
+    INGEST_HEARTBEAT_INTERVAL: int = Field(default=5, gt=0)  # 续期锁、刷新任务心跳、轮询取消（秒）
+    INGEST_HEARTBEAT_STALE: int = Field(default=30, gt=0)  # 心跳超过该秒数视为持锁 worker 已退出
 
     # Documents
     DOCUMENTS_DIR: str = str(_BACKEND_DIR / "documents")
@@ -176,6 +178,17 @@ class Settings(BaseSettings):
             raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")
         if self.RERANKER_PROVIDER == "api" and not self.RERANKER_API_BASE_URL:
             raise ValueError("RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api")
+
+        if self.INGEST_HEARTBEAT_STALE <= self.INGEST_HEARTBEAT_INTERVAL:
+            raise ValueError(
+                f"INGEST_HEARTBEAT_STALE ({self.INGEST_HEARTBEAT_STALE}) must be greater than "
+                f"INGEST_HEARTBEAT_INTERVAL ({self.INGEST_HEARTBEAT_INTERVAL})"
+            )
+        if self.INGEST_HEARTBEAT_STALE >= self.INGEST_LOCK_TTL:
+            raise ValueError(
+                f"INGEST_HEARTBEAT_STALE ({self.INGEST_HEARTBEAT_STALE}) must be less than "
+                f"INGEST_LOCK_TTL ({self.INGEST_LOCK_TTL})"
+            )
         return self
 
 

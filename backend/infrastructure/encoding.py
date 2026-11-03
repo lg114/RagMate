@@ -8,6 +8,10 @@ from backend.infrastructure.config import settings
 ENCODE_BATCH_SIZE = 64
 
 
+class EncodingCancelled(Exception):
+    """入库线程在编码过程中观察到取消标志。"""
+
+
 @lru_cache(maxsize=1)
 def get_bge_m3():
     """加载 bge-m3 模型（单例），用于提取 dense + sparse 向量。"""
@@ -16,13 +20,21 @@ def get_bge_m3():
     return BGEM3FlagModel(settings.EMBEDDING_MODEL, use_fp16=use_fp16, devices=device)
 
 
-def encode_documents(texts: list[str]) -> tuple[list, list]:
-    """用 bge-m3 提取 dense 和 sparse 向量（分批处理避免内存溢出）。返回 (dense_vecs, sparse_vecs)。"""
+def encode_documents(texts: list[str], cancel_event=None) -> tuple[list, list]:
+    """用 bge-m3 提取 dense 和 sparse 向量（分批处理避免内存溢出）。
+
+    cancel_event 已置位时抛出 EncodingCancelled，且不会为了取消去加载模型。
+    返回 (dense_vecs, sparse_vecs)。
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        raise EncodingCancelled()
     model = get_bge_m3()
     all_dense = []
     all_sparse = []
 
     for i in range(0, len(texts), ENCODE_BATCH_SIZE):
+        if cancel_event is not None and cancel_event.is_set():
+            raise EncodingCancelled()
         batch = texts[i:i + ENCODE_BATCH_SIZE]
         output = model.encode(batch, return_dense=True, return_sparse=True)
         all_dense.extend(output["dense_vecs"].tolist())

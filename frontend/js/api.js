@@ -64,6 +64,7 @@ export const API = {
   uploadDocument(file)    { const f = new FormData(); f.append('file', file); return this.request('POST', '/documents/upload', f); },
   deleteDocument(name)    { return this.request('DELETE', `/documents/${encodeURIComponent(name)}`); },
   startIngest(filenames)  { return filenames ? this.request('POST', '/ingest', { filenames }) : this.request('POST', '/ingest'); },
+  cancelIngest()          { return this.request('POST', '/ingest/cancel'); },
   getIngestStatus()       { return this.request('GET', '/ingest/status'); },
   getSessions()           { return this.request('GET', '/chat/sessions'); },
   getHistory(sessionId)   { return this.request('GET', `/chat/sessions/${encodeURIComponent(sessionId)}`); },

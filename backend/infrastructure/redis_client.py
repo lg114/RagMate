@@ -118,14 +118,18 @@ async def renew_ingest_lock(token: str):
 
 
 async def get_ingest_status() -> dict:
+    """读取入库状态原文，不判断持锁进程是否还活着。"""
     r = await get_redis()
     data = await r.get(INGEST_STATUS_KEY)
-    if not data:
+    if not isinstance(data, str) or not data:
         return {"status": "idle", "last_ingest": None}
     try:
-        return json.loads(data)
+        parsed = json.loads(data)
     except json.JSONDecodeError:
         return {"status": "idle", "last_ingest": None}
+    if not isinstance(parsed, dict):
+        return {"status": "idle", "last_ingest": None}
+    return parsed
 
 
 async def set_ingest_status(data: dict):
@@ -139,3 +143,107 @@ def set_ingest_status_sync(data: dict):
     payload = {**data, "last_ingest": datetime.now(timezone.utc).isoformat()}
     r = get_sync_redis()
     r.setex(INGEST_STATUS_KEY, settings.INGEST_STATUS_TTL, json.dumps(payload, default=str))
+
+
+# ── Ingest task record（跨进程 / 跨 worker 的任务句柄） ──
+# 锁只表示「有人在跑」；任务哈希保存 token、心跳和取消标志，
+# 这样状态查询和取消请求不必打到持有 asyncio.Task 的那个进程。
+
+INGEST_TASK_KEY = "ragmate:ingest:task"
+
+_HEARTBEAT_TASK_SCRIPT = """
+if redis.call("hget", KEYS[1], "token") == ARGV[1] then
+    redis.call("hset", KEYS[1], "heartbeat_at", ARGV[2])
+    redis.call("expire", KEYS[1], ARGV[3])
+    return 1
+end
+return 0
+"""
+
+_CANCEL_TASK_SCRIPT = """
+if redis.call("exists", KEYS[1]) == 1 then
+    redis.call("hset", KEYS[1], "cancel", "1")
+    return 1
+end
+return 0
+"""
+
+_CLEAR_TASK_SCRIPT = """
+if redis.call("hget", KEYS[1], "token") == ARGV[1] then
+    return redis.call("del", KEYS[1])
+end
+return 0
+"""
+
+
+async def get_ingest_lock_token() -> str | None:
+    """读取当前入库锁的 token。没有锁时返回 None。"""
+    r = await get_redis()
+    token = await r.get(INGEST_LOCK_KEY)
+    return token if isinstance(token, str) else None
+
+
+async def get_ingest_lock_ttl() -> int | None:
+    """返回入库锁剩余秒数。锁不存在时返回 None。"""
+    r = await get_redis()
+    ttl = await r.ttl(INGEST_LOCK_KEY)
+    if isinstance(ttl, int) and ttl >= 0:
+        return ttl
+    return None
+
+
+async def save_ingest_task(token: str, filenames: list[str] | None, worker_id: str) -> None:
+    """写入入库任务记录并设置与锁相同的 TTL。"""
+    now = datetime.now(timezone.utc).isoformat()
+    r = await get_redis()
+    await r.delete(INGEST_TASK_KEY)
+    await r.hset(INGEST_TASK_KEY, mapping={
+        "token": token,
+        "worker_id": worker_id,
+        "filenames": json.dumps(filenames, ensure_ascii=False),
+        "started_at": now,
+        "heartbeat_at": now,
+        "cancel": "0",
+    })
+    await r.expire(INGEST_TASK_KEY, settings.INGEST_LOCK_TTL)
+
+
+async def get_ingest_task() -> dict | None:
+    """读取入库任务记录。不存在时返回 None。"""
+    r = await get_redis()
+    data = await r.hgetall(INGEST_TASK_KEY)
+    if not isinstance(data, dict) or not data.get("token"):
+        return None
+    return data
+
+
+async def heartbeat_ingest_task(token: str) -> bool:
+    """刷新任务心跳并续期。token 不匹配时返回 False。"""
+    r = await get_redis()
+    now = datetime.now(timezone.utc).isoformat()
+    renewed = await r.eval(
+        _HEARTBEAT_TASK_SCRIPT, 1, INGEST_TASK_KEY, token, now, settings.INGEST_LOCK_TTL,
+    )
+    return bool(renewed)
+
+
+async def mark_ingest_cancel() -> bool:
+    """请求取消当前入库任务。任何 worker 都可调用。没有任务时返回 False。"""
+    r = await get_redis()
+    flagged = await r.eval(_CANCEL_TASK_SCRIPT, 1, INGEST_TASK_KEY)
+    return bool(flagged)
+
+
+async def clear_ingest_task(token: str) -> None:
+    """仅当 token 匹配时删除任务记录。"""
+    r = await get_redis()
+    await r.eval(_CLEAR_TASK_SCRIPT, 1, INGEST_TASK_KEY, token)
+
+
+def ingest_cancel_requested_sync() -> bool:
+    """同步读取取消标志，供入库线程在阶段边界轮询。Redis 不可用时返回 False。"""
+    try:
+        flag = get_sync_redis().hget(INGEST_TASK_KEY, "cancel")
+    except Exception:
+        return False
+    return flag == "1"

@@ -265,8 +265,7 @@ export const DocumentsPanel = {
       } else {
         this._ingestModal = showProgressModal('正在入库…', files.length || 1);
         document.getElementById('prog-cancel').onclick = () => {
-          this._ingestModal.close();
-          this._ingestModal = null;
+          API.cancelIngest().catch(() => {});
         };
         this.pollIngest();
       }
@@ -319,6 +318,25 @@ export const DocumentsPanel = {
         this.setIngestBtnState('done');
         await this.refreshList();
         ChatPanel.updateHeroState();
+      } else if (status.status === 'cancelled') {
+        this.stopPolling();
+        if (this._ingestModal) {
+          this._ingestModal.done('已取消', { ok: [], fail: [] }, '入库已停止。');
+          this._ingestModal = null;
+        }
+        this._ingestHandled = true;
+        this.setIngestBtnState('default');
+      } else if (status.status === 'interrupted') {
+        this.stopPolling();
+        if (this._ingestModal) {
+          this._ingestModal.done('入库中断', {
+            ok: [],
+            fail: [{ name: '入库任务', error: status.error || '进程已退出' }],
+          });
+          this._ingestModal = null;
+        }
+        this._ingestHandled = true;
+        this.setIngestBtnState('failed');
       } else if (status.status === 'failed') {
         this.stopPolling();
         if (this._ingestModal) {

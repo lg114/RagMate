@@ -45,16 +45,15 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from backend.infrastructure.redis_client import get_redis, close_sync_redis
-    from backend.application.ingest_manager import cancel_ingest
+    from backend.application.ingest_manager import cancel_ingest, reconcile_stale_ingest
 
-    # 检查是否有遗留的 ingest 锁
+    # 心跳已死的 running 收成 interrupted，并放开对应的锁；活着的其他 worker 不动。
     try:
-        r = await get_redis()
-        lock_exists = await r.exists("ragmate:ingest:lock")
-        if lock_exists:
-            logger.warning("Found existing ingest lock on startup — another instance may be running, or a previous run crashed.")
+        state = await reconcile_stale_ingest()
+        if state.get("status") == "interrupted":
+            logger.warning("Reconciled a stale ingest task on startup: %s", state.get("error"))
     except Exception as e:
-        logger.warning(f"Failed to check ingest lock on startup: {e}")
+        logger.warning(f"Failed to reconcile ingest state on startup: {e}")
 
     try:
         await init_db()

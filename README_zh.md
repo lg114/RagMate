@@ -210,7 +210,8 @@ flowchart LR
 | POST | `/documents/upload` | 上传单个文件（上限 50 MB） |
 | DELETE | `/documents/{filename}` | 删除文档、磁盘文件及其向量 |
 | POST | `/ingest` | 启动入库（可指定文件名） |
-| GET | `/ingest/status` | 查询入库状态与进度 |
+| POST | `/ingest/cancel` | 请求持锁 worker 停止入库 |
+| GET | `/ingest/status` | 查询入库状态与进度（进程重启后仍然可读） |
 | GET | `/health` | 存活探针 |
 | GET | `/ready` | 就绪探针（PostgreSQL、Redis、Milvus） |
 
@@ -371,7 +372,7 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 
 ## 已知约束
 
-- **假设单进程运行。** 入库任务句柄与锁 token 存放在进程内存中，多 worker 部署（例如 `uvicorn --workers 4`）会导致入库状态与取消功能失效。请使用单 worker。
+- **同一时间只有一个 worker 在入库。** 状态、锁、进度和取消标志都在 Redis 里，任意 uvicorn worker 都能读进度并发起取消。拿到锁的 worker 负责执行，并按 `INGEST_HEARTBEAT_INTERVAL`（默认 5 秒）刷新心跳。该进程退出后，下一次状态查询会在 `INGEST_HEARTBEAT_STALE`（默认 30 秒）后把任务标成 `interrupted` 并释放锁。
 - **无认证与多租户。** 任何能访问 API 的人都可看到全部会话与文档。
 - **Schema 变更需手动重建。** Milvus 集合 schema 不匹配时启动会抛出校验错误而不是自动迁移，需要删除集合后重建。
 - **没有迁移工具。** 表结构变更通过 `create_all` 加上 `infrastructure/database.py` 中一份手写的补列清单完成。
@@ -388,7 +389,7 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 | 模型下载或 CPU 推理很慢 | 使用 CUDA，或改用托管嵌入服务 |
 | 对话没有检索到内容 | 确认入库已完成，且 `MILVUS_HOST`、`DATABASE_URL`、`REDIS_URL` 指向正在运行的服务 |
 | 端口冲突 | 修改 `docker-compose.yml` 的宿主机端口，并同步更新 `.env` |
-| 入库卡在 `running` | 上次崩溃可能仍持有锁；锁 10 分钟后自动过期，也可直接重启应用 |
+| 入库卡在 `running` | 状态由 Redis 心跳对账。worker 退出后默认 30 秒（`INGEST_HEARTBEAT_STALE`）会变成 `interrupted`；`POST /ingest/cancel` 可请求仍在运行的 worker 停止 |
 
 ---
 
