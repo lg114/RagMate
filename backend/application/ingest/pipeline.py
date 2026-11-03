@@ -13,7 +13,8 @@ from backend.infrastructure.config import settings
 from backend.infrastructure.database import SyncSession
 from backend.domain.errors import ServiceUnavailableError
 from backend.domain.models import Document
-from backend.infrastructure.redis_client import set_ingest_status_sync
+from backend.infrastructure.encoding import EncodingCancelled, encode_documents
+from backend.infrastructure.redis_client import ingest_cancel_requested_sync, set_ingest_status_sync
 from backend.infrastructure.milvus import (
     check_milvus_available,
     deduplicate_chunks,
@@ -22,12 +23,24 @@ from backend.infrastructure.milvus import (
     get_milvus_client,
     insert_chunks,
 )
-from backend.infrastructure.encoding import encode_documents
-
 from .db_sync import sync_documents_table
 from .loaders import SUPPORTED_EXTENSIONS, load_document
 
 logger = logging.getLogger("ragmate")
+
+
+def _stop_requested(cancel_event) -> bool:
+    """本地事件或 Redis 取消标志任一出现即停止，并把标志同步回本地事件。"""
+    if cancel_event is not None and cancel_event.is_set():
+        return True
+    try:
+        if ingest_cancel_requested_sync():
+            if cancel_event is not None:
+                cancel_event.set()
+            return True
+    except Exception:
+        logger.debug("Failed to read ingest cancel flag", exc_info=True)
+    return False
 
 
 def _discover_files(docs_dir: str, filenames: list[str] | None) -> list[str]:
@@ -172,7 +185,7 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
     )
     failed_files = []
     for i, filename in enumerate(new_files):
-        if cancel_event and cancel_event.is_set():
+        if _stop_requested(cancel_event):
             break
         try:
             set_ingest_status_sync({
@@ -263,12 +276,12 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
             "message": "All documents already ingested",
         }
 
-    if cancel_event and cancel_event.is_set():
+    if _stop_requested(cancel_event):
         return {"status": "idle", "message": "Cancelled"}
 
     # 3. 加载 + 切分
     chunks, chunk_counter, failed_files = _load_and_split(docs_dir, new_files, cancel_event)
-    if cancel_event and cancel_event.is_set():
+    if _stop_requested(cancel_event):
         return {"status": "idle", "message": "Cancelled"}
     if not chunks:
         return {"status": "failed", "error": "No text extracted from any file", "failed": failed_files}
@@ -303,7 +316,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         set_ingest_status_sync(result)
         return result
 
-    if cancel_event and cancel_event.is_set():
+    if _stop_requested(cancel_event):
         return {"status": "idle", "message": "Cancelled"}
 
     # 7. 编码
@@ -318,7 +331,10 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         "current_file": "", "progress": len(new_files), "total": len(new_files),
         "chunk_count": len(chunks),
     })
-    dense_vecs, sparse_vecs = encode_documents(texts)
+    try:
+        dense_vecs, sparse_vecs = encode_documents(texts, cancel_event)
+    except EncodingCancelled:
+        return {"status": "idle", "message": "Cancelled"}
 
     # 8. 写入新向量（先插入后删除，失败则旧数据不丢）
     set_ingest_status_sync({

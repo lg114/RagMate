@@ -210,7 +210,8 @@ Simple greetings and other non-RAG messages are routed straight to the LLM, skip
 | POST | `/documents/upload` | Upload a single file (50 MB max) |
 | DELETE | `/documents/{filename}` | Delete a document, its file, and its vectors |
 | POST | `/ingest` | Start ingestion (optionally for specific filenames) |
-| GET | `/ingest/status` | Current ingestion status and progress |
+| POST | `/ingest/cancel` | Ask the worker that holds the ingest lock to stop |
+| GET | `/ingest/status` | Current ingestion status and progress (survives restarts) |
 | GET | `/health` | Liveness probe |
 | GET | `/ready` | Readiness probe across PostgreSQL, Redis, and Milvus |
 
@@ -371,7 +372,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 
 ## Known constraints
 
-- **Single process assumed.** The ingestion task handle and lock token live in process memory, so running multiple workers (for example `uvicorn --workers 4`) breaks ingestion status and cancellation. Run a single worker.
+- **Ingest runs on one worker at a time.** Status, the lock, progress, and the cancel flag live in Redis, so any uvicorn worker can read progress and request cancellation. The worker that acquired the lock does the work and refreshes a heartbeat (`INGEST_HEARTBEAT_INTERVAL`, default 5s). If that process dies, the next status read marks the job `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30s) and releases the lock.
 - **No authentication or multi-tenancy.** Every session and document is visible to anyone who can reach the API.
 - **Schema changes need a manual rebuild.** If the Milvus collection schema does not match, startup raises a validation error instead of migrating; the collection must be dropped and recreated.
 - **No migration tool.** Schema changes are applied with `create_all` plus a small hand-written column-migration list in `infrastructure/database.py`.
@@ -388,7 +389,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 | Model download or CPU inference is slow | Use CUDA, or a hosted embedding service |
 | Chat returns no useful context | Confirm ingestion finished and `MILVUS_HOST`, `DATABASE_URL`, `REDIS_URL` point at the running stack |
 | Port conflicts | Change the host-side ports in `docker-compose.yml` and update the matching `.env` values |
-| Ingestion stuck in `running` | A previous crash may still hold the lock; it expires after 10 minutes, or restart the app |
+| Ingestion stuck in `running` | Status is reconciled from the Redis heartbeat. A dead worker becomes `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30); `POST /ingest/cancel` asks the live worker to stop |
 
 ---
 
