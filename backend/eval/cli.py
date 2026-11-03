@@ -1,4 +1,4 @@
-"""RAGAS 评估 CLI 入口。"""
+"""评估 CLI 入口：RAGAS 打分与确定性检索评测。"""
 import argparse
 import json
 import logging
@@ -16,6 +16,21 @@ from .retrieval import retrieve_contexts
 from .response_gen import generate_response
 from .metrics import compute_metrics, probe_judge_llm
 from .report import build_report, cases_from_report, print_report, write_raw_checkpoint
+from .manifest import build_manifest
+from .retrieval_eval import (
+    STAGES,
+    build_chunk_inventory,
+    build_retrieval_report,
+    compare_with_manifest,
+    load_golden_testset,
+    print_retrieval_report,
+    run_retrieval_eval,
+    validate_gold_schema,
+    verify_gold_in_index,
+    verify_gold_in_inventory,
+    write_retrieval_checkpoint,
+    write_retrieval_markdown,
+)
 
 logger = logging.getLogger("ragmate")
 
@@ -218,6 +233,141 @@ def cmd_rescore(args):
     print_report(new_report)
 
 
+def cmd_retrieval(args):
+    """Deterministic retrieval evaluation: stage-wise ranked lists + tier-1 metrics.
+
+    No LLM calls. The golden set must carry gold chunk IDs (see `check-gold`).
+    Writes three files next to --output: the metrics JSON report, a Markdown
+    baseline table, and a `<report>.retrieval.json` checkpoint with the raw
+    ranked lists (first repeat only) for recomputation without re-running
+    retrieval.
+    """
+    testset_path = resolve_path(args.testset)
+    if not testset_path.exists():
+        print(f"Error: Test set not found: {testset_path}")
+        sys.exit(1)
+
+    try:
+        cases = load_golden_testset(testset_path)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    stages = [s.strip() for s in args.stages.split(",") if s.strip()]
+    unknown = [s for s in stages if s not in STAGES]
+    if not stages or unknown:
+        print(f"Error: --stages must be a subset of {STAGES}, got {args.stages!r}")
+        sys.exit(1)
+    ks = tuple(sorted({k for k in args.ks if k > 0}))
+    if not ks:
+        print("Error: --ks must list at least one positive k")
+        sys.exit(1)
+
+    report_path = str(resolve_path(args.report) if args.report else
+                      DEFAULT_REPORTS_DIR / "baseline" / "retrieval-baseline-50q.json")
+
+    manifest = build_manifest(
+        testset_path=testset_path, stages=stages, over_fetch=args.over_fetch,
+        ks=list(ks), repeat=args.repeat, n_questions=len(cases),
+    )
+    manifest["report_path"] = report_path
+
+    if args.compare_manifest:
+        previous_path = resolve_path(args.compare_manifest)
+        if not previous_path.exists():
+            print(f"Error: Previous report not found: {previous_path}")
+            sys.exit(1)
+        changes = compare_with_manifest(manifest, previous_path)
+        if changes:
+            print("Config changes vs previous run:")
+            for key, change in changes.items():
+                print(f"  {key}: {change['old']!r} → {change['new']!r}")
+        else:
+            print("Config identical to previous run (same manifest).")
+
+    print(f"Loaded {len(cases)} golden cases from {testset_path}")
+    print(f"Stages: {', '.join(stages)}, over_fetch={args.over_fetch}, "
+          f"ks={list(ks)}, repeat={args.repeat}")
+
+    try:
+        result = run_retrieval_eval(cases, stages, args.over_fetch, args.repeat, ks, manifest)
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    checkpoint_path = write_retrieval_checkpoint(result["checkpoint"], report_path)
+    print(f"Raw ranked lists checkpointed to {checkpoint_path}")
+
+    report = build_retrieval_report(manifest, result["evaluations"], checkpoint_path, stages)
+    report_output = Path(report_path)
+    report_output.parent.mkdir(parents=True, exist_ok=True)
+    with open(report_output, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    md_path = write_retrieval_markdown(report, report_path)
+    print(f"Markdown baseline table saved to {md_path}")
+
+    print_retrieval_report(report)
+
+
+def cmd_check_gold(args):
+    """Validate golden set annotations: schema, chunk inventory, live index.
+
+    Schema errors fail fast (annotation incomplete). The inventory check
+    reproduces chunking from the corpus directory with the real pipeline
+    code and requires every gold triple to exist there. --live additionally
+    requires every gold triple to exist in the Milvus collection.
+    """
+    testset_path = resolve_path(args.testset)
+    if not testset_path.exists():
+        print(f"Error: Test set not found: {testset_path}")
+        sys.exit(1)
+
+    with open(testset_path, "r", encoding="utf-8") as f:
+        cases = json.load(f)
+    if not isinstance(cases, list):
+        print("Error: Test set must be a JSON list of cases")
+        sys.exit(1)
+
+    errors = validate_gold_schema(cases)
+    if errors:
+        print(f"Golden set schema: {len(errors)} problem(s):")
+        for error in errors:
+            print(f"  - {error}")
+        sys.exit(1)
+    print(f"Schema OK: {len(cases)} cases, "
+          f"{sum(1 for c in cases if c['gold_chunks'])} answerable, "
+          f"{sum(1 for c in cases if not c['gold_chunks'])} unanswerable.")
+
+    corpus_dir = resolve_path(args.corpus)
+    try:
+        inventory = build_chunk_inventory(corpus_dir)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    print(f"Chunk inventory from {corpus_dir}: {len(inventory)} chunks.")
+    missing = verify_gold_in_inventory(cases, inventory)
+    if missing:
+        print(f"Inventory check: {len(missing)} gold chunk(s) missing:")
+        for item in missing:
+            print(f"  - {item}")
+        sys.exit(1)
+    print("Inventory check OK: every gold chunk exists in the reproduced chunking.")
+
+    if args.live:
+        try:
+            missing = verify_gold_in_index(cases)
+        except Exception as e:
+            print(f"Error: live index check failed: {e}")
+            sys.exit(1)
+        if missing:
+            print(f"Live index check: {len(missing)} gold chunk(s) missing from Milvus:")
+            for item in missing:
+                print(f"  - {item}")
+            sys.exit(1)
+        print("Live index check OK: every gold chunk exists in Milvus.")
+
+
 def main():
     # No arguments → interactive menu
     if len(sys.argv) == 1:
@@ -249,6 +399,20 @@ def main():
     rescore_parser.add_argument("--output", type=str, default=None, help="Output path for the re-scored report")
     rescore_parser.add_argument("--judge-model", type=str, default=None, help="Judge LLM model name (defaults to the one in the report)")
 
+    retrieval_parser = subparsers.add_parser("retrieval", help="Deterministic retrieval evaluation (no LLM judge)")
+    retrieval_parser.add_argument("--testset", type=str, required=True, help="Golden test set JSON path (must carry gold chunk IDs)")
+    retrieval_parser.add_argument("--report", type=str, default=None, help="Metrics report output path")
+    retrieval_parser.add_argument("--stages", type=str, default=",".join(STAGES), help="Comma-separated stages: dense,sparse,fused,reranked")
+    retrieval_parser.add_argument("--over-fetch", type=int, default=50, help="Candidates retrieved per stage before reranking")
+    retrieval_parser.add_argument("--ks", type=int, nargs="+", default=[5, 10, 20], help="k values for hit/recall/nDCG")
+    retrieval_parser.add_argument("--repeat", type=int, default=1, help="Repeat runs to measure determinism spread")
+    retrieval_parser.add_argument("--compare-manifest", type=str, default=None, help="Previous retrieval report path to diff config against")
+
+    check_gold_parser = subparsers.add_parser("check-gold", help="Validate golden set gold chunk annotations")
+    check_gold_parser.add_argument("--testset", type=str, required=True, help="Golden test set JSON path")
+    check_gold_parser.add_argument("--corpus", type=str, default="eval/testsets/sample/corpus", help="Corpus directory used to reproduce chunking")
+    check_gold_parser.add_argument("--live", action="store_true", help="Also verify gold chunks exist in the live Milvus index")
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -257,3 +421,7 @@ def main():
         cmd_evaluate(args)
     elif args.command == "rescore":
         cmd_rescore(args)
+    elif args.command == "retrieval":
+        cmd_retrieval(args)
+    elif args.command == "check-gold":
+        cmd_check_gold(args)
