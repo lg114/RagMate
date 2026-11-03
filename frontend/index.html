@@ -3,136 +3,201 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="RagMate：面向自有文档的检索问答。上传、入库，并核对带来源的回答。">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net">
-<title>RagMate</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231D1D1F'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='serif' font-size='18' fill='%230071E3'%3ER%3C/text%3E%3C/svg%3E">
+<title>RagMate · 对话</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23171614'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Georgia,serif' font-size='18' fill='%238EE0CB'%3ER%3C/text%3E%3C/svg%3E">
+<script src="/js/boot.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+<div class="shell" id="shell">
+  <aside class="nav" id="nav" aria-label="主导航">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">R</span>
+      <span class="brand-text">
+        <span class="brand-name">RagMate</span>
+        <span class="brand-tag">文档问答</span>
+      </span>
+    </div>
+    <nav class="nav-tabs" aria-label="视图">
+      <button type="button" class="nav-tab is-active" data-view="chat" aria-current="page">
+        <span class="nav-index" aria-hidden="true">1</span>对话
+      </button>
+      <button type="button" class="nav-tab" data-view="documents">
+        <span class="nav-index" aria-hidden="true">2</span>文档
+      </button>
+      <button type="button" class="nav-tab" data-view="settings">
+        <span class="nav-index" aria-hidden="true">3</span>设置
+      </button>
+    </nav>
+    <div class="nav-sessions" id="nav-sessions">
+      <button type="button" id="btn-new-chat" class="btn btn-primary btn-block">新对话</button>
+      <label class="search-field">
+        <span class="visually-hidden">搜索会话</span>
+        <input id="session-search" type="search" placeholder="搜索会话" autocomplete="off">
+      </label>
+      <div class="history-head">
+        <span>最近</span>
+        <button type="button" id="btn-refresh-sessions" class="btn btn-ghost btn-tiny" aria-label="刷新会话">刷新</button>
+      </div>
+      <div id="history-list" class="history-list" role="list"></div>
+    </div>
+    <div class="nav-foot">
+      <button type="button" id="btn-theme-quick" class="btn btn-ghost btn-block">外观 · 跟随系统</button>
+    </div>
+  </aside>
+  <button type="button" id="nav-scrim" class="nav-scrim" hidden aria-label="关闭菜单"></button>
 
-<main id="main">
+  <div class="workspace" id="workspace">
+    <header class="topbar">
+      <button type="button" id="btn-nav-toggle" class="btn btn-ghost nav-toggle" aria-expanded="false" aria-controls="nav">菜单</button>
+      <div class="topbar-title">
+        <h1 id="view-title">对话</h1>
+        <p id="chat-context">新对话</p>
+      </div>
+      <button type="button" id="ingest-chip" class="ingest-chip" hidden>入库中</button>
+      <button type="button" id="btn-ready" class="ready-pill" data-state="pending">检查中</button>
+    </header>
 
-  <section id="panel-chat" class="panel active">
-    <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <span class="logo">RagMate</span>
-          <nav class="sidebar-tabs">
-            <button class="sidebar-tab active" data-tab="chat">对话</button>
-            <button class="sidebar-tab" data-tab="documents">文档</button>
-          </nav>
+    <main id="main">
+      <section id="view-chat" class="view" aria-label="对话">
+        <div id="chat-status" class="visually-hidden" aria-live="polite"></div>
+        <div id="chat-scroll" class="chat-scroll">
+          <div id="chat-messages" class="chat-column"></div>
         </div>
-        <div class="sidebar-section">
-          <button id="btn-new-chat" class="btn-new-chat">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            新对话
-          </button>
-          <div class="history-header">
-            <span>历史</span>
-            <button id="btn-refresh-sessions" class="btn-icon" title="刷新">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            </button>
-          </div>
-          <div id="history-list" class="history-list">
-            <div class="history-empty">暂无记录</div>
-          </div>
-        </div>
-      </aside>
-      <div class="content">
-        <div id="view-chat" class="view">
-          <div class="chat-header">
-            <span id="chat-title">对话</span>
-          </div>
-          <div id="chat-messages" class="chat-messages">
-            <div id="hero-empty" class="hero-empty empty-state">
-              <div class="hero-content">
-                <h1 class="hero-title">你的<span class="accent">知识库</span> AI 助手</h1>
-                <p class="hero-subtitle">上传文档，开启智能问答</p>
-                <div class="hero-steps" id="hero-steps">
-                  <div class="hero-step" data-step="1"><span class="hero-step-num">1</span>上传文档</div>
-                  <div class="hero-step-line"></div>
-                  <div class="hero-step" data-step="2"><span class="hero-step-num">2</span>智能提问</div>
-                  <div class="hero-step-line"></div>
-                  <div class="hero-step" data-step="3"><span class="hero-step-num">3</span>精准溯源</div>
-                </div>
-                <div class="hero-cards" id="hero-cards"></div>
-              </div>
-            </div>
-          </div>
-          <div id="chat-error" class="chat-error hidden"></div>
-          <form id="chat-form" class="chat-input-wrap">
-            <label class="debug-toggle" title="在回答下显示检索候选、分数，以及被重排过滤丢掉的片段">
-              <input type="checkbox" id="chat-debug">
+        <button type="button" id="btn-jump-latest" class="jump-latest" hidden>回到底部</button>
+        <div id="chat-error" class="banner banner-danger chat-error" role="alert" hidden></div>
+        <form id="chat-form" class="composer">
+          <label class="visually-hidden" for="chat-textarea">问题</label>
+          <textarea id="chat-textarea" rows="1" maxlength="10000" placeholder="基于已入库的文档提问" autocomplete="off"></textarea>
+          <div class="composer-bar">
+            <label class="debug-toggle">
+              <input type="checkbox" id="chat-debug" data-debug-toggle>
               检索调试
             </label>
-            <div class="chat-input-row">
-              <textarea id="chat-textarea" placeholder="输入问题…" rows="1" autocomplete="off"></textarea>
-              <button type="submit" id="btn-send" class="btn-send" title="发送">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="#fff"/>
-                </svg>
-              </button>
-            </div>
-          </form>
-        </div>
+            <span id="composer-count" class="composer-count" hidden>0 / 10000</span>
+            <span class="composer-hint">Enter 发送，Shift+Enter 换行</span>
+            <button type="submit" id="btn-send" class="btn btn-primary">发送</button>
+            <button type="button" id="btn-stop" class="btn btn-danger" hidden>停止</button>
+          </div>
+        </form>
+      </section>
 
-        <div id="view-documents" class="view hidden">
-          <div class="doc-header">
-            <h2>文档管理</h2>
-            <p>上传文档建立知识库，支持 PDF、DOCX、XLSX、TXT、Markdown 格式。</p>
+      <section id="view-documents" class="view view-pad" aria-label="文档" hidden>
+        <header class="page-head">
+          <div>
+            <h2>文档库</h2>
+            <p id="library-summary">正在读取文档…</p>
           </div>
-          <div class="doc-toolbar">
-            <div class="doc-upload-area">
-              <label class="upload-zone" id="upload-zone">
-                <input type="file" id="file-input" accept=".pdf,.docx,.xlsx,.xls,.txt,.md" multiple hidden>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <span>上传文档</span>
-              </label>
-              <span id="upload-error" class="upload-error hidden"></span>
-            </div>
-            <div class="doc-actions">
-              <button id="btn-ingest" class="btn-primary" disabled>
-                <span id="btn-ingest-text">入库</span>
-                <span id="btn-ingest-spinner" class="spinner hidden"></span>
-              </button>
-              <button id="btn-batch-delete" class="btn-batch-delete" disabled>
-                <span id="btn-batch-delete-text">删除</span>
-              </button>
-            </div>
+        </header>
+        <div id="library-error" class="banner banner-danger" hidden>
+          <span></span>
+          <button type="button" id="btn-library-retry" class="btn btn-ghost">重试</button>
+        </div>
+        <section id="ingest-banner" class="ingest-banner" hidden aria-live="polite"></section>
+        <label class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" accept=".pdf,.docx,.xlsx,.xls,.txt,.md" multiple>
+          <span class="upload-title">拖入文件，或点击选择</span>
+          <span class="upload-hint">PDF、DOCX、XLSX、XLS、TXT、Markdown · 单个最大 50 MB</span>
+        </label>
+        <ul id="upload-queue" class="upload-queue" hidden></ul>
+        <div class="library-tools">
+          <label class="search-field">
+            <span class="visually-hidden">搜索文档</span>
+            <input id="doc-search" type="search" placeholder="搜索文件名" autocomplete="off">
+          </label>
+          <div class="filter-row" role="group" aria-label="按状态筛选">
+            <button type="button" class="chip is-active" data-filter="all" aria-pressed="true">全部</button>
+            <button type="button" class="chip" data-filter="pending">待处理</button>
+            <button type="button" class="chip" data-filter="ingested">已入库</button>
+            <button type="button" class="chip" data-filter="failed">失败</button>
           </div>
-          <div class="doc-table-wrap">
-            <div class="doc-table-header">
-              <label class="doc-select-all-label">
-                <input type="checkbox" id="doc-select-all">
-                <span>全选</span>
-              </label>
-            </div>
-            <div id="doc-card-list" class="doc-card-list">
-              <div id="doc-skeleton" class="doc-skeleton"></div>
-            </div>
-            <div id="doc-empty" class="empty-state hidden">
-              <div class="empty-label">暂无文档，上传文档开始</div>
-            </div>
+          <div class="library-actions">
+            <label class="check-line">
+              <input type="checkbox" id="doc-select-all">
+              <span>全选当前列表</span>
+            </label>
+            <button type="button" id="btn-ingest" class="btn btn-primary" disabled>入库</button>
+            <button type="button" id="btn-batch-delete" class="btn btn-danger" disabled>删除所选</button>
           </div>
         </div>
-      </div>
-    </div>
-  </section>
+        <div id="doc-list" class="doc-list" role="list"></div>
+        <p id="doc-empty" class="empty-copy" hidden>把文件拖到上方，或点击选择。入库之后，对话才能引用它们。</p>
+      </section>
 
-</main>
+      <section id="view-settings" class="view view-pad" aria-label="设置" hidden>
+        <header class="page-head">
+          <div>
+            <h2>设置</h2>
+            <p>外观、检索调试和这台浏览器保存的访问令牌。</p>
+          </div>
+        </header>
+        <div class="settings-grid">
+          <section class="card">
+            <h3>外观</h3>
+            <p class="card-lead">选择跟着系统，或固定浅色、深色。快捷键 Alt+1 到 Alt+3 切换视图。</p>
+            <div class="choice-row" role="radiogroup" aria-label="外观">
+              <label class="choice"><input type="radio" name="theme" value="system"> 跟随系统</label>
+              <label class="choice"><input type="radio" name="theme" value="light"> 浅色</label>
+              <label class="choice"><input type="radio" name="theme" value="dark"> 深色</label>
+            </div>
+          </section>
+          <section class="card">
+            <h3>检索调试</h3>
+            <p class="card-lead">打开后，下一次提问会带上 debug，并在回答下列出候选片段、分数和丢弃原因。预览是文档原文，平时保持关闭。</p>
+            <label class="check-line">
+              <input type="checkbox" id="settings-debug" data-debug-toggle>
+              <span>随请求返回检索调试</span>
+            </label>
+          </section>
+          <section class="card">
+            <h3>API 令牌</h3>
+            <p class="card-lead">服务端设置了 API_AUTH_TOKEN 时才需要。令牌只留在这台浏览器的本地存储里，请求时作为 Bearer 发送。</p>
+            <label class="field" for="api-token">令牌</label>
+            <div class="token-row">
+              <input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="留空表示不发送">
+              <button type="button" id="btn-token-reveal" class="btn btn-ghost" aria-pressed="false">显示</button>
+            </div>
+            <div class="card-actions">
+              <button type="button" id="btn-token-save" class="btn btn-primary">保存</button>
+              <button type="button" id="btn-token-clear" class="btn btn-ghost">清除</button>
+            </div>
+            <p id="token-note" class="card-note" role="status"></p>
+          </section>
+          <section class="card">
+            <h3>服务状态</h3>
+            <p id="ready-summary" class="card-lead">正在检查…</p>
+            <ul id="ready-list" class="ready-list"></ul>
+            <button type="button" id="btn-ready-refresh" class="btn btn-secondary">重新检查</button>
+          </section>
+        </div>
+      </section>
+    </main>
 
-<div id="modal-overlay" class="modal-overlay hidden">
-  <div class="modal-box">
-    <p id="modal-message"></p>
-    <div class="modal-actions">
-      <button id="modal-cancel" class="btn-modal btn-modal-cancel">取消</button>
-      <button id="modal-confirm" class="btn-modal btn-modal-confirm">确定</button>
-    </div>
+    <aside id="source-panel" class="source-panel" aria-label="来源" hidden>
+      <header class="source-head">
+        <h2 id="source-title" class="source-heading">来源</h2>
+        <button type="button" id="btn-close-source" class="btn btn-ghost" aria-label="关闭来源">关闭</button>
+      </header>
+      <div id="source-body" class="source-body"></div>
+    </aside>
   </div>
 </div>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-message">
+  <form method="dialog">
+    <p id="confirm-message"></p>
+    <div class="dialog-actions">
+      <button type="submit" value="cancel" class="btn btn-ghost">取消</button>
+      <button type="submit" value="ok" id="confirm-ok" class="btn btn-primary">确定</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>

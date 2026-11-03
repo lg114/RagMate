@@ -1,0 +1,3 @@
+/* Settings share the card styles in base.css. This file keeps the import stable. */
+.token-row input { flex: 1; }
+.field { display: block; font-size: 13px; font-weight: 700; margin-bottom: 6px; }

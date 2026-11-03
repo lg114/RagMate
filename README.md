@@ -136,10 +136,13 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 
 ## First-use workflow
 
-1. Open the **Documents** tab and upload one or more supported files.
-2. Trigger ingestion and wait for the status to become `success`.
-3. Open **Chat** and ask questions about the indexed documents.
-4. Use the returned citations to inspect the source passages.
+1. Open **文档** and upload one or more supported files.
+2. Ingest the pending files and wait until the in-page status banner finishes.
+3. Open **对话** and ask questions about the indexed documents.
+4. Click a citation to open the source: file name, page, library status, and the retrieved passage when retrieval debug is on.
+5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL, Redis, and Milvus.
+
+The UI is still the zero-build page at `frontend/index.html`, served at `/`. No frontend build step.
 
 Supported formats: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
 
@@ -160,7 +163,7 @@ RagMate/
 │   ├── infrastructure/     # config, database, redis, milvus, encoding, model_factory
 │   ├── eval/               # RAGAS evaluation CLI (optional dependency)
 │   └── tests/
-└── frontend/               # Zero-build vanilla HTML/CSS/JS, served by FastAPI
+└── frontend/               # Zero-build UI (对话 / 文档 / 设置), served by FastAPI at /
 ```
 
 ---
@@ -256,7 +259,7 @@ Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, 
 
 The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
-`retrieval_debug` is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The chat UI has a "检索调试" checkbox that sends this flag. Leave it off in normal use; previews are excerpts of your documents.
+`retrieval_debug` is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The composer and the **设置** page share a “检索调试” checkbox that sends this flag and remembers it in the browser. Leave it off in normal use; previews are excerpts of your documents.
 
 ---
 

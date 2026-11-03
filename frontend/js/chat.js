@@ -1,412 +1,641 @@
 import { API } from './api.js';
-import { escapeHtml, renderAssistantMarkdown } from './utils.js';
 import { getSessionId, newSession } from './session.js';
 import { on, emit } from './event-bus.js';
+import { debugEnabled } from './prefs.js';
+import { SourcePanel } from './sources.js';
+import {
+  GROUNDING_COPY,
+  confidenceLabel,
+  dropReasonLabel,
+  extractSourceLine,
+  mergeCitations,
+  normalizeCitations,
+  renderMarkdown,
+  bindCodeCopy,
+  linkifyCitations,
+  splitAnswerFrame,
+} from './utils.js';
 
-const AI_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
-const USER_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>`;
-
-const HERO_HTML = `
-  <div id="hero-empty" class="hero-empty empty-state">
-    <div class="hero-content">
-      <h1 class="hero-title">你的<span class="accent">知识库</span> AI 助手</h1>
-      <p class="hero-subtitle">上传文档，开启智能问答</p>
-      <div class="hero-steps" id="hero-steps">
-        <div class="hero-step" data-step="1"><span class="hero-step-num">1</span>上传文档</div>
-        <div class="hero-step-line"></div>
-        <div class="hero-step" data-step="2"><span class="hero-step-num">2</span>智能提问</div>
-        <div class="hero-step-line"></div>
-        <div class="hero-step" data-step="3"><span class="hero-step-num">3</span>精准溯源</div>
-      </div>
-      <div class="hero-cards" id="hero-cards"></div>
-    </div>
-  </div>`;
-
-function renderRetrievalDebug(blocks) {
-  const details = document.createElement('details');
-  details.className = 'retrieval-debug';
-  details.open = true;
-  const summary = document.createElement('summary');
-  summary.textContent = '检索调试';
-  details.appendChild(summary);
-  blocks.forEach((block) => {
-    const query = document.createElement('div');
-    query.className = 'retrieval-debug-query';
-    query.textContent = block.query || '';
-    details.appendChild(query);
-    (block.chunks || []).forEach((chunk) => {
-      const row = document.createElement('div');
-      row.className = 'retrieval-debug-row' + (chunk.kept ? ' is-kept' : ' is-dropped');
-      const where = chunk.page ? `${chunk.source} · 第${chunk.page}页` : (chunk.source || '');
-      const score = typeof chunk.score === 'number' ? chunk.score.toFixed(3) : '';
-      const reason = chunk.kept ? '保留' : (chunk.dropped_by || '丢弃');
-      row.textContent = `#${chunk.rank}  ${score}  ${reason}  ${where}\n${chunk.preview || ''}`;
-      details.appendChild(row);
-    });
-  });
-  return details;
-}
+const PROMPTS = [
+  { q: '帮我总结这个知识库的核心内容', title: '总结核心内容', detail: '先给一个可以核对的概览' },
+  { q: '这些文档之间有什么关联？', title: '找出文档关联', detail: '看不同来源是否在讲同一件事' },
+  { q: '有没有互相矛盾的说法？', title: '检查矛盾说法', detail: '把冲突的段落分开列出来' },
+];
 
 export const ChatPanel = {
-  messagesEl:  document.getElementById('chat-messages'),
-  formEl:      document.getElementById('chat-form'),
-  textareaEl:  document.getElementById('chat-textarea'),
-  sendBtn:     document.getElementById('btn-send'),
-  errorEl:     document.getElementById('chat-error'),
-  loading:     false,
+  messagesEl: null,
+  scrollEl: null,
+  formEl: null,
+  textareaEl: null,
+  sendBtn: null,
+  stopBtn: null,
+  errorEl: null,
+  statusEl: null,
+  jumpBtn: null,
+  loading: false,
+  abortController: null,
   _lastUserText: '',
 
   init() {
-    this.formEl.addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
-    document.getElementById('btn-new-chat').addEventListener('click', () => {
-      this.clear();
-      emit('history:refresh');
-    });
+    this.messagesEl = document.getElementById('chat-messages');
+    this.scrollEl = document.getElementById('chat-scroll');
+    this.formEl = document.getElementById('chat-form');
+    this.textareaEl = document.getElementById('chat-textarea');
+    this.sendBtn = document.getElementById('btn-send');
+    this.stopBtn = document.getElementById('btn-stop');
+    this.errorEl = document.getElementById('chat-error');
+    this.statusEl = document.getElementById('chat-status');
+    this.jumpBtn = document.getElementById('btn-jump-latest');
 
-    this.textareaEl.addEventListener('input', () => {
-      this.textareaEl.style.height = 'auto';
-      const fontSize = parseFloat(getComputedStyle(this.textareaEl).fontSize);
-      const lineHeight = parseFloat(getComputedStyle(this.textareaEl).lineHeight) || fontSize * 1.5;
-      this.textareaEl.style.height = Math.min(this.textareaEl.scrollHeight, lineHeight * 5) + 'px';
+    this.formEl.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.send();
     });
-    this.textareaEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
+    document.getElementById('btn-new-chat').addEventListener('click', () => this.startNew());
+    this.stopBtn.addEventListener('click', () => this.stop());
+    this.jumpBtn.addEventListener('click', () => this.scrollToBottom(true));
+    this.textareaEl.addEventListener('input', () => this.autosize());
+    this.textareaEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        this.send();
+      }
     });
+    this.scrollEl.addEventListener('scroll', () => this.updateJump());
 
-    on('chat:show-error',    (msg) => this.showError(msg));
-    on('chat:load-messages', (msgs) => this.loadMessages(msgs));
-    on('view:switch',        (tab) => { if (tab === 'chat') this.textareaEl.focus(); });
+    on('chat:load-messages', (payload) => this.loadMessages(payload.messages || [], payload.title));
+    on('library:changed', () => this.updateHeroState());
+    on('view:switch', (tab) => { if (tab === 'chat') this.textareaEl.focus(); });
+
+    this.showHero();
+    this.setStatus('');
   },
 
-  addMessage(role, text) {
-    const empty = this.messagesEl.querySelector('.empty-state');
-    if (empty) empty.remove();
+  onShow() {
+    this.textareaEl?.focus();
+  },
 
-    if (this.messagesEl.querySelector('.msg')) {
-      const divider = document.createElement('div');
-      divider.className = 'msg-divider';
-      this.messagesEl.appendChild(divider);
+  startNew() {
+    this.stop(true);
+    newSession();
+    emit('history:active', null);
+    emit('shell:context', '新对话');
+    this.clear();
+    emit('history:refresh');
+  },
+
+  setStatus(text) {
+    if (this.statusEl) this.statusEl.textContent = text || '';
+  },
+
+  autosize() {
+    const el = this.textareaEl;
+    el.style.height = 'auto';
+    const line = parseFloat(getComputedStyle(el).lineHeight) || 24;
+    el.style.height = `${Math.min(el.scrollHeight, line * 6)}px`;
+    const count = document.getElementById('composer-count');
+    if (count) {
+      const len = el.value.length;
+      count.hidden = len < 8000;
+      count.textContent = `${len} / 10000`;
     }
-
-    const div = document.createElement('div');
-    div.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-assistant');
-
-    if (role === 'assistant') {
-      div.innerHTML = `<div class="msg-body"><div class="msg-role"><span class="msg-role-icon ai-icon">${AI_ICON}</span>RagMate</div><div class="msg-content">${renderAssistantMarkdown(text)}</div></div>`;
-    } else {
-      div.innerHTML = `<div class="msg-body"><div class="msg-role"><span class="msg-role-icon user-icon">${USER_ICON}</span>You</div><div class="msg-content">${DOMPurify.sanitize(text)}</div></div>`;
-    }
-    this.messagesEl.appendChild(div);
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-    return div;
   },
 
-  showLoading() {
-    const div = document.createElement('div');
-    div.className = 'msg-loading typing-dots';
-    div.innerHTML = '思考中<span>.</span><span>.</span><span>.</span>';
-    div.id = 'msg-loading';
-    this.messagesEl.appendChild(div);
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  nearBottom() {
+    const el = this.scrollEl;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   },
 
-  hideLoading() {
-    const el = document.getElementById('msg-loading');
-    if (el) el.remove();
+  scrollToBottom(force) {
+    if (force || this.nearBottom()) this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
+    this.updateJump();
+  },
+
+  updateJump() {
+    const hasMessages = !!this.messagesEl.querySelector('.msg');
+    this.jumpBtn.hidden = !hasMessages || this.nearBottom();
+  },
+
+  setBusy(busy) {
+    this.loading = busy;
+    this.sendBtn.hidden = busy;
+    this.stopBtn.hidden = !busy;
+    this.textareaEl.disabled = busy;
+    this.formEl.setAttribute('aria-busy', busy ? 'true' : 'false');
   },
 
   showError(msg) {
-    this.errorEl.innerHTML = '';
-    this.errorEl.appendChild(document.createTextNode(msg + ' '));
-    const retryBtn = document.createElement('button');
-    retryBtn.className = 'btn-retry';
-    retryBtn.textContent = '重试';
-    retryBtn.addEventListener('click', () => {
-      if (this._lastUserText && !this.loading) {
-        this.hideError();
-        const lastMsg = this.messagesEl.querySelector('.msg-assistant:last-of-type');
-        if (lastMsg) {
-          const prev = lastMsg.previousElementSibling;
-          if (prev && prev.classList.contains('msg-divider')) prev.remove();
-          lastMsg.remove();
-        }
-        const userMsg = this.messagesEl.querySelector('.msg-user:last-of-type');
-        if (userMsg) {
-          const prev = userMsg.previousElementSibling;
-          if (prev && prev.classList.contains('msg-divider')) prev.remove();
-          userMsg.remove();
-        }
-        this.textareaEl.value = this._lastUserText;
-        this.send(true);
-      }
+    this.errorEl.replaceChildren();
+    const text = document.createElement('span');
+    text.textContent = msg;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-ghost';
+    retry.textContent = '重试';
+    retry.addEventListener('click', () => {
+      if (!this._lastUserText || this.loading) return;
+      this.hideError();
+      this.removeLastTurn();
+      this.textareaEl.value = this._lastUserText;
+      this.send(true);
     });
-    this.errorEl.appendChild(retryBtn);
-    this.errorEl.classList.remove('hidden');
+    this.errorEl.append(text, retry);
+    this.errorEl.hidden = false;
   },
 
-  hideError() { this.errorEl.classList.add('hidden'); },
+  hideError() {
+    this.errorEl.hidden = true;
+    this.errorEl.replaceChildren();
+  },
 
-  setDisabled(disabled) {
-    this.loading = disabled;
-    this.sendBtn.disabled = disabled;
-    this.textareaEl.disabled = disabled;
+  removeLastTurn() {
+    const assistant = this.messagesEl.querySelector('.msg-assistant:last-of-type');
+    const user = assistant ? previousUser(assistant) : this.messagesEl.querySelector('.msg-user:last-of-type');
+    assistant?.remove();
+    user?.remove();
+    if (!this.messagesEl.querySelector('.msg')) this.showHero();
+  },
+
+  showHero() {
+    this.messagesEl.replaceChildren(buildHero());
+    this.updateHeroState();
+    this.updateJump();
+  },
+
+  clear() {
+    this.hideError();
+    SourcePanel.close();
+    this.showHero();
+  },
+
+  async updateHeroState() {
+    const actions = document.getElementById('hero-actions');
+    const lead = document.getElementById('hero-lead');
+    if (!actions || !lead) return;
+    let ingested = 0;
+    let total = 0;
+    try {
+      const data = await API.getDocuments();
+      const docs = data.documents || [];
+      total = docs.length;
+      ingested = docs.filter((doc) => doc.status === 'ingested').length;
+    } catch { /* leave the upload prompt in place */ }
+
+    actions.replaceChildren();
+    if (ingested > 0) {
+      lead.textContent = `知识库里有 ${ingested} 篇已入库文档。提问后，回答会带上置信度和可核对的来源。`;
+      PROMPTS.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'prompt-card';
+        const title = document.createElement('span');
+        title.className = 'prompt-title';
+        title.textContent = item.title;
+        const detail = document.createElement('span');
+        detail.className = 'prompt-detail';
+        detail.textContent = item.detail;
+        btn.append(title, detail);
+        btn.addEventListener('click', () => {
+          this.textareaEl.value = item.q;
+          this.autosize();
+          this.formEl.requestSubmit();
+        });
+        actions.append(btn);
+      });
+    } else {
+      lead.textContent = total
+        ? '文档已经上传，入库完成之后就可以按来源提问。'
+        : '先把资料放进文档库。入库完成后，回答会标明出处。';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'prompt-card prompt-card-primary';
+      const title = document.createElement('span');
+      title.className = 'prompt-title';
+      title.textContent = total ? '去文档库入库' : '上传文档';
+      const detail = document.createElement('span');
+      detail.className = 'prompt-detail';
+      detail.textContent = '支持 PDF、Word、Excel、TXT、Markdown';
+      btn.append(title, detail);
+      btn.addEventListener('click', () => emit('view:switch', 'documents'));
+      actions.append(btn);
+    }
+  },
+
+  addUserMessage(text) {
+    this.messagesEl.querySelector('.hero')?.remove();
+    const article = document.createElement('article');
+    article.className = 'msg msg-user';
+    const content = document.createElement('div');
+    content.className = 'msg-content';
+    content.textContent = text;
+    article.append(content);
+    this.messagesEl.append(article);
+    this.scrollToBottom(true);
+    return article;
+  },
+
+  startStreamMessage() {
+    this.messagesEl.querySelector('.hero')?.remove();
+    const article = document.createElement('article');
+    article.className = 'msg msg-assistant is-streaming';
+    article.setAttribute('aria-busy', 'true');
+    article.append(this._kicker('正在检索资料'));
+    const content = document.createElement('div');
+    content.className = 'msg-content prose';
+    article.append(content);
+    this.messagesEl.append(article);
+    this.scrollToBottom(true);
+    return article;
+  },
+
+  _kicker(state) {
+    const row = document.createElement('div');
+    row.className = 'msg-kicker';
+    const mark = document.createElement('span');
+    mark.className = 'avatar';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = 'R';
+    const name = document.createElement('span');
+    name.className = 'msg-author';
+    name.textContent = 'RagMate';
+    const live = document.createElement('span');
+    live.className = 'stream-state';
+    live.textContent = state || '';
+    row.append(mark, name, live);
+    return row;
+  },
+
+  appendStreamToken(article, fullText) {
+    if (article._streamDone) return;
+    article._latestText = fullText;
+    const state = article.querySelector('.stream-state');
+    if (state) state.textContent = '正在生成';
+    if (article._streamTimer) return;
+    article._streamTimer = setTimeout(() => {
+      article._streamTimer = null;
+      if (article._streamDone) return;
+      const content = article.querySelector('.msg-content');
+      content.innerHTML = renderMarkdown(article._latestText || '');
+      content.classList.add('is-streaming');
+      this.scrollToBottom(false);
+    }, 50);
+  },
+
+  finalizeStreamMessage(article, fullText, doneData = {}, stopped = false) {
+    article._streamDone = true;
+    if (article._streamTimer) {
+      clearTimeout(article._streamTimer);
+      article._streamTimer = null;
+    }
+    article.classList.remove('is-streaming');
+    article.removeAttribute('aria-busy');
+    const text = (!stopped && doneData.response) ? doneData.response : (fullText || '');
+    article._finalText = text;
+    article._retrievalDebug = doneData.retrieval_debug || [];
+    const frame = splitAnswerFrame(text, doneData.grounding);
+    if (stopped && !text) frame.stopped = true;
+
+    const state = article.querySelector('.stream-state');
+    if (state) state.remove();
+    if (doneData.confidence && !frame.refused) {
+      article.querySelector('.msg-kicker')?.append(confidencePill(doneData.confidence));
+    }
+
+    const content = article.querySelector('.msg-content');
+    content.classList.remove('is-streaming');
+    article.querySelectorAll('.msg-banner, .cite-list, .retrieval-debug, .msg-actions').forEach((el) => el.remove());
+
+    if (frame.refused) {
+      article.classList.add('is-refused');
+      content.replaceChildren();
+      article.insertBefore(banner('refused', '无法可靠回答', GROUNDING_COPY.refusal), content);
+    } else if (frame.stopped && !frame.body) {
+      content.replaceChildren();
+      const note = document.createElement('p');
+      note.className = 'stopped-note';
+      note.textContent = '已停止生成';
+      content.append(note);
+    } else {
+      if (frame.hedge) article.insertBefore(banner('hedged', '低置信', GROUNDING_COPY.hedge), content);
+      const hasSourceLine = /^\s*数据来源[:：]/m.test(frame.body);
+      const normalized = hasSourceLine ? frame.body : normalizeCitations(frame.body);
+      const extracted = extractSourceLine(normalized);
+      content.innerHTML = extracted.body ? renderMarkdown(extracted.body) : '';
+      bindCodeCopy(content);
+      linkifyCitations(content, (citation, trigger) => this.openSource(citation, trigger, article));
+      if (!extracted.body && !frame.hedge) {
+        const note = document.createElement('p');
+        note.className = 'stopped-note';
+        note.textContent = '没有收到回复';
+        content.append(note);
+      }
+      const cites = doneData.citations?.length
+        ? mergeCitations(doneData.citations, [])
+        : extracted.citations;
+      if (cites.length && !frame.refused) article.append(this._citationList(cites, article));
+    }
+
+    if (doneData.unsupported_claims?.length && !frame.refused) {
+      article.append(claimsBanner(doneData.unsupported_claims));
+    }
+    if (doneData.retrieval_debug?.length) {
+      article.append(renderRetrievalDebug(doneData.retrieval_debug, (citation, trigger) => {
+        this.openSource(citation, trigger, article);
+      }));
+    }
+    article.append(this._actions(article, doneData.allowRegen !== false && !frame.refused && !frame.stopped));
+    this.scrollToBottom(false);
+
+    if (doneData.quiet) return;
+    if (frame.refused) this.setStatus('没有足够资料，已拒答');
+    else if (frame.hedge) this.setStatus('低置信回答已完成');
+    else if (stopped) this.setStatus('已停止生成');
+    else this.setStatus('回答已完成');
+  },
+
+  _citationList(citations, article) {
+    const list = document.createElement('div');
+    list.className = 'cite-list';
+    const label = document.createElement('span');
+    label.className = 'cite-label';
+    label.textContent = '来源';
+    list.append(label);
+    citations.forEach((citation, index) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cite-btn';
+      const indexEl = document.createElement('span');
+      indexEl.className = 'cite-index';
+      indexEl.textContent = String(index + 1);
+      const name = document.createElement('span');
+      name.className = 'cite-name';
+      name.textContent = citation.source;
+      btn.append(indexEl, name);
+      if (citation.page) {
+        const page = document.createElement('span');
+        page.className = 'cite-page';
+        page.textContent = `第 ${citation.page} 页`;
+        btn.append(page);
+      }
+      btn.addEventListener('click', () => this.openSource(citation, btn, article));
+      list.append(btn);
+    });
+    return list;
+  },
+
+  _actions(article, allowRegen) {
+    const row = document.createElement('div');
+    row.className = 'msg-actions';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn btn-ghost';
+    copy.textContent = '复制';
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(article._finalText || '');
+        copy.textContent = '已复制';
+        setTimeout(() => { copy.textContent = '复制'; }, 1400);
+      } catch {
+        copy.textContent = '复制失败';
+      }
+    });
+    row.append(copy);
+    if (allowRegen) {
+      const regen = document.createElement('button');
+      regen.type = 'button';
+      regen.className = 'btn btn-ghost';
+      regen.textContent = '重新生成';
+      regen.addEventListener('click', () => {
+        if (this.loading) return;
+        const user = previousUser(article);
+        const userText = user?.querySelector('.msg-content')?.textContent || this._lastUserText;
+        if (!userText) return;
+        article.remove();
+        user?.remove();
+        this.textareaEl.value = userText;
+        this.send(true);
+      });
+      row.append(regen);
+    }
+    return row;
+  },
+
+  openSource(citation, trigger, article) {
+    const previews = [];
+    (article?._retrievalDebug || []).forEach((block) => {
+      (block.chunks || []).forEach((chunk) => {
+        if (chunk.source !== citation.source) return;
+        if (citation.page != null && chunk.page != null && chunk.page !== citation.page) return;
+        if (chunk.preview) previews.push(chunk);
+      });
+    });
+    SourcePanel.open(citation, trigger, { previews: previews.slice(0, 3) });
   },
 
   async send(replaceLast) {
     const text = this.textareaEl.value.trim();
     if (!text || this.loading) return;
-
     this.textareaEl.value = '';
-    this.textareaEl.style.height = 'auto';
+    this.autosize();
     this.hideError();
     this._lastUserText = text;
-    this.addMessage('user', text);
-    this.setDisabled(true);
+    this.addUserMessage(text);
+    this.setBusy(true);
+    this.setStatus('正在检索资料');
+    emit('shell:context', text.length > 42 ? `${text.slice(0, 42)}…` : text);
 
-    const sid = getSessionId();
-    const streamDiv = this.startStreamMessage();
+    const article = this.startStreamMessage();
     let fullText = '';
+    const controller = new AbortController();
+    this.abortController = controller;
+    const sid = getSessionId();
+    emit('history:active', sid);
 
-    const debug = document.getElementById('chat-debug')?.checked;
-    await API.chatStream(
-      text, sid,
-      (token) => { fullText += token; this.appendStreamToken(streamDiv, fullText); },
-      (doneData) => {
-        this.finalizeStreamMessage(streamDiv, fullText, doneData);
-        sessionStorage.setItem('ragmate_session_id', doneData.session_id);
-        this.setDisabled(false);
-        this.textareaEl.focus();
-        emit('history:refresh');
+    await API.chatStream(text, sid, {
+      onToken: (token) => {
+        fullText += token;
+        this.appendStreamToken(article, fullText);
+        this.setStatus('正在生成回答');
       },
-      (errMsg) => {
-        this.finalizeStreamMessage(streamDiv, fullText || '');
-        this.showError(errMsg);
-        this.setDisabled(false);
-        this.textareaEl.focus();
-        emit('history:refresh');
-      },
-      replaceLast,
-      debug,
-    );
-  },
-
-  startStreamMessage() {
-    const empty = this.messagesEl.querySelector('.empty-state');
-    if (empty) empty.remove();
-
-    if (this.messagesEl.querySelector('.msg')) {
-      const divider = document.createElement('div');
-      divider.className = 'msg-divider';
-      this.messagesEl.appendChild(divider);
-    }
-
-    const div = document.createElement('div');
-    div.className = 'msg msg-assistant';
-    div.innerHTML = `<div class="msg-body"><div class="msg-role"><span class="msg-role-icon ai-icon">${AI_ICON}</span>RagMate</div><div class="msg-content"><div class="msg-loading typing-dots">检索与生成中<span>.</span><span>.</span><span>.</span></div></div></div>`;
-    this.messagesEl.appendChild(div);
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-    return div;
-  },
-
-  appendStreamToken(div, fullText) {
-    const content = div.querySelector('.msg-content');
-    if (div._streamDone) return;
-    div._latestText = fullText;
-    if (!div._streamTimer) {
-      div._streamTimer = setTimeout(() => {
-        div._streamTimer = null;
-        if (div._streamDone) return;
-        content.innerHTML = DOMPurify.sanitize(marked.parse(div._latestText));
-        const el = this.messagesEl;
-        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-        if (isNearBottom) el.scrollTop = el.scrollHeight;
-      }, 80);
-    }
-  },
-
-  finalizeStreamMessage(div, fullText, doneData = {}) {
-    div._streamDone = true;
-    const content = div.querySelector('.msg-content');
-    // done.response 是服务端落地后的文本（拒答、低置信保留、补上的引用）
-    const text = (doneData.response != null && doneData.response !== '')
-      ? doneData.response
-      : (fullText || '没有收到回复');
-    div._finalText = text;
-    content.innerHTML = renderAssistantMarkdown(text);
-
-    if (doneData.confidence) {
-      const level = doneData.confidence.level;
-      const label = { high: '高置信', medium: '中置信', low: '低置信' }[level] || level;
-      const badge = document.createElement('div');
-      badge.className = `confidence-badge confidence-${level}`;
-      badge.textContent = label;
-      badge.title = `最高相关度: ${doneData.confidence.score}, 引用片段: ${doneData.confidence.chunks}`;
-      content.appendChild(badge);
-    }
-
-    if (doneData.citations && doneData.citations.length > 0) {
-      const row = document.createElement('div');
-      row.className = 'citation-row';
-      doneData.citations.forEach((c) => {
-        const chip = document.createElement('span');
-        chip.className = 'source-chip';
-        chip.textContent = c.page ? `${c.source} · 第${c.page}页` : c.source;
-        row.appendChild(chip);
-      });
-      content.appendChild(row);
-    }
-
-    if (doneData.retrieval_debug && doneData.retrieval_debug.length > 0) {
-      content.appendChild(renderRetrievalDebug(doneData.retrieval_debug));
-    }
-
-    if (doneData.unsupported_claims && doneData.unsupported_claims.length > 0) {
-      const warn = document.createElement('div');
-      warn.className = 'faithfulness-warning';
-      warn.innerHTML = `⚠ 以下声明可能缺乏文献支撑：<ul>${doneData.unsupported_claims.map(c => `<li>${escapeHtml(c.claim)}</li>`).join('')}</ul>`;
-      content.appendChild(warn);
-    }
-
-    const actionsHtml = `<div class="msg-actions">
-      <button class="msg-action-btn" data-action="copy" title="复制">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        复制
-      </button>
-      <button class="msg-action-btn" data-action="regenerate" title="重新生成">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        重新生成
-      </button>
-    </div>`;
-    content.insertAdjacentHTML('beforeend', actionsHtml);
-
-    const msgBody = div.querySelector('.msg-body') || content.parentElement;
-    const copyBtn = msgBody.querySelector('[data-action="copy"]');
-    const regenBtn = msgBody.querySelector('[data-action="regenerate"]');
-
-    if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(div._finalText || text || '').then(() => {
-          copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已复制`;
-          setTimeout(() => {
-            copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制`;
-          }, 1500);
-        });
-      });
-    }
-
-    if (regenBtn) {
-      regenBtn.addEventListener('click', () => {
-        if (this.loading) return;
-        let userMsg = null;
-        let el = div.previousElementSibling;
-        if (el && el.classList.contains('msg-divider')) el = el.previousElementSibling;
-        if (el && el.classList.contains('msg-user')) userMsg = el;
-
-        const userText = userMsg
-          ? userMsg.querySelector('.msg-content')?.textContent || ''
-          : (this._lastUserText || '');
-        if (!userText) return;
-
-        const prevSibling = div.previousElementSibling;
-        if (prevSibling && prevSibling.classList.contains('msg-divider')) prevSibling.remove();
-        div.remove();
-        if (userMsg) {
-          const userDivider = userMsg.previousElementSibling;
-          if (userDivider && userDivider.classList.contains('msg-divider')) userDivider.remove();
-          userMsg.remove();
+      onDone: (doneData) => {
+        this.finalizeStreamMessage(article, fullText, doneData);
+        if (doneData.session_id) {
+          sessionStorage.setItem('ragmate_session_id', doneData.session_id);
+          emit('history:active', doneData.session_id);
         }
-        this.textareaEl.value = userText;
-        this.send(true);
-      });
-    }
-
-    content.querySelectorAll('.btn-copy-code').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const code = decodeURIComponent(escape(atob(btn.dataset.codeB64)));
-        navigator.clipboard.writeText(code).then(() => {
-          btn.textContent = '已复制';
-          btn.classList.add('copied');
-          setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1500);
-        });
-      });
+        this.setBusy(false);
+        this.textareaEl.focus();
+        emit('history:refresh');
+      },
+      onError: (message) => {
+        this.finalizeStreamMessage(article, fullText, {}, true);
+        if (!fullText) {
+          const content = article.querySelector('.msg-content');
+          content.replaceChildren();
+          const note = document.createElement('p');
+          note.className = 'stopped-note';
+          note.textContent = '这次没有生成完';
+          content.append(note);
+        }
+        this.showError(message);
+        this.setStatus('回答失败');
+        this.setBusy(false);
+        this.textareaEl.focus();
+        emit('history:refresh');
+      },
+      onAbort: () => {
+        this.finalizeStreamMessage(article, fullText, {}, true);
+        this.setBusy(false);
+        this.textareaEl.focus();
+      },
+    }, {
+      replaceLast: !!replaceLast,
+      debug: debugEnabled(),
+      signal: controller.signal,
     });
+    if (this.abortController === controller) this.abortController = null;
   },
 
-  clear() {
-    newSession();
-    this.messagesEl.innerHTML = HERO_HTML;
-    this.updateHeroState();
+  stop(silent) {
+    if (this.abortController) this.abortController.abort();
+    if (silent) this.setBusy(false);
+  },
+
+  loadMessages(messages, title) {
     this.hideError();
-  },
-
-  _bindHeroCards() {
-    document.querySelectorAll('.hero-card[data-q]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const q = btn.dataset.q;
-        if (q) {
-          this.textareaEl.value = q;
-          this.textareaEl.dispatchEvent(new Event('input'));
-          this.formEl.requestSubmit();
-        }
-      });
-    });
-    document.querySelectorAll('.hero-card[data-action="upload"]').forEach(btn => {
-      btn.addEventListener('click', () => emit('view:switch', 'documents'));
-    });
-  },
-
-  async updateHeroState() {
-    const cardsEl = document.getElementById('hero-cards');
-    const stepsEl = document.getElementById('hero-steps');
-    if (!cardsEl || !stepsEl) return;
-
-    const checkIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-    const uploadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`;
-    const summaryIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
-    const linkIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
-    const conflictIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
-
-    let hasDocs = false;
-    try {
-      const data = await API.getDocuments();
-      hasDocs = (data.documents || []).some(d => d.status === 'ingested');
-    } catch (_) {}
-
-    const steps = stepsEl.querySelectorAll('.hero-step');
-    const lines = stepsEl.querySelectorAll('.hero-step-line');
-
-    if (hasDocs) {
-      steps[0].className = 'hero-step done';
-      steps[0].querySelector('.hero-step-num').innerHTML = checkIcon;
-      lines[0].className = 'hero-step-line done';
-      cardsEl.innerHTML = `
-        <button class="hero-card" data-q="帮我总结这个知识库的核心内容">
-          <div class="hero-card-icon">${summaryIcon}</div>
-          <div class="hero-card-title">总结核心内容</div>
-        </button>
-        <button class="hero-card" data-q="这些文档之间有什么关联？">
-          <div class="hero-card-icon">${linkIcon}</div>
-          <div class="hero-card-title">分析文档关联</div>
-        </button>
-        <button class="hero-card" data-q="有没有互相矛盾的说法？">
-          <div class="hero-card-icon">${conflictIcon}</div>
-          <div class="hero-card-title">检测矛盾说法</div>
-        </button>`;
-    } else {
-      steps[0].className = 'hero-step';
-      steps[0].querySelector('.hero-step-num').textContent = '1';
-      lines[0].className = 'hero-step-line';
-      cardsEl.innerHTML = `
-        <button class="hero-card" data-action="upload">
-          <div class="hero-card-icon">${uploadIcon}</div>
-          <div class="hero-card-title">上传文档开始</div>
-        </button>`;
+    this.messagesEl.replaceChildren();
+    if (!messages.length) {
+      this.showHero();
+      return;
     }
-    this._bindHeroCards();
+    let lastAssistant = -1;
+    messages.forEach((message, index) => {
+      if (message.role !== 'user') lastAssistant = index;
+    });
+    messages.forEach((message, index) => {
+      if (message.role === 'user') this.addUserMessage(message.content || '');
+      else {
+        const article = this.startStreamMessage();
+        this.finalizeStreamMessage(article, message.content || '', {
+          quiet: true,
+          allowRegen: index === lastAssistant,
+        });
+      }
+    });
+    emit('shell:context', title || '历史对话');
+    this.scrollToBottom(true);
   },
-
-  loadMessages(messages) {
-    this.messagesEl.innerHTML = '';
-    messages.forEach(m => this.addMessage(m.role, m.content));
-  }
 };
+
+function previousUser(article) {
+  let el = article.previousElementSibling;
+  while (el && !el.classList.contains('msg-user')) el = el.previousElementSibling;
+  return el;
+}
+
+function banner(kind, title, body) {
+  const el = document.createElement('div');
+  el.className = `msg-banner banner-${kind}`;
+  el.setAttribute('role', kind === 'refused' ? 'alert' : 'status');
+  const strong = document.createElement('strong');
+  strong.textContent = title;
+  const p = document.createElement('p');
+  p.textContent = body;
+  el.append(strong, p);
+  return el;
+}
+
+function claimsBanner(claims) {
+  const el = document.createElement('div');
+  el.className = 'msg-banner banner-warn';
+  el.setAttribute('role', 'status');
+  const strong = document.createElement('strong');
+  strong.textContent = '部分说法缺少依据';
+  const list = document.createElement('ul');
+  claims.forEach((claim) => {
+    const li = document.createElement('li');
+    li.textContent = claim.claim || '';
+    list.append(li);
+  });
+  el.append(strong, list);
+  return el;
+}
+
+function confidencePill(confidence) {
+  const el = document.createElement('span');
+  const level = confidence.level || 'low';
+  el.className = `confidence confidence-${level}`;
+  const score = typeof confidence.score === 'number' ? confidence.score.toFixed(2) : '—';
+  const chunks = confidence.chunks ?? 0;
+  el.textContent = confidenceLabel(level);
+  el.title = `最高相关度 ${score}，引用片段 ${chunks}`;
+  el.setAttribute('aria-label', `${confidenceLabel(level)}，最高相关度 ${score}，${chunks} 个片段`);
+  return el;
+}
+
+function renderRetrievalDebug(blocks, onOpen) {
+  const details = document.createElement('details');
+  details.className = 'retrieval-debug';
+  details.open = true;
+  const summary = document.createElement('summary');
+  const count = blocks.reduce((sum, block) => sum + (block.chunks || []).length, 0);
+  summary.textContent = `检索调试 · ${blocks.length} 次检索 · ${count} 个候选`;
+  details.append(summary);
+  blocks.forEach((block) => {
+    const query = document.createElement('p');
+    query.className = 'debug-query';
+    query.textContent = block.query || '（空查询）';
+    const meta = document.createElement('p');
+    meta.className = 'debug-meta';
+    const top = typeof block.top_score === 'number' ? block.top_score.toFixed(3) : '—';
+    const threshold = typeof block.threshold === 'number' ? block.threshold.toFixed(3) : '—';
+    meta.textContent = `最高分 ${top} · 阈值 ${threshold} · 留下 ${block.returned ?? 0}/${block.candidates ?? (block.chunks || []).length}`;
+    details.append(query, meta);
+    (block.chunks || []).forEach((chunk) => {
+      const row = document.createElement('article');
+      row.className = `debug-row${chunk.kept ? ' is-kept' : ' is-dropped'}`;
+      const head = document.createElement('div');
+      head.className = 'debug-row-head';
+      const score = document.createElement('span');
+      score.className = 'debug-score';
+      score.textContent = typeof chunk.score === 'number' ? chunk.score.toFixed(3) : '—';
+      const where = document.createElement('button');
+      where.type = 'button';
+      where.className = 'debug-where';
+      const page = chunk.page ? ` · 第 ${chunk.page} 页` : '';
+      where.textContent = `${chunk.source || '未知来源'}${page}`;
+      where.addEventListener('click', () => onOpen({ source: chunk.source, page: chunk.page }, where));
+      const reason = document.createElement('span');
+      reason.className = 'debug-reason';
+      reason.textContent = chunk.kept ? '保留' : dropReasonLabel(chunk.dropped_by);
+      head.append(score, where, reason);
+      const preview = document.createElement('p');
+      preview.className = 'debug-preview';
+      preview.textContent = chunk.preview || '';
+      row.append(head, preview);
+      details.append(row);
+    });
+  });
+  return details;
+}
+
+function buildHero() {
+  const hero = document.createElement('div');
+  hero.className = 'hero';
+  hero.id = 'hero-empty';
+  const kicker = document.createElement('p');
+  kicker.className = 'hero-kicker';
+  kicker.textContent = '知识库问答';
+  const title = document.createElement('h2');
+  title.className = 'hero-title';
+  title.textContent = '问文档里写过的事';
+  const lead = document.createElement('p');
+  lead.className = 'hero-lead';
+  lead.id = 'hero-lead';
+  lead.textContent = '上传并入库之后，回答会带上置信度和来源。';
+  const actions = document.createElement('div');
+  actions.className = 'hero-actions';
+  actions.id = 'hero-actions';
+  hero.append(kicker, title, lead, actions);
+  return hero;
+}

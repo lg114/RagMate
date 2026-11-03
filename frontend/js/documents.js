@@ -1,397 +1,599 @@
 import { API } from './api.js';
-import { escapeHtml, formatFileSize, formatDate, statusLabel } from './utils.js';
-import { showConfirm, showProgressModal } from './modal.js';
-import { emit } from './event-bus.js';
-import { ChatPanel } from './chat.js';
+import { emit, on } from './event-bus.js';
+import { showConfirm } from './modal.js';
+import { fileExt, formatDate, formatFileSize, statusLabel } from './utils.js';
+
+const ACCEPT = ['pdf', 'docx', 'xlsx', 'xls', 'txt', 'md'];
+const MAX_BYTES = 50 * 1024 * 1024;
+const STAGES = { loading: '加载', splitting: '切分', encoding: '编码', storing: '写入' };
 
 export const DocumentsPanel = {
-  listEl:          document.getElementById('doc-card-list'),
-  emptyEl:         document.getElementById('doc-empty'),
-  uploadZone:      document.getElementById('upload-zone'),
-  fileInput:       document.getElementById('file-input'),
-  uploadError:     document.getElementById('upload-error'),
-  ingestBtn:       document.getElementById('btn-ingest'),
-  ingestBtnText:   document.getElementById('btn-ingest-text'),
-  ingestSpinner:   document.getElementById('btn-ingest-spinner'),
-  selectAllEl:     document.getElementById('doc-select-all'),
-  batchDeleteBtn:  document.getElementById('btn-batch-delete'),
-  batchDeleteText: document.getElementById('btn-batch-delete-text'),
-  _ingestStateTimer: null,
-  _ingestHandled:    false,
-  _ingestModal:      null,
-  pollTimer:         null,
-  _uploadQueue:      [],
-  _uploading:        false,
-  _suppressCheckboxEvent: false,
+  docs: [],
+  filter: 'all',
+  query: '',
+  pollTimer: null,
+  phase: 'unknown',
+  loadedOnce: false,
+  loadError: '',
+  pendingFocus: '',
+  uploading: false,
+  uploadQueue: [],
 
   init() {
-    this.fileInput.addEventListener('change', (e) => {
-      const files = Array.from(e.target.files);
-      e.target.value = '';
-      this._enqueueUploads(files);
+    this.listEl = document.getElementById('doc-list');
+    this.emptyEl = document.getElementById('doc-empty');
+    this.summaryEl = document.getElementById('library-summary');
+    this.errorEl = document.getElementById('library-error');
+    this.bannerEl = document.getElementById('ingest-banner');
+    this.queueEl = document.getElementById('upload-queue');
+    this.fileInput = document.getElementById('file-input');
+    this.uploadZone = document.getElementById('upload-zone');
+    this.searchEl = document.getElementById('doc-search');
+    this.selectAllEl = document.getElementById('doc-select-all');
+    this.ingestBtn = document.getElementById('btn-ingest');
+    this.deleteBtn = document.getElementById('btn-batch-delete');
+    this.chipEl = document.getElementById('ingest-chip');
+
+    this.fileInput.addEventListener('change', () => {
+      this.enqueue(Array.from(this.fileInput.files || []));
+      this.fileInput.value = '';
+    });
+    ['dragover', 'dragenter'].forEach((name) => {
+      this.uploadZone.addEventListener(name, (event) => {
+        event.preventDefault();
+        this.uploadZone.classList.add('is-drag');
+      });
+    });
+    this.uploadZone.addEventListener('dragleave', () => this.uploadZone.classList.remove('is-drag'));
+    this.uploadZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      this.uploadZone.classList.remove('is-drag');
+      this.enqueue(Array.from(event.dataTransfer?.files || []));
     });
 
-    this.uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); this.uploadZone.classList.add('drag-over'); });
-    this.uploadZone.addEventListener('dragleave', () => this.uploadZone.classList.remove('drag-over'));
-    this.uploadZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      this.uploadZone.classList.remove('drag-over');
-      this._enqueueUploads(Array.from(e.dataTransfer.files));
+    this.searchEl.addEventListener('input', () => {
+      this.query = this.searchEl.value.trim().toLowerCase();
+      this.render();
     });
-
-    this.ingestBtn.addEventListener('click', () => this.startIngest());
-
+    document.querySelectorAll('[data-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.filter = btn.dataset.filter;
+        document.querySelectorAll('[data-filter]').forEach((el) => {
+          el.classList.toggle('is-active', el === btn);
+          if (el === btn) el.setAttribute('aria-pressed', 'true');
+          else el.removeAttribute('aria-pressed');
+        });
+        this.render();
+      });
+    });
     this.selectAllEl.addEventListener('change', () => {
-      const checked = this.selectAllEl.checked;
-      const listEl = document.getElementById('doc-card-list');
-      if (!listEl) return;
-      this._suppressCheckboxEvent = true;
-      listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
-      this._suppressCheckboxEvent = false;
-      this._updateBatchBar();
+      this.visibleRows().forEach((row) => {
+        const box = row.querySelector('input[type="checkbox"]');
+        if (box) box.checked = this.selectAllEl.checked;
+      });
+      this.updateSelection();
+    });
+    this.ingestBtn.addEventListener('click', () => this.startIngest());
+    this.deleteBtn.addEventListener('click', () => this.deleteSelected());
+    this.chipEl.addEventListener('click', () => emit('view:switch', 'documents'));
+    document.getElementById('btn-library-retry')?.addEventListener('click', () => this.load());
+    on('library:focus', (name) => {
+      this.pendingFocus = name || '';
+      this.filter = 'all';
+      this.query = '';
+      this.searchEl.value = '';
+      document.querySelectorAll('[data-filter]').forEach((el) => {
+        const on = el.dataset.filter === 'all';
+        el.classList.toggle('is-active', on);
+        if (on) el.setAttribute('aria-pressed', 'true');
+        else el.removeAttribute('aria-pressed');
+      });
+      this.render();
     });
 
-    this.batchDeleteBtn.addEventListener('click', () => this.batchDelete());
-
-    this._updateBatchBar();
     this.load();
+    this.watch();
   },
 
-  _getSelectedFiles() {
-    const listEl = document.getElementById('doc-card-list');
-    if (!listEl) return [];
-    return Array.from(listEl.querySelectorAll('input[type="checkbox"]:checked'))
-      .map(cb => cb.dataset.filename);
-  },
-
-  _updateBatchBar() {
-    const listEl = document.getElementById('doc-card-list');
-    if (!listEl) return;
-    const selectedCbs = Array.from(listEl.querySelectorAll('input[type="checkbox"]:checked'));
-    const count = selectedCbs.length;
-    const hasSelection = count > 0;
-    const hasUnIngested = selectedCbs.some(cb => cb.dataset.status !== 'ingested');
-    this.ingestBtn.removeAttribute('data-state');
-    this.ingestBtn.disabled = !hasUnIngested;
-    this.batchDeleteBtn.disabled = !hasSelection;
-    this.batchDeleteText.textContent = hasSelection ? `删除 (${count})` : '删除';
-    this.ingestBtnText.textContent = hasUnIngested ? `入库 (${selectedCbs.filter(cb => cb.dataset.status !== 'ingested').length})` : '入库';
-    const allCbs = listEl.querySelectorAll('input[type="checkbox"]');
-    this.selectAllEl.checked = allCbs.length > 0 && count === allCbs.length;
-    this.selectAllEl.indeterminate = count > 0 && count < allCbs.length;
-  },
-
-  async batchDelete() {
-    const files = this._getSelectedFiles();
-    if (files.length === 0) return;
-    if (!await showConfirm(`确定删除 ${files.length} 个文档？`)) return;
-
-    const modal = showProgressModal('正在删除文档…', files.length);
-    const items = { ok: [], fail: [] };
-
-    for (let i = 0; i < files.length; i++) {
-      if (modal.cancelled) break;
-      modal.update(i, files[i]);
-      try {
-        await API.deleteDocument(files[i]);
-        items.ok.push(files[i]);
-      } catch (err) {
-        items.fail.push({ name: files[i], error: err.message || '未知错误' });
-      }
-    }
-
-    modal.done('删除完成', {
-      ok: items.ok.map(f => ({ name: f })),
-      fail: items.fail,
-    });
-    this.selectAllEl.checked = false;
-    this._updateBatchBar();
-    await this.load();
+  onShow() {
+    this.load();
+    this.checkIngest();
   },
 
   async load() {
-    this._renderSkeleton();
+    if (!this.loadedOnce) this.renderSkeleton();
     try {
       const data = await API.getDocuments();
-      this.render(data.documents || []);
+      this.docs = data.documents || [];
+      this.loadError = '';
     } catch (err) {
-      this.render([]);
+      this.loadError = err.message || '无法加载文档';
+      if (!this.loadedOnce) this.docs = [];
     }
-    this.checkIngestStatus();
+    this.loadedOnce = true;
+    this.render();
+    emit('library:changed');
   },
 
-  async refreshList() {
-    try {
-      const data = await API.getDocuments();
-      this.render(data.documents || []);
-    } catch (err) {
-      this.render([]);
-    }
+  enqueue(files) {
+    files.forEach((file) => {
+      const ext = fileExt(file.name);
+      const item = { file, name: file.name, progress: 0, state: 'queued', error: '' };
+      if (!ACCEPT.includes(ext)) {
+        item.state = 'error';
+        item.error = '不支持的格式';
+      } else if (file.size > MAX_BYTES) {
+        item.state = 'error';
+        item.error = '超过 50 MB';
+      }
+      this.uploadQueue.push(item);
+    });
+    this.renderQueue();
+    this.pumpQueue();
   },
 
-  _renderSkeleton() {
-    const skeleton = document.getElementById('doc-skeleton');
-    if (!skeleton) return;
-    skeleton.innerHTML = Array.from({length: 4}, () =>
-      `<div class="skeleton-row">
-        <div class="skeleton skeleton-check"></div>
-        <div class="skeleton skeleton-bar w-40"></div>
-        <div class="skeleton skeleton-bar w-10"></div>
-        <div class="skeleton skeleton-bar w-16"></div>
-        <div class="skeleton skeleton-bar w-20"></div>
-      </div>`
-    ).join('');
-  },
-
-  render(docs) {
-    const listEl = document.getElementById('doc-card-list');
-    if (!listEl) return;
-    const skeleton = document.getElementById('doc-skeleton');
-    if (skeleton) skeleton.innerHTML = '';
-
-    listEl.querySelectorAll('.doc-card').forEach(el => el.remove());
-
-    this.selectAllEl.checked = false;
-    this.selectAllEl.indeterminate = false;
-    this._updateBatchBar();
-
-    if (docs.length === 0) {
-      this.emptyEl.classList.remove('hidden');
-      return;
-    }
-    this.emptyEl.classList.add('hidden');
-
-    docs.sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''));
-    docs.forEach(doc => {
-      const ext = doc.filename.split('.').pop().toLowerCase();
-      const iconClass = ['pdf','docx','xlsx','txt','md'].includes(ext) ? ext : 'txt';
-      const card = document.createElement('div');
-      card.className = 'doc-card';
-      card.innerHTML = `
-        <div class="doc-card-check"><input type="checkbox" data-filename="${escapeHtml(doc.filename)}" data-status="${doc.status}"></div>
-        <div class="doc-card-icon ${iconClass}">${ext}</div>
-        <div class="doc-card-info">
-          <div class="doc-card-name" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</div>
-          <div class="doc-card-meta">
-            <span>${formatFileSize(doc.size_bytes)}</span>
-            <span class="badge badge-${doc.status}">${statusLabel(doc.status)}${doc.chunk_count ? ' · ' + doc.chunk_count + ' 片段' : ''}</span>
-            <span>${formatDate(doc.uploaded_at)}</span>
-          </div>
-        </div>
-        <div class="doc-card-actions">
-          <button class="btn-delete" data-filename="${escapeHtml(doc.filename)}">删除</button>
-        </div>
-      `;
-      card.querySelector('input[type="checkbox"]').addEventListener('change', () => {
-        if (!this._suppressCheckboxEvent) this._updateBatchBar();
-      });
-      card.querySelector('.btn-delete').addEventListener('click', () => this.deleteDoc(doc.filename));
-      listEl.appendChild(card);
+  renderQueue() {
+    this.queueEl.replaceChildren();
+    this.queueEl.hidden = this.uploadQueue.length === 0;
+    this.uploadQueue.forEach((item) => {
+      const li = document.createElement('li');
+      li.className = `upload-item is-${item.state}`;
+      const name = document.createElement('span');
+      name.className = 'upload-name';
+      name.textContent = item.name;
+      const meta = document.createElement('span');
+      meta.className = 'upload-meta';
+      if (item.state === 'uploading') meta.textContent = `${Math.round(item.progress * 100)}%`;
+      else if (item.state === 'done') meta.textContent = '已上传';
+      else if (item.state === 'error') meta.textContent = item.error || '失败';
+      else meta.textContent = '等待';
+      li.append(name, meta);
+      if (item.state === 'uploading') {
+        const bar = document.createElement('span');
+        bar.className = 'upload-bar';
+        const fill = document.createElement('span');
+        fill.style.width = `${Math.round(item.progress * 100)}%`;
+        bar.append(fill);
+        li.append(bar);
+      }
+      this.queueEl.append(li);
     });
   },
 
-  _enqueueUploads(files) {
-    this._uploadQueue.push(...files);
-    this._processUploadQueue();
-  },
-
-  async _processUploadQueue() {
-    if (this._uploading) return;
-    this._uploading = true;
-    while (this._uploadQueue.length > 0) {
-      const file = this._uploadQueue.shift();
-      await this.upload(file);
-    }
-    this._uploading = false;
-  },
-
-  async upload(file) {
-    const ext = file.name.toLowerCase().split('.').pop();
-    const supported = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'txt', 'md'];
-    if (!supported.includes(ext)) {
-      this.showUploadError('不支持的文件格式');
-      return;
-    }
-    if (file.size > 50 * 1024 * 1024) {
-      this.showUploadError('文件不能超过 50MB');
-      return;
-    }
-
-    this.uploadZone.classList.add('uploading');
-    this.hideUploadError();
-
-    try {
-      await API.uploadDocument(file);
-      await this.load();
-    } catch (err) {
-      if (err.message && err.message.includes('already exists')) {
-        if (await showConfirm(`"${file.name}" 已存在，是否替换？`)) {
-          try {
-            await API.deleteDocument(file.name);
-            await API.uploadDocument(file);
-            await this.load();
-          } catch (retryErr) {
-            this.showUploadError(retryErr.message || '替换失败');
+  async pumpQueue() {
+    if (this.uploading) return;
+    this.uploading = true;
+    while (this.uploadQueue.some((item) => item.state === 'queued')) {
+      const item = this.uploadQueue.find((entry) => entry.state === 'queued');
+      item.state = 'uploading';
+      this.renderQueue();
+      try {
+        await API.uploadDocument(item.file, (ratio) => {
+          item.progress = ratio;
+          this.renderQueue();
+        });
+        item.state = 'done';
+        item.progress = 1;
+      } catch (err) {
+        if (String(err.message || '').includes('already exists')) {
+          const replace = await showConfirm(`“${item.name}” 已存在。用新文件替换它？`, { confirmLabel: '替换' });
+          if (replace) {
+            try {
+              await API.deleteDocument(item.name);
+              await API.uploadDocument(item.file, (ratio) => {
+                item.progress = ratio;
+                this.renderQueue();
+              });
+              item.state = 'done';
+            } catch (retryErr) {
+              item.state = 'error';
+              item.error = retryErr.message || '替换失败';
+            }
+          } else {
+            item.state = 'error';
+            item.error = '已保留原文件';
           }
+        } else {
+          item.state = 'error';
+          item.error = err.message || '上传失败';
         }
-      } else {
-        this.showUploadError(err.message || '上传失败');
       }
-    } finally {
-      this.uploadZone.classList.remove('uploading');
+      this.renderQueue();
+      await this.load();
+    }
+    this.uploading = false;
+  },
+
+  visibleDocs() {
+    return this.docs.filter((doc) => {
+      if (this.query && !doc.filename.toLowerCase().includes(this.query)) return false;
+      if (this.filter === 'pending') return doc.status === 'uploaded' || doc.status === 'ingesting';
+      if (this.filter === 'ingested') return doc.status === 'ingested';
+      if (this.filter === 'failed') return doc.status === 'failed';
+      return true;
+    });
+  },
+
+  renderSkeleton() {
+    this.listEl.replaceChildren();
+    for (let i = 0; i < 4; i += 1) {
+      const row = document.createElement('div');
+      row.className = 'skeleton-line';
+      this.listEl.append(row);
     }
   },
 
-  async deleteDoc(filename) {
-    if (!await showConfirm(`确定删除 "${filename}"？`)) return;
+  render() {
+    const docs = this.visibleDocs();
+    const ingested = this.docs.filter((doc) => doc.status === 'ingested').length;
+    const pending = this.docs.filter((doc) => doc.status !== 'ingested').length;
+    this.summaryEl.textContent = this.docs.length
+      ? `${this.docs.length} 个文件 · ${ingested} 已入库 · ${pending} 待处理`
+      : '还没有文档';
+    this.errorEl.hidden = !this.loadError;
+    this.errorEl.querySelector('span').textContent = this.loadError || '';
+
+    this.listEl.replaceChildren();
+    this.emptyEl.hidden = docs.length !== 0 || !this.loadedOnce;
+    if (!this.docs.length && this.loadedOnce && !this.loadError) {
+      this.emptyEl.hidden = false;
+      this.emptyEl.textContent = '把文件拖到上方，或点击选择。入库之后，对话才能引用它们。';
+    } else if (this.docs.length && !docs.length) {
+      this.emptyEl.hidden = false;
+      this.emptyEl.textContent = '没有符合筛选的文档';
+    } else {
+      this.emptyEl.textContent = '把文件拖到上方，或点击选择。入库之后，对话才能引用它们。';
+    }
+
+    docs.forEach((doc) => {
+      const row = document.createElement('article');
+      row.className = 'doc-row';
+      row.dataset.filename = doc.filename;
+      row.dataset.status = doc.status || '';
+      if (doc.filename === this.pendingFocus) row.classList.add('is-focused');
+
+      const checkLabel = document.createElement('label');
+      checkLabel.className = 'doc-check';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.dataset.filename = doc.filename;
+      box.dataset.status = doc.status || '';
+      const checkText = document.createElement('span');
+      checkText.className = 'visually-hidden';
+      checkText.textContent = `选择 ${doc.filename}`;
+      checkLabel.append(box, checkText);
+      box.addEventListener('change', () => this.updateSelection());
+
+      const ext = document.createElement('span');
+      ext.className = 'doc-ext';
+      ext.textContent = fileExt(doc.filename).slice(0, 4) || 'file';
+
+      const info = document.createElement('div');
+      info.className = 'doc-info';
+      const name = document.createElement('h3');
+      name.className = 'doc-name';
+      name.textContent = doc.filename;
+      name.title = doc.filename;
+      const meta = document.createElement('p');
+      meta.className = 'doc-meta';
+      const bits = [formatFileSize(doc.size_bytes), statusLabel(doc.status)];
+      if (doc.chunk_count) bits.push(`${doc.chunk_count} 个片段`);
+      bits.push(formatDate(doc.uploaded_at));
+      meta.textContent = bits.join(' · ');
+      info.append(name, meta);
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn btn-ghost';
+      del.textContent = '删除';
+      del.setAttribute('aria-label', `删除 ${doc.filename}`);
+      del.addEventListener('click', () => this.deleteOne(doc.filename));
+
+      row.append(checkLabel, ext, info, del);
+      this.listEl.append(row);
+    });
+
+    if (this.pendingFocus) {
+      const row = this.listEl.querySelector('.is-focused');
+      row?.scrollIntoView({ block: 'center' });
+    }
+    this.updateSelection();
+  },
+
+  visibleRows() {
+    return Array.from(this.listEl.querySelectorAll('.doc-row'));
+  },
+
+  selectedBoxes() {
+    return Array.from(this.listEl.querySelectorAll('input[type="checkbox"]:checked'));
+  },
+
+  updateSelection() {
+    const boxes = Array.from(this.listEl.querySelectorAll('input[type="checkbox"]'));
+    const selected = boxes.filter((box) => box.checked);
+    const pendingSelected = selected.filter((box) => box.dataset.status !== 'ingested');
+    const pendingAll = this.docs.filter((doc) => doc.status !== 'ingested');
+    this.selectAllEl.checked = boxes.length > 0 && selected.length === boxes.length;
+    this.selectAllEl.indeterminate = selected.length > 0 && selected.length < boxes.length;
+    this.deleteBtn.disabled = selected.length === 0;
+    this.deleteBtn.textContent = selected.length ? `删除所选 (${selected.length})` : '删除所选';
+    const running = this.phase === 'running' || !!this.startedAt;
+    if (running) {
+      this.ingestBtn.disabled = true;
+      this.ingestBtn.textContent = '入库中';
+      return;
+    }
+    if (pendingSelected.length) {
+      this.ingestBtn.disabled = false;
+      this.ingestBtn.textContent = `入库所选 (${pendingSelected.length})`;
+    } else if (!selected.length && pendingAll.length) {
+      this.ingestBtn.disabled = false;
+      this.ingestBtn.textContent = `入库未处理 (${pendingAll.length})`;
+    } else {
+      this.ingestBtn.disabled = true;
+      this.ingestBtn.textContent = this.docs.length && !pendingAll.length ? '都已入库' : '入库';
+    }
+  },
+
+  async deleteOne(filename) {
+    const ok = await showConfirm(`删除 “${filename}”？文件和对应向量都会移除。`, {
+      confirmLabel: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await API.deleteDocument(filename);
       await this.load();
     } catch (err) {
-      this.showUploadError('删除失败: ' + (err.message || '未知错误'));
+      this.showLibraryError(err.message || '删除失败');
     }
+  },
+
+  async deleteSelected() {
+    const names = this.selectedBoxes().map((box) => box.dataset.filename);
+    if (!names.length) return;
+    const ok = await showConfirm(`删除 ${names.length} 个文档？文件和对应向量都会移除。`, {
+      confirmLabel: '删除',
+      danger: true,
+    });
+    if (!ok) return;
+    const failures = [];
+    for (let i = 0; i < names.length; i += 1) {
+      this.summaryEl.textContent = `正在删除 ${i + 1}/${names.length}…`;
+      try {
+        await API.deleteDocument(names[i]);
+      } catch (err) {
+        failures.push(`${names[i]}：${err.message || '失败'}`);
+      }
+    }
+    await this.load();
+    if (failures.length) this.showLibraryError(failures.slice(0, 3).join('；'));
+  },
+
+  showLibraryError(message) {
+    this.loadError = message;
+    this.errorEl.hidden = false;
+    this.errorEl.querySelector('span').textContent = message;
+  },
+
+  ingestTargets() {
+    const selected = this.selectedBoxes();
+    if (selected.length) {
+      return selected
+        .filter((box) => box.dataset.status !== 'ingested')
+        .map((box) => box.dataset.filename);
+    }
+    return this.docs.filter((doc) => doc.status !== 'ingested').map((doc) => doc.filename);
   },
 
   async startIngest() {
-    const files = this._getSelectedFiles();
-    this._ingestHandled = false;
-    this.setIngestBtnState('running');
-    this.batchDeleteBtn.disabled = true;
-
+    const filenames = this.ingestTargets();
+    if (!filenames.length) return;
+    this.ingestBtn.disabled = true;
+    this.ingestBtn.textContent = '正在启动…';
+    this.startedAt = Date.now();
+    this.sawRunning = false;
     try {
-      const result = await API.startIngest(files.length > 0 ? files : null);
-      if (result.status === 'already_running') {
-        this.pollIngest();
-      } else {
-        this._ingestModal = showProgressModal('正在入库…', files.length || 1);
-        document.getElementById('prog-cancel').onclick = () => {
-          API.cancelIngest().catch(() => {});
-        };
-        this.pollIngest();
-      }
-    } catch (err) {
-      this.setIngestBtnState('failed');
-    }
-  },
-
-  pollIngest() {
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    this.pollTimer = setInterval(async () => {
-      await this.checkIngestStatus();
-    }, 2000);
-  },
-
-  async checkIngestStatus() {
-    try {
-      const status = await API.getIngestStatus();
-      if (!status || status.status === 'idle') {
-        this._ingestHandled = false;
-        this.stopPolling();
-        if (this._ingestModal) { this._ingestModal.close(); this._ingestModal = null; }
-        this.setIngestBtnState('default');
+      const result = await API.startIngest(filenames);
+      if (result.status !== 'started' && result.status !== 'already_running') {
+        this.startedAt = 0;
+        this.renderTerminal({ status: 'failed', error: result.error || '没能启动入库' });
+        this.updateSelection();
         return;
       }
-      if (this._ingestHandled && status.status !== 'running') return;
-      if (status.status === 'running') {
-        const stage = status.stage || '';
-        const stageLabels = {loading: '加载中', splitting: '切分中', encoding: '编码中', storing: '写入中'};
-        const stageLabel = stageLabels[stage] || '处理中';
-        const file = status.current_file || '';
-        const progress = status.total || 0;
-        const current = status.progress || 0;
-        if (this._ingestModal && progress > 0) {
-          this._ingestModal.update(current, `${stageLabel} — ${file}`);
-        }
-        this.setIngestBtnState('running');
-      } else if (status.status === 'success') {
-        this.stopPolling();
-        if (this._ingestModal) {
-          const docCount = status.document_count || 0;
-          const chunkCount = status.chunk_count || 0;
-          const skipped = (status.skipped || []).map(s => ({ name: s.filename, reason: s.reason }));
-          const okItems = docCount > 0 ? Array.from({length: docCount}, (_, i) => ({ name: (status.filenames || [])[i] || `文档${i+1}` })) : [];
-          this._ingestModal.done('入库完成', { ok: okItems, skipped, fail: [] },
-            skipped.length === 0 ? `${docCount} 个文档，${chunkCount} 个片段` : '');
-          this._ingestModal = null;
-        }
-        this._ingestHandled = true;
-        this.setIngestBtnState('done');
-        await this.refreshList();
-        ChatPanel.updateHeroState();
-      } else if (status.status === 'cancelled') {
-        this.stopPolling();
-        if (this._ingestModal) {
-          this._ingestModal.done('已取消', { ok: [], fail: [] }, '入库已停止。');
-          this._ingestModal = null;
-        }
-        this._ingestHandled = true;
-        this.setIngestBtnState('default');
-      } else if (status.status === 'interrupted') {
-        this.stopPolling();
-        if (this._ingestModal) {
-          this._ingestModal.done('入库中断', {
-            ok: [],
-            fail: [{ name: '入库任务', error: status.error || '进程已退出' }],
-          });
-          this._ingestModal = null;
-        }
-        this._ingestHandled = true;
-        this.setIngestBtnState('failed');
-      } else if (status.status === 'failed') {
-        this.stopPolling();
-        if (this._ingestModal) {
-          this._ingestModal.done('入库失败', {
-            ok: [],
-            fail: [{ name: '入库任务', error: status.error || '未知错误' }],
-          });
-          this._ingestModal = null;
-        }
-        this._ingestHandled = true;
-        this.setIngestBtnState('failed');
-      }
+      this.fillBanner({
+        tone: 'running',
+        title: '正在启动入库',
+        detail: filenames.length ? filenames.join('、') : '全部待处理文件',
+        progress: 6,
+        actions: [{ id: 'cancel', label: '取消入库', kind: 'ghost' }],
+      });
+      this.schedule(400);
     } catch (err) {
-      this.stopPolling();
-      if (this._ingestModal) { this._ingestModal.close(); this._ingestModal = null; }
-      this.setIngestBtnState('default');
+      this.startedAt = 0;
+      this.renderTerminal({ status: 'failed', error: err.message || '没能启动入库' });
+      this.updateSelection();
     }
   },
 
-  stopPolling() {
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+  schedule(ms) {
+    clearTimeout(this.pollTimer);
+    this.pollTimer = setTimeout(() => this.watchTick(), ms);
   },
 
-  setIngestBtnState(state) {
-    if (this._ingestStateTimer) { clearTimeout(this._ingestStateTimer); this._ingestStateTimer = null; }
-    this.ingestBtn.removeAttribute('data-state');
-    if (state === 'running') {
-      this.ingestBtn.disabled = true;
-      this.ingestBtn.setAttribute('data-state', 'running');
-      this.ingestSpinner.classList.remove('hidden');
-      this.ingestBtnText.textContent = '入库中';
-    } else if (state === 'done') {
-      this.ingestBtn.disabled = true;
-      this.ingestBtn.setAttribute('data-state', 'done');
-      this.ingestSpinner.classList.add('hidden');
-      this.ingestBtnText.textContent = '完成';
-      this._ingestStateTimer = setTimeout(() => this.setIngestBtnState('default'), 2000);
-    } else if (state === 'failed') {
-      this.ingestBtn.disabled = true;
-      this.ingestBtn.setAttribute('data-state', 'failed');
-      this.ingestSpinner.classList.add('hidden');
-      this.ingestBtnText.textContent = '失败';
-      this._ingestStateTimer = setTimeout(() => this.setIngestBtnState('default'), 2000);
-    } else {
-      this.ingestSpinner.classList.add('hidden');
-      this._updateBatchBar();
+  watch() {
+    this.watchTick();
+  },
+
+  async watchTick() {
+    const status = await this.checkIngest();
+    const running = status?.status === 'running' || this.startedAt;
+    this.schedule(running ? 1500 : 12000);
+  },
+
+  async checkIngest() {
+    let status;
+    try {
+      status = await API.getIngestStatus();
+    } catch {
+      this.chipEl.hidden = true;
+      return null;
+    }
+    const name = status?.status || 'idle';
+    const stamp = Date.parse(status?.last_ingest || '') || 0;
+    const fresh = this.startedAt && stamp >= this.startedAt - 1500;
+    if (name === 'running') {
+      this.sawRunning = true;
+      this.phase = 'running';
+      this.renderRunning(status);
+      this.updateSelection();
+      return status;
+    }
+    const finished = name === 'success' || name === 'cancelled' || name === 'interrupted' || name === 'failed';
+    if (finished && (this.sawRunning || fresh)) {
+      this.startedAt = 0;
+      this.sawRunning = false;
+      this.phase = name;
+      this.renderTerminal(status);
+      this.chipEl.hidden = true;
+      await this.load();
+      return status;
+    }
+    if (this.startedAt && Date.now() - this.startedAt < 20000) {
+      this.chipEl.hidden = false;
+      this.chipEl.textContent = '入库启动中';
+      return status;
+    }
+    if (this.startedAt) this.startedAt = 0;
+    if (this.phase === 'unknown') {
+      this.phase = name;
+      if (name === 'failed' || name === 'interrupted') this.renderTerminal(status);
+      else if (name === 'success') this.renderQuiet(status);
+      this.chipEl.hidden = true;
+    }
+    return status;
+  },
+
+  renderRunning(status) {
+    const stage = STAGES[status.stage] || '处理';
+    const current = Number(status.progress) || 0;
+    const total = Number(status.total) || 0;
+    const ratio = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 8;
+    const file = status.current_file || '';
+    this.fillBanner({
+      tone: 'running',
+      title: `正在入库 · ${stage}`,
+      detail: file ? `${file}${total ? ` · ${Math.min(current + 1, total)}/${total}` : ''}` : (total ? `${current}/${total}` : '正在准备任务'),
+      progress: ratio,
+      actions: [{ id: 'cancel', label: '取消入库', kind: 'ghost' }],
+    });
+    this.chipEl.hidden = false;
+    this.chipEl.textContent = `入库中 · ${stage}`;
+  },
+
+  renderTerminal(status) {
+    const name = status?.status || 'failed';
+    if (name === 'success') {
+      const docs = status.document_count ?? 0;
+      const chunks = status.chunk_count ?? 0;
+      const skipped = Array.isArray(status.skipped) ? status.skipped : [];
+      let detail = status.message === 'All documents already ingested'
+        ? '没有新的改动，这些文件已经入库。'
+        : `完成 ${docs} 个文档，${chunks} 个片段。`;
+      if (skipped.length) {
+        detail += ` 跳过 ${skipped.length} 个：${skipped.slice(0, 3).map((item) => item.filename || item.name).filter(Boolean).join('、')}`;
+      }
+      this.fillBanner({ tone: 'ok', title: '入库完成', detail, actions: [{ id: 'dismiss', label: '关闭', kind: 'ghost' }] });
+      return;
+    }
+    if (name === 'cancelled') {
+      this.fillBanner({
+        tone: 'idle',
+        title: '入库已取消',
+        detail: '已停止。已写入的进度以服务端为准，可以重新入库。',
+        actions: [{ id: 'dismiss', label: '关闭', kind: 'ghost' }],
+      });
+      return;
+    }
+    const title = name === 'interrupted' ? '入库中断' : '入库失败';
+    this.fillBanner({
+      tone: 'danger',
+      title,
+      detail: friendlyIngestError(status?.error || status?.message),
+      actions: [{ id: 'dismiss', label: '关闭', kind: 'ghost' }],
+    });
+  },
+
+  renderQuiet(status) {
+    if (status.status === 'cancelled') return;
+    const when = status.last_ingest ? formatDate(status.last_ingest) : '';
+    const docs = status.document_count ?? 0;
+    const chunks = status.chunk_count ?? 0;
+    this.fillBanner({
+      tone: 'idle',
+      title: '上次入库',
+      detail: [when, `${docs} 个文档`, `${chunks} 个片段`].filter(Boolean).join(' · '),
+      actions: [{ id: 'dismiss', label: '关闭', kind: 'ghost' }],
+    });
+  },
+
+  fillBanner({ tone, title, detail, progress, actions }) {
+    this.bannerEl.hidden = false;
+    this.bannerEl.className = `ingest-banner is-${tone}`;
+    this.bannerEl.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'ingest-copy';
+    const h = document.createElement('h3');
+    h.textContent = title;
+    const p = document.createElement('p');
+    p.textContent = detail || '';
+    head.append(h, p);
+    this.bannerEl.append(head);
+    if (progress != null) {
+      const bar = document.createElement('div');
+      bar.className = 'progress';
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      bar.setAttribute('aria-valuenow', String(progress));
+      const fill = document.createElement('span');
+      fill.style.width = `${progress}%`;
+      bar.append(fill);
+      this.bannerEl.append(bar);
+    }
+    const row = document.createElement('div');
+    row.className = 'ingest-actions';
+    (actions || []).forEach((action) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = action.kind === 'danger' ? 'btn btn-danger' : 'btn btn-ghost';
+      btn.textContent = action.label;
+      btn.addEventListener('click', () => {
+        if (action.id === 'cancel') this.cancelIngest();
+        if (action.id === 'dismiss') this.bannerEl.hidden = true;
+      });
+      row.append(btn);
+    });
+    this.bannerEl.append(row);
+  },
+
+  async cancelIngest() {
+    try {
+      await API.cancelIngest();
+      this.fillBanner({
+        tone: 'idle',
+        title: '正在取消',
+        detail: '已请求停止，等待当前步骤结束。',
+        actions: [],
+      });
+    } catch (err) {
+      this.showLibraryError(err.message || '取消失败');
     }
   },
-
-  showUploadError(msg) {
-    this.uploadError.textContent = msg;
-    this.uploadError.classList.remove('hidden');
-  },
-
-  hideUploadError() {
-    this.uploadError.classList.add('hidden');
-  }
 };
+
+function friendlyIngestError(message) {
+  const text = String(message || '未知错误');
+  if (text === 'Cancelled') return '入库已取消。';
+  return text;
+}
