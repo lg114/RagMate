@@ -29,3 +29,37 @@
 - Python 3.14 注意：ragas 0.4.3 的打分超时（`asyncio.wait_for`）在 3.14 下会让全部
   打分任务秒灭（`Timeout should be used inside a task`），`compute_metrics` 因此传
   `RunConfig(timeout=None)` 绕开；单次调用的超时由 HTTP 客户端默认兜底。3.12 不受影响。
+
+## 确定性检索评测（tier-1，不经过 LLM）
+
+RAGAS 的 `context_precision` / `context_recall` 是 LLM judge 打分的指标，
+不是确定性检索指标——名字像，不等于。真正的检索基线用 gold chunk ID
+直接算，不经过 judge：
+
+```bash
+# 先校验标注：schema + chunk 清单；--live 再校验 live Milvus 索引
+ragmate-eval check-gold --testset eval/testsets/sample/testset.json [--live]
+
+# 分阶段跑检索并算 hit/recall/MRR/nDCG（默认四臂：dense / sparse / fused / reranked）
+ragmate-eval retrieval --testset eval/testsets/sample/testset.json
+```
+
+`retrieval` 命令写三个文件（默认 `--report` 为
+`eval/reports/baseline/retrieval-baseline-50q.json`）：指标 JSON 报告、
+同名 `.md` 基线表（入仓）、同名 `.retrieval.json` 分阶段排序落盘（不入仓，
+供重算指标时复用，不重跑检索）。reranked 阶段只取排序，不做阈值过滤、
+去重、父展开——那些是生成侧的取舍，不应污染检索基线。unanswerable 题
+不计入均值，单独计数。
+
+## 实验纪律：manifest + 一次只改一个变量 + 噪声带宽
+
+每次 `retrieval` 运行都在报告里写一份 manifest：题库文件 SHA-256、全部
+检索相关配置、harness 参数、git commit。用 `--compare-manifest <上一份报告>`
+在运行前打印与上次的配置差异；差异超过一个变量时，对比结论不成立。
+
+噪声带宽分两层量：
+
+- 确定性检索层：`--repeat 3` 重复跑，指标极差应当为 0（固定索引下的
+  检索排序是确定的）。极差非 0 时先修不确定性来源，再比 A/B。
+- judge 层：同配置重复跑，极差即噪声；50 题时 1 题占 2 分，<5 题的
+  翻转不算赢（95% 区间约 ±11 分）。

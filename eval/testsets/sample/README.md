@@ -9,7 +9,7 @@
 
 | 文件 | 说明 |
 |---|---|
-| `testset.json` | 50 道问答，格式与 `ragmate-eval evaluate` 的输入一致（`user_input` + `reference`） |
+| `testset.json` | 50 道问答，v1.1 标注：每题除 `user_input` + `reference` 外，还有 `gold_chunks`（gold chunk ID）、`expected_claims`（预期要点）、`question_type`（题型）、`source_doc`（来源文档） |
 | `corpus/*.md` | 8 篇中文技术文档，约 24,000 字：Docker Compose 部署、PostgreSQL 索引优化、Redis 缓存策略、Python asyncio、HTTP 缓存与 CDN、JWT 与 OAuth 2.0、Linux 进程与信号、Git 内部原理 |
 
 题目覆盖：单文档事实问答、跨概念对比、机制问答，以及 2 道语料未覆盖
@@ -17,12 +17,36 @@
 如实回答无法回答）。每篇文档约 5–6 道题，题目均匀分布，避免单篇语料
 主导评测结果。
 
+## v1.1 标注：gold chunk ID（P0-1）
+
+`testset.json` 每题在原 `user_input` / `reference` 之外多了四个字段：
+
+| 字段 | 说明 |
+|---|---|
+| `gold_chunks` | gold chunk 列表，每项为 `{source, page, chunk_index}`；chunk 身份用三元组而不用 Milvus 自增 id（自增 id 不可复现，三元组是入库时写进 metadata 的确定性标识，检索链路内部也用它去重）。48 道可回答题各有 1–2 个 gold chunk，2 道 unanswerable 题为空 |
+| `expected_claims` | 参考答案拆出的可核查要点（1–3 条），供后续生成侧 claim 级打分用 |
+| `question_type` | `factoid`（48 题中 46 题）/ `multi-hop`（2 题：TaskGroup vs gather、GIN vs B-tree，各需 2 个 chunk）/ `unanswerable`（2 题） |
+| `source_doc` | gold chunk 所在的语料文件名，unanswerable 题为空 |
+
+标注方法：用仓库真实的入库切分逻辑（`_load_and_split`）从 `corpus/` 复现
+chunk 清单，逐题核对参考答案的事实落在哪个/哪几个 chunk 里；只有“只读
+该 chunk 就能回答出问题”的 chunk 才算 gold。复现结果与作者本地入库
+完全一致：67 块、各文件 11/11/9/10/7/7/6/6。标注后用
+`ragmate-eval check-gold` 校验（schema + chunk 清单；加 `--live` 再校验
+live Milvus 索引里确实有这些 chunk）。
+
 ## 复现方法
 
-1. 把 `corpus/` 下的 4 篇文档放进 `backend/documents/`（或 `DOCUMENTS_DIR`
+1. 把 `corpus/` 下的 8 篇文档放进 `backend/documents/`（或 `DOCUMENTS_DIR`
    指向的目录），触发一次入库；
-2. 在仓库根目录运行评测（需先启动 PostgreSQL / Redis / Milvus 栈，
-   并配置好 LLM 密钥）：
+2. 在仓库根目录运行确定性检索评测（只需 PostgreSQL / Redis / Milvus 栈，
+   不需要 LLM）：
+
+```bash
+ragmate-eval retrieval --testset eval/testsets/sample/testset.json
+```
+
+   也可以跑原来的 RAGAS 全链路评测（需配置好 LLM 密钥）：
 
 ```bash
 ragmate-eval evaluate --testset eval/testsets/sample/testset.json
