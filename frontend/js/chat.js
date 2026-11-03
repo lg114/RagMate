@@ -22,6 +22,31 @@ const HERO_HTML = `
     </div>
   </div>`;
 
+function renderRetrievalDebug(blocks) {
+  const details = document.createElement('details');
+  details.className = 'retrieval-debug';
+  details.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = '检索调试';
+  details.appendChild(summary);
+  blocks.forEach((block) => {
+    const query = document.createElement('div');
+    query.className = 'retrieval-debug-query';
+    query.textContent = block.query || '';
+    details.appendChild(query);
+    (block.chunks || []).forEach((chunk) => {
+      const row = document.createElement('div');
+      row.className = 'retrieval-debug-row' + (chunk.kept ? ' is-kept' : ' is-dropped');
+      const where = chunk.page ? `${chunk.source} · 第${chunk.page}页` : (chunk.source || '');
+      const score = typeof chunk.score === 'number' ? chunk.score.toFixed(3) : '';
+      const reason = chunk.kept ? '保留' : (chunk.dropped_by || '丢弃');
+      row.textContent = `#${chunk.rank}  ${score}  ${reason}  ${where}\n${chunk.preview || ''}`;
+      details.appendChild(row);
+    });
+  });
+  return details;
+}
+
 export const ChatPanel = {
   messagesEl:  document.getElementById('chat-messages'),
   formEl:      document.getElementById('chat-form'),
@@ -142,6 +167,7 @@ export const ChatPanel = {
     const streamDiv = this.startStreamMessage();
     let fullText = '';
 
+    const debug = document.getElementById('chat-debug')?.checked;
     await API.chatStream(
       text, sid,
       (token) => { fullText += token; this.appendStreamToken(streamDiv, fullText); },
@@ -160,6 +186,7 @@ export const ChatPanel = {
         emit('history:refresh');
       },
       replaceLast,
+      debug,
     );
   },
 
@@ -227,6 +254,10 @@ export const ChatPanel = {
         row.appendChild(chip);
       });
       content.appendChild(row);
+    }
+
+    if (doneData.retrieval_debug && doneData.retrieval_debug.length > 0) {
+      content.appendChild(renderRetrievalDebug(doneData.retrieval_debug));
     }
 
     if (doneData.unsupported_claims && doneData.unsupported_claims.length > 0) {

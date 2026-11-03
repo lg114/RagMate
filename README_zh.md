@@ -221,7 +221,8 @@ flowchart LR
 {
   "message": "什么是 RAG？",   // 必填，最长 10 000 字符
   "session_id": "...",        // 可选 UUID；不传则新建
-  "replace_last": false       // 重试 / 重新生成：先丢弃最后一轮
+  "replace_last": false,      // 重试 / 重新生成：先丢弃最后一轮
+  "debug": false               // 为 true 时返回检索候选、分数，以及被过滤丢掉的原因
 }
 ```
 
@@ -245,7 +246,8 @@ data: {"done": true, "session_id": "...",
        "confidence": {"level": "high", "score": 0.87, "chunks": 6},
        "citations": [{"source": "guide.pdf", "page": 3}],
        "grounding": "grounded",
-       "unsupported_claims": [{"claim": "...", "supported": false}]}
+       "unsupported_claims": [{"claim": "...", "supported": false}],
+       "retrieval_debug": [{"query": "...", "chunks": [{"rank": 1, "score": 0.91, "kept": true, "dropped_by": null, "preview": "..."}]}]}
 
 data: {"error": "..."}                               // 终止性错误
 ```
@@ -253,6 +255,8 @@ data: {"error": "..."}                               // 终止性错误
 空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence`、`citations`、`grounding` 和 `unsupported_claims` 只出现在 `done` 事件中。该事件里的 `response` 是落地后的文本（拒答、低置信保留、以及真实来源行），客户端应用它替换已经流出的 token。`unsupported_claims` 在忠实度校验发现无依据声明时出现。`grounding` 取值为 `refused`、`hedged`、`grounded`；没有发生检索时省略。
 
 非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
+
+只有请求带 `"debug": true` 时才会返回 `retrieval_debug`。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。对话页的「检索调试」开关会带上这个标志。平时关掉；preview 是文档原文片段。
 
 ---
 

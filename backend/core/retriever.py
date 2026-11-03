@@ -1,7 +1,9 @@
 """检索管线：Milvus 混合检索 + Reranking + 动态过滤。"""
+import contextvars
 import json
 import logging
 import math
+import os
 import re
 import threading
 import urllib.request
@@ -25,6 +27,37 @@ class _MetricsLocal(threading.local):
 
 
 _metrics = _MetricsLocal()
+
+# 仅在请求显式打开 debug 时记录候选轨迹。ContextVar 会随线程池复制，
+# 所以 agent 工具线程里也能看到调用方在 run_agent 上设置的开关。
+_retrieval_debug_enabled: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "retrieval_debug_enabled", default=False,
+)
+_last_debug = threading.local()
+
+
+def set_retrieval_debug(enabled: bool):
+    """打开或关闭当前上下文的检索调试。返回 reset 用的 token。"""
+    return _retrieval_debug_enabled.set(bool(enabled))
+
+
+def reset_retrieval_debug(token) -> None:
+    """恢复 set_retrieval_debug 之前的开关。"""
+    _retrieval_debug_enabled.reset(token)
+
+
+def retrieval_debug_enabled() -> bool:
+    """当前上下文是否在记录检索调试信息。"""
+    return bool(_retrieval_debug_enabled.get())
+
+
+def take_retrieval_debug() -> dict | None:
+    """取出 retrieve() 刚写下的调试记录。调试关闭时丢掉记录并返回 None。"""
+    entry = getattr(_last_debug, "entry", None)
+    _last_debug.entry = None
+    if not retrieval_debug_enabled():
+        return None
+    return entry
 
 
 def calculate_confidence(metrics_list: list[dict]) -> dict | None:
@@ -414,6 +447,135 @@ def _compress_chunks(query: str, candidates: list[dict]) -> list[dict]:
     return candidates
 
 
+def _debug_source(source: str | None) -> str:
+    text = str(source or "").replace("\\", "/")
+    return os.path.basename(text) or text or "unknown"
+
+
+def _debug_page(page) -> int | None:
+    if isinstance(page, int) and not isinstance(page, bool):
+        return page + 1
+    return None
+
+
+def _scrub_debug_fields(candidates: list[dict]) -> None:
+    """去掉只给调试用的临时字段，避免它们跟着片段进入模型上下文。"""
+    for cand in candidates:
+        cand.pop("_debug_preview", None)
+        cand.pop("dropped_by", None)
+
+
+def build_retrieval_debug(query: str, candidates: list[dict], kept: list[dict], threshold: float, top_score: float) -> dict:
+    """把重排后的候选整理成调试结构：分数、是否留下、被哪一步丢掉。
+
+    只应在请求打开 debug 时调用。preview 截断，避免把整篇父片段塞进响应。
+    """
+    kept_ids = {id(c) for c in kept}
+    chunks = []
+    for rank, cand in enumerate(candidates, start=1):
+        dropped = cand.get("dropped_by")
+        if id(cand) in kept_ids:
+            dropped = None
+        preview = cand.get("_debug_preview")
+        if preview is None:
+            preview = (cand.get("text") or "")[:240]
+        row = {
+            "rank": rank,
+            "source": _debug_source(cand.get("source")),
+            "chunk_index": cand.get("chunk_index"),
+            "score": round(float(cand.get("score") or 0.0), 4),
+            "kept": id(cand) in kept_ids,
+            "dropped_by": dropped,
+            "preview": preview,
+        }
+        page = _debug_page(cand.get("page"))
+        if page is not None:
+            row["page"] = page
+        if cand.get("compressed"):
+            row["compressed"] = True
+        chunks.append(row)
+    return {
+        "query": query,
+        "top_score": round(float(top_score), 4),
+        "threshold": round(float(threshold), 4),
+        "candidates": len(candidates),
+        "returned": len(kept),
+        "chunks": chunks,
+    }
+
+
+def _annotate_drop_reasons(candidates: list[dict], threshold: float, k: int, kept: list[dict]) -> None:
+    """给候选打上 dropped_by。仅调试路径调用，不改变过滤结果。"""
+    if not candidates:
+        return
+    top_score = candidates[0]["score"]
+    effective_threshold = max(top_score * settings.DYNAMIC_THRESHOLD_RATIO, threshold)
+    scored = [c for c in candidates if c["score"] >= effective_threshold]
+    scored_ids = {id(c) for c in scored}
+
+    source_groups: dict[str, list] = {}
+    for cand in scored:
+        source_groups.setdefault(canonical_source(cand["source"]), []).append(cand)
+    source_dominance = {}
+    for canonical, group in source_groups.items():
+        best = max(group, key=lambda x: x["score"])["score"]
+        source_dominance[canonical] = best / top_score if top_score > 0 else 0
+
+    deduped = []
+    per_source_ids = set()
+    for canonical, group in source_groups.items():
+        group.sort(key=lambda x: x["score"], reverse=True)
+        high_count = sum(1 for c in group if c["score"] >= top_score * settings.HIGH_SCORE_RATIO)
+        limit = max(high_count, settings.MIN_PER_SOURCE)
+        dominance = source_dominance[canonical]
+        if dominance >= settings.SOURCE_DOMINANCE_THRESHOLD:
+            soft_limit = min(int(limit * settings.SOURCE_DOMINANCE_BOOST), k)
+        else:
+            soft_limit = settings.MAX_PER_SOURCE
+        limit = min(limit, soft_limit)
+        deduped.extend(group[:limit])
+        for cand in group[limit:]:
+            per_source_ids.add(id(cand))
+    deduped.sort(key=lambda x: x["score"], reverse=True)
+
+    gap_ids = set()
+    topk_ids = set()
+    if deduped:
+        stopped = False
+        count = 1
+        for i in range(1, len(deduped)):
+            if stopped:
+                break
+            gap = deduped[i - 1]["score"] - deduped[i]["score"]
+            if gap > settings.SCORE_GAP_THRESHOLD:
+                for cand in deduped[i:]:
+                    gap_ids.add(id(cand))
+                stopped = True
+                break
+            if count >= k:
+                for cand in deduped[i:]:
+                    topk_ids.add(id(cand))
+                stopped = True
+                break
+            count += 1
+
+    kept_ids = {id(c) for c in kept}
+    for cand in candidates:
+        cid = id(cand)
+        if cid in kept_ids:
+            cand["dropped_by"] = None
+        elif cid in gap_ids:
+            cand["dropped_by"] = "score_gap"
+        elif cid in topk_ids:
+            cand["dropped_by"] = "top_k"
+        elif cid in per_source_ids:
+            cand["dropped_by"] = "per_source"
+        elif cid not in scored_ids:
+            cand["dropped_by"] = "threshold"
+        else:
+            cand["dropped_by"] = "filtered"
+
+
 def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[dict]:
     """基于 sigmoid 概率的动态过滤、去重、截断。"""
     if not candidates:
@@ -426,6 +588,9 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     scored = [c for c in candidates if c["score"] >= effective_threshold]
 
     if not scored:
+        if retrieval_debug_enabled():
+            for cand in candidates:
+                cand["dropped_by"] = "threshold"
         return []
 
     # 2. 动态源文件去重：同源高分 chunk 多则放宽；核心来源软上限
@@ -467,6 +632,9 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
         if len(result) >= k:
             break
         result.append(deduped[i])
+
+    if retrieval_debug_enabled():
+        _annotate_drop_reasons(candidates, threshold, k, result)
 
     return result
 
@@ -544,6 +712,8 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         if client is None:
             logger.info("Retrieval: collection does not exist, returning empty")
             _store_retrieval_metrics(0.0, 0, 0)
+            if retrieval_debug_enabled():
+                _last_debug.entry = build_retrieval_debug(query, [], [], settings.RERANK_SCORE_THRESHOLD, 0.0)
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
@@ -557,10 +727,15 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         if not candidates:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")
             _store_retrieval_metrics(0.0, 0, 0)
+            if retrieval_debug_enabled():
+                _last_debug.entry = build_retrieval_debug(query, [], [], settings.RERANK_SCORE_THRESHOLD, 0.0)
             return []
 
         # 打分用小片段：阈值、断崖、压缩门槛都是在片段粒度上校准的
         candidates, top_score = _rerank_and_score(query, candidates)
+        if retrieval_debug_enabled():
+            for cand in candidates:
+                cand["_debug_preview"] = (cand.get("text") or "")[:240]
 
         threshold = settings.RERANK_SCORE_THRESHOLD
         result = _filter_and_dedup(candidates, threshold, k)
@@ -568,6 +743,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         if not result:
             logger.info(f"Retrieval: len={len(query)} → top_score={top_score:.3f} < {threshold}")
             _store_retrieval_metrics(top_score, len(candidates), 0, threshold)
+            if retrieval_debug_enabled():
+                _last_debug.entry = build_retrieval_debug(query, candidates, [], threshold, top_score)
+                _scrub_debug_fields(candidates)
             return []
 
         # 先裁到最终要交付的片段，再换成父片段，最后压缩。
@@ -581,6 +759,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         )
 
         _store_retrieval_metrics(top_score, len(candidates), len(result), threshold)
+        if retrieval_debug_enabled():
+            _last_debug.entry = build_retrieval_debug(query, candidates, result, threshold, top_score)
+            _scrub_debug_fields(candidates)
 
         return result
 

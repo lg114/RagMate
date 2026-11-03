@@ -64,6 +64,10 @@
           </div>
           <div id="chat-error" class="chat-error hidden"></div>
           <form id="chat-form" class="chat-input-wrap">
+            <label class="debug-toggle" title="在回答下显示检索候选、分数，以及被重排过滤丢掉的片段">
+              <input type="checkbox" id="chat-debug">
+              检索调试
+            </label>
             <div class="chat-input-row">
               <textarea id="chat-textarea" placeholder="输入问题…" rows="1" autocomplete="off"></textarea>
               <button type="submit" id="btn-send" class="btn-send" title="发送">

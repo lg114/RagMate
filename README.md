@@ -221,7 +221,8 @@ Simple greetings and other non-RAG messages are routed straight to the LLM, skip
 {
   "message": "What is RAG?",   // required, max 10 000 characters
   "session_id": "...",         // optional UUID; a new one is created when omitted
-  "replace_last": false        // retry / regenerate: drop the last turn first
+  "replace_last": false,       // retry / regenerate: drop the last turn first
+  "debug": false                // include retrieved chunks, scores, and why filter dropped them
 }
 ```
 
@@ -245,7 +246,8 @@ data: {"done": true, "session_id": "...",
        "confidence": {"level": "high", "score": 0.87, "chunks": 6},
        "citations": [{"source": "guide.pdf", "page": 3}],
        "grounding": "grounded",
-       "unsupported_claims": [{"claim": "...", "supported": false}]}
+       "unsupported_claims": [{"claim": "...", "supported": false}],
+       "retrieval_debug": [{"query": "...", "chunks": [{"rank": 1, "score": 0.91, "kept": true, "dropped_by": null, "preview": "..."}]}]}
 
 data: {"error": "..."}                                 // terminal error
 ```
@@ -253,6 +255,8 @@ data: {"error": "..."}                                 // terminal error
 Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, `citations`, `grounding`, and `unsupported_claims` appear only on the `done` event. `response` on that event is the text after grounding (refusal, hedge, and the real source line) — clients should replace the streamed tokens with it. `unsupported_claims` is present when faithfulness checking flagged a claim. `grounding` is `refused`, `hedged`, `grounded`, or omitted when no retrieval ran.
 
 The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
+
+`retrieval_debug` is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The chat UI has a "检索调试" checkbox that sends this flag. Leave it off in normal use; previews are excerpts of your documents.
 
 ---
 

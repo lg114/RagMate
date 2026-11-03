@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., max_length=10000)
     session_id: str | None = None
     replace_last: bool = False  # 重试/重新生成时，替换 Redis 中的最后一条用户消息
+    debug: bool = False  # 为 true 时响应带上检索候选、分数和丢弃原因；默认不返回内部结构
 
     @field_validator("session_id")
     @classmethod
@@ -41,6 +42,8 @@ class ChatResponse(BaseModel):
     citations: list[dict] | None = None
     # refused=无依据拒答；hedged=低置信保留；grounded=正常 RAG 回答
     grounding: str | None = None
+    # 仅当请求 debug=true 时填充：[{query, chunks: [{score, kept, dropped_by, preview}, ...]}]
+    retrieval_debug: list[dict] | None = None
 
 
 class IngestRequest(BaseModel):

@@ -13,12 +13,17 @@ export const API = {
     return data;
   },
 
-  async chatStream(message, sessionId, onToken, onDone, onError, replaceLast) {
+  async chatStream(message, sessionId, onToken, onDone, onError, replaceLast, debug) {
     try {
       const res = await fetch('/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, session_id: sessionId, replace_last: !!replaceLast }),
+        body: JSON.stringify({
+          message,
+          session_id: sessionId,
+          replace_last: !!replaceLast,
+          debug: !!debug,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
