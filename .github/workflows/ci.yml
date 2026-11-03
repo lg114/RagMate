@@ -28,3 +28,11 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
           LLM_API_KEY: test-key-for-ci
         run: pytest -q
+      - name: Retrieval quality gate
+        working-directory: backend
+        # 不启动 Milvus，也不下载 BGE / reranker。用样本语料做确定性 BM25 重放，
+        # 对照 eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json 的 fused 指标。
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
+          LLM_API_KEY: test-key-for-ci
+        run: ragmate-eval retrieval-gate

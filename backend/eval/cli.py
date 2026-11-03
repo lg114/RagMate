@@ -684,6 +684,20 @@ def cmd_check_gold(args):
         print("Live index check OK: every gold chunk exists in Milvus.")
 
 
+def cmd_retrieval_gate(args):
+    """词法重放样本题库，Recall@k / nDCG 低于基线门槛时以非 0 退出。"""
+    from .retrieval_gate import run_retrieval_gate
+
+    result = run_retrieval_gate(
+        testset_path=args.testset,
+        corpus_dir=args.corpus,
+        baseline_path=args.baseline,
+    )
+    print(result.render())
+    if not result.ok:
+        sys.exit(1)
+
+
 def main():
     # No arguments → interactive menu
     if len(sys.argv) == 1:
@@ -793,6 +807,24 @@ def main():
     check_gold_parser.add_argument("--corpus", type=str, default="eval/testsets/sample/corpus", help="Corpus directory used to reproduce chunking")
     check_gold_parser.add_argument("--live", action="store_true", help="Also verify gold chunks exist in the live Milvus index")
 
+    gate_parser = subparsers.add_parser(
+        "retrieval-gate",
+        help="CI gate: lexical replay of the sample set vs pinned Recall@k / nDCG floors",
+    )
+    gate_parser.add_argument(
+        "--testset", type=str, default=None,
+        help="Golden test set (default: eval/testsets/sample/testset.json)",
+    )
+    gate_parser.add_argument(
+        "--corpus", type=str, default=None,
+        help="Corpus directory (default: eval/testsets/sample/corpus)",
+    )
+    gate_parser.add_argument(
+        "--baseline", type=str, default=None,
+        help="Committed retrieval report to pin floors from "
+             "(default: eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json, fused stage)",
+    )
+
     delivery_parser = subparsers.add_parser(
         "delivery",
         help="Two-layer scoring: child rerank vs production filter/dedup (from checkpoint)",
@@ -857,6 +889,8 @@ def main():
         cmd_retrieval(args)
     elif args.command == "check-gold":
         cmd_check_gold(args)
+    elif args.command == "retrieval-gate":
+        cmd_retrieval_gate(args)
     elif args.command == "delivery":
         cmd_delivery(args)
     elif args.command == "cutoff":

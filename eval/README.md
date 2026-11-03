@@ -77,6 +77,49 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
 去重、父展开——那些是生成侧的取舍，不应污染检索基线。unanswerable 题
 不计入均值，单独计数。
 
+## CI 检索质量门禁
+
+GitHub Actions（`.github/workflows/ci.yml`）在 pytest 之后跑：
+
+```bash
+ragmate-eval retrieval-gate
+```
+
+每次 PR 都拉起 BGE-M3、Milvus 和 reranker 太重，也依赖本机模型和 GPU。
+门禁用生产切块把 `eval/testsets/sample/corpus` 复现成 chunk，再用确定性
+BM25（汉字二字组 + 拉丁串，无网络、无随机）给 98 道题排序，指标仍是
+`deterministic_metrics` 里的 Recall@k / nDCG。命令退出码非 0 即 CI 失败。
+
+门槛钉在已入库报告
+[`retrieval-baseline-98q-titlepath-rerun.json`](reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)
+的 **fused** 阶段（与当前默认 `CHUNKING_STRATEGY=title_path` 的混合检索一致；
+reranked 那一臂要 cross-encoder，词法重放对不齐）。余量 `0.015`，约等于
+91 道可答题里的 1 题（`1/91 ≈ 0.011`），用来容纳 BM25 和 BGE 混合检索的差距，
+不是放宽线上数字。观察值低于「基线 − 0.015」就失败。
+
+| 指标 | fused 基线 | CI 门槛 |
+|---|---|---|
+| recall@5 | 0.9963 | 0.9813 |
+| nDCG@5 | 0.9839 | 0.9689 |
+| recall@10 | 1.0000 | 0.9850 |
+| nDCG@10 | 0.9855 | 0.9705 |
+| recall@20 | 1.0000 | 0.9850 |
+| nDCG@20 | 0.9855 | 0.9705 |
+
+报告里记录的题库 sha256 是 `685eeb359d6a…`，与当前提交的
+`testset.json` 字节不一致；题干顺序和报告里的 `per_question` 一致，门禁
+按题干对齐，不按那条 sha 放行。
+
+有意更新基线时：
+
+1. 在有 Milvus 和模型的环境重跑 `ragmate-eval retrieval`，用新的报告替换
+   `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`
+   （保留 `stages.fused.summary` 和按题顺序的 `per_question`）。
+2. 把上表和 `backend/tests/test_retrieval_gate.py` 里的 `PINNED_FUSED`
+   改成新的 fused 数字。门槛仍是这些数字减去 `0.015`。
+3. 确认 `ragmate-eval retrieval-gate` 对当前语料退出码为 0。词法重放过不了
+   新门槛时，先看切块或排序是不是真的退步了，不要把 `ALLOWANCE` 调大来换绿灯。
+
 ## 实验纪律：manifest + 一次只改一个变量 + 噪声带宽
 
 每次 `retrieval` 运行都在报告里写一份 manifest：题库文件 SHA-256、全部
