@@ -98,8 +98,11 @@ def retrieval_tool(query: str) -> str:
         results = retrieve(query, k=settings.FINAL_CONTEXT_K)
     except AppError:
         return "检索服务暂时不可用，请稍后重试"
-    from backend.core.retriever import get_retrieval_metrics
+    from backend.core.retriever import get_retrieval_metrics, take_retrieval_debug
     remember_retrieval(ctx, results, get_retrieval_metrics())
+    debug_entry = take_retrieval_debug()
+    if ctx is not None and debug_entry is not None:
+        ctx.setdefault("debug", []).append(debug_entry)
     if not results:
         return "未找到相关文档"
 
@@ -170,10 +173,12 @@ def extract_text_content(content) -> str:
 
 
 # ── 公开 API ────────────────────────────────────────────────────────────────
-def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
+def run_agent(messages: list[dict], thread_id: str = "default", debug: bool = False) -> dict:
     """运行 agent，支持多轮对话。messages 格式: [{"role": "user", "content": "..."}, ...]"""
+    from backend.core.retriever import reset_retrieval_debug, set_retrieval_debug
     from backend.infrastructure.config import settings
     _prepare_session(thread_id, messages)
+    debug_token = set_retrieval_debug(debug)
     try:
         return get_agent().invoke(
             {"messages": messages},
@@ -188,11 +193,12 @@ def run_agent(messages: list[dict], thread_id: str = "default") -> dict:
             _contexts.pop(thread_id, None)
         raise
     finally:
+        reset_retrieval_debug(debug_token)
         with _counts_lock:
             _retrieval_counts.pop(thread_id, None)
 
 
-def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
+def run_agent_streaming(messages: list[dict], thread_id: str = "default", debug: bool = False):
     """流式运行 agent，只返回最终回复。过滤掉 agent thinking 和 tool_call 参数。
 
     - 直接回答（无工具调用）：正常流式输出
@@ -200,8 +206,10 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
     """
     from langchain_core.messages import AIMessageChunk, ToolMessage
 
+    from backend.core.retriever import reset_retrieval_debug, set_retrieval_debug
     from backend.infrastructure.config import settings
     _prepare_session(thread_id, messages)
+    debug_token = set_retrieval_debug(debug)
     try:
         for msg_chunk, _ in get_agent().stream(
             {"messages": messages},
@@ -224,5 +232,6 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default"):
             _contexts.pop(thread_id, None)
         raise
     finally:
+        reset_retrieval_debug(debug_token)
         with _counts_lock:
             _retrieval_counts.pop(thread_id, None)

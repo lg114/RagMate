@@ -255,8 +255,8 @@ def _classify_error(e: Exception) -> str:
 
 
 async def _pop_retrieval_signals(
-    session_id: str, response_text: str, is_error: bool
-) -> tuple[dict | None, list[dict] | None, list[dict]]:
+    session_id: str, response_text: str, is_error: bool, *, debug: bool = False,
+) -> tuple[dict | None, list[dict] | None, list[dict], list[dict] | None]:
     """取出本次问答的检索数据，计算置信度、引用与（可选的）无依据声明。
 
     一次问答只能调用一次：pop_retrieval_data 会清除该 session 的 agent 上下文。
@@ -266,13 +266,14 @@ async def _pop_retrieval_signals(
         confidence 为 None 表示本次没有发生检索；
         unsupported_claims 为 None 表示未做校验或全部通过；
         citations 为检索到的原始引用（可能为空列表）。
+        第四项是检索调试轨迹，仅当本次请求打开了 debug 时才返回。
     """
     from backend.core.agent import pop_retrieval_data
     from backend.core.retriever import calculate_confidence, check_faithfulness
 
     rdata = pop_retrieval_data(session_id)
     if not rdata:
-        return None, None, []
+        return None, None, [], None
 
     confidence = calculate_confidence(rdata.get("metrics", []))
     citations = list(rdata.get("citations") or [])
@@ -291,13 +292,20 @@ async def _pop_retrieval_signals(
                     f"Faithfulness: {len(unsupported)} unsupported claims in session={session_id[:8]}"
                 )
 
-    return confidence, unsupported, citations
+    debug_trace = list(rdata.get("debug") or []) if debug else None
+    return confidence, unsupported, citations, debug_trace or None
 
 
-async def _ground_response(session_id: str, response_text: str, is_error: bool) -> tuple[str, dict]:
+async def _ground_response(
+    session_id: str, response_text: str, is_error: bool, *, debug: bool = False,
+) -> tuple[str, dict]:
     """弹出检索信号并按置信度改写回答。返回 (最终文本, 要并入 API 的附加字段)。"""
-    confidence, unsupported, citations = await _pop_retrieval_signals(session_id, response_text, is_error)
+    confidence, unsupported, citations, debug_trace = await _pop_retrieval_signals(
+        session_id, response_text, is_error, debug=debug,
+    )
     extra: dict = {}
+    if debug and debug_trace:
+        extra["retrieval_debug"] = debug_trace
     if is_error:
         if confidence:
             extra["confidence"] = confidence
@@ -333,7 +341,7 @@ def _strip_last_turn(history: list[dict]) -> list[dict]:
     return trimmed
 
 
-async def chat(message: str, session_id: str | None = None, replace_last: bool = False) -> dict:
+async def chat(message: str, session_id: str | None = None, replace_last: bool = False, debug: bool = False) -> dict:
     """处理用户聊天消息，支持多轮对话。返回 {"response": str, "session_id": str}"""
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -381,7 +389,7 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
     t0 = time.monotonic()
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(run_agent, history, session_id),
+            asyncio.to_thread(run_agent, history, session_id, debug),
             timeout=settings.AGENT_TIMEOUT,
         )
         response_text = normalize_citations(extract_text(result))
@@ -395,7 +403,7 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
 
     # 4. 按检索置信度改写回答，再写入历史（错误提示不写入历史，但用户消息需要保留）
     is_error = _is_error_response(response_text)
-    response_text, extra = await _ground_response(session_id, response_text, is_error)
+    response_text, extra = await _ground_response(session_id, response_text, is_error, debug=debug)
     visible = _strip_error_sentinel(response_text)
     if is_error:
         logger.warning(f"chat error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={visible}")
@@ -415,7 +423,7 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
 _SENTINEL = object()
 
 
-async def chat_stream(message: str, session_id: str | None = None, replace_last: bool = False):
+async def chat_stream(message: str, session_id: str | None = None, replace_last: bool = False, debug: bool = False):
     """流式聊天，逐 token yield。返回格式: {"token": str} 或 {"done": True, "session_id": str}"""
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -464,7 +472,7 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     def _run():
         nonlocal error_msg
         try:
-            for token in run_agent_streaming(history, session_id):
+            for token in run_agent_streaming(history, session_id, debug):
                 full_response.append(token)
                 loop.call_soon_threadsafe(queue.put_nowait, token)
         except Exception as e:
@@ -506,7 +514,7 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     is_error = _is_error_response(response_text)
     elapsed = time.monotonic() - t0
 
-    response_text, extra = await _ground_response(session_id, response_text, is_error)
+    response_text, extra = await _ground_response(session_id, response_text, is_error, debug=debug)
     visible = _strip_error_sentinel(response_text)
 
     if is_error:

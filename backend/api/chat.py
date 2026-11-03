@@ -23,7 +23,7 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
-    result = await chat(body.message, body.session_id, replace_last=body.replace_last)
+    result = await chat(body.message, body.session_id, replace_last=body.replace_last, debug=body.debug)
     return ChatResponse(
         response=result["response"],
         session_id=result["session_id"],
@@ -31,6 +31,7 @@ async def chat_endpoint(body: ChatRequest, request: Request):
         unsupported_claims=result.get("unsupported_claims"),
         citations=result.get("citations"),
         grounding=result.get("grounding"),
+        retrieval_debug=result.get("retrieval_debug"),
     )
 
 
@@ -45,7 +46,9 @@ async def chat_stream_endpoint(body: ChatRequest, request: Request):
 
         async def producer():
             try:
-                async for chunk in chat_stream(body.message, body.session_id, replace_last=body.replace_last):
+                async for chunk in chat_stream(
+                    body.message, body.session_id, replace_last=body.replace_last, debug=body.debug,
+                ):
                     await queue.put(chunk)
             except Exception as e:
                 logger.error(f"Stream producer failed: {e}", exc_info=True)
