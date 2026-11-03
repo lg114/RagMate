@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     EMBEDDING_NORMALIZE: bool = True
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_API_BASE_URL: str = ""
+    EMBEDDING_API_TIMEOUT: float = Field(default=60.0, gt=0)  # 远程 embedding 请求超时（秒）
     HF_TOKEN: str = ""
 
     # LangSmith
@@ -178,6 +179,16 @@ class Settings(BaseSettings):
             raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")
         if self.RERANKER_PROVIDER == "api" and not self.RERANKER_API_BASE_URL:
             raise ValueError("RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api")
+
+        # huggingface / local / flagembedding：API 进程内加载 FlagEmbedding。
+        # openai / remote：OpenAI 兼容 HTTP，不在 API 进程里加载 BGE。
+        if self.EMBEDDING_PROVIDER not in ("huggingface", "local", "flagembedding", "openai", "remote"):
+            raise ValueError(
+                "EMBEDDING_PROVIDER must be huggingface, local, flagembedding, openai, or remote, "
+                f"got '{self.EMBEDDING_PROVIDER}'"
+            )
+        if self.EMBEDDING_PROVIDER in ("openai", "remote") and not self.EMBEDDING_API_BASE_URL:
+            raise ValueError("EMBEDDING_API_BASE_URL is required when EMBEDDING_PROVIDER is openai or remote")
 
         if self.INGEST_HEARTBEAT_STALE <= self.INGEST_HEARTBEAT_INTERVAL:
             raise ValueError(

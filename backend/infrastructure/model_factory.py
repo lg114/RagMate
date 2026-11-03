@@ -29,14 +29,14 @@ def clear_llm_cache():
 @lru_cache(maxsize=1)
 def get_embeddings():
     """根据 EMBEDDING_PROVIDER 创建 Embeddings 实例（单例，只加载一次）"""
-    if settings.EMBEDDING_PROVIDER == "openai":
+    if settings.EMBEDDING_PROVIDER in ("openai", "remote"):
         kwargs = {"model": settings.EMBEDDING_MODEL}
         if settings.EMBEDDING_API_KEY:
             kwargs["api_key"] = settings.EMBEDDING_API_KEY
         if settings.EMBEDDING_API_BASE_URL:
             kwargs["base_url"] = settings.EMBEDDING_API_BASE_URL
         return OpenAIEmbeddings(**kwargs)
-    elif settings.EMBEDDING_PROVIDER == "huggingface":
+    elif settings.EMBEDDING_PROVIDER in ("huggingface", "local", "flagembedding"):
         kwargs = {"model": settings.EMBEDDING_MODEL}
         device = settings.EMBEDDING_DEVICE
         if device == "cuda" and not torch.cuda.is_available():
