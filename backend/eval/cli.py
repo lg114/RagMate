@@ -242,6 +242,8 @@ def cmd_retrieval(args):
     ranked lists (first repeat only) for recomputation without re-running
     retrieval.
     """
+    from backend.infrastructure.config import settings
+
     testset_path = resolve_path(args.testset)
     if not testset_path.exists():
         print(f"Error: Test set not found: {testset_path}")
@@ -288,6 +290,17 @@ def cmd_retrieval(args):
     print(f"Loaded {len(cases)} golden cases from {testset_path}")
     print(f"Stages: {', '.join(stages)}, over_fetch={args.over_fetch}, "
           f"ks={list(ks)}, repeat={args.repeat}")
+    print(f"Embedding device: {settings.EMBEDDING_DEVICE}")
+    if settings.EMBEDDING_DEVICE == "cuda":
+        import torch
+        if not torch.cuda.is_available():
+            print(
+                "Error: EMBEDDING_DEVICE=cuda but torch.cuda.is_available() is False. "
+                "This venv likely has a CPU-only torch wheel; install a CUDA build, e.g.\n"
+                "  pip install torch --index-url https://download.pytorch.org/whl/cu126"
+            )
+            sys.exit(1)
+        print(f"CUDA: {torch.cuda.get_device_name(0)}")
 
     try:
         result = run_retrieval_eval(cases, stages, args.over_fetch, args.repeat, ks, manifest)

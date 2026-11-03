@@ -126,7 +126,10 @@ def get_reranker() -> CrossEncoder:
         return _reranker
     with _reranker_lock:
         if _reranker is None:
-            _reranker = CrossEncoder(settings.RERANKER_MODEL)
+            _reranker = CrossEncoder(
+                settings.RERANKER_MODEL,
+                device=settings.EMBEDDING_DEVICE,
+            )
         return _reranker
 
 

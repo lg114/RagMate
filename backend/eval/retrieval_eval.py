@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 
 from pymilvus import AnnSearchRequest, RRFRanker
+from tqdm import tqdm
 
 from backend.core.retriever import score_pairs
 from backend.infrastructure.config import settings
@@ -333,39 +334,46 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
         )
     checkpoint = None
     evaluations = []
-    for rep in range(repeat):
-        items = {}
-        for stage in stages:
-            items[stage] = []
-        stage_lists = {}
-        for idx, tc in enumerate(cases):
-            stage_records = run_stages(client, tc["user_input"], stages, over_fetch)
+    total = repeat * len(cases)
+    pbar = tqdm(total=total, desc="Retrieval eval", unit="q")
+    try:
+        for rep in range(repeat):
+            items = {}
             for stage in stages:
-                items[stage].append({
-                    "user_input": tc["user_input"],
-                    "source_doc": tc.get("source_doc", ""),
-                    "question_type": tc.get("question_type", ""),
-                    "ranked": [normalize_key(r) for r in stage_records[stage]],
-                    "gold": [normalize_key(g) for g in tc.get("gold_chunks", [])],
-                })
+                items[stage] = []
+            stage_lists = {}
+            for idx, tc in enumerate(cases):
+                pbar.set_postfix(rep=f"{rep + 1}/{repeat}", refresh=False)
+                stage_records = run_stages(client, tc["user_input"], stages, over_fetch)
+                for stage in stages:
+                    items[stage].append({
+                        "user_input": tc["user_input"],
+                        "source_doc": tc.get("source_doc", ""),
+                        "question_type": tc.get("question_type", ""),
+                        "ranked": [normalize_key(r) for r in stage_records[stage]],
+                        "gold": [normalize_key(g) for g in tc.get("gold_chunks", [])],
+                    })
+                if rep == 0:
+                    stage_lists[str(idx)] = {
+                        stage: _checkpoint_records(stage_records[stage])
+                        for stage in stages
+                    }
+                pbar.update(1)
             if rep == 0:
-                stage_lists[str(idx)] = {
-                    stage: _checkpoint_records(stage_records[stage])
-                    for stage in stages
+                checkpoint = {
+                    "manifest": manifest,
+                    "score_kinds": {stage: SCORE_KINDS[stage] for stage in stages},
+                    "cases": [
+                        {"index": i, "user_input": tc["user_input"]}
+                        for i, tc in enumerate(cases)
+                    ],
+                    "stages": stage_lists,
                 }
-        if rep == 0:
-            checkpoint = {
-                "manifest": manifest,
-                "score_kinds": {stage: SCORE_KINDS[stage] for stage in stages},
-                "cases": [
-                    {"index": i, "user_input": tc["user_input"]}
-                    for i, tc in enumerate(cases)
-                ],
-                "stages": stage_lists,
-            }
-        evaluations.append({
-            stage: evaluate_questions(items[stage], ks) for stage in stages
-        })
+            evaluations.append({
+                stage: evaluate_questions(items[stage], ks) for stage in stages
+            })
+    finally:
+        pbar.close()
     return {"checkpoint": checkpoint, "evaluations": evaluations}
 
 
