@@ -210,6 +210,9 @@ def test_score_with_repeats_runs_n_times(monkeypatch):
 
 
 def test_build_judge_llm_passes_temperature(monkeypatch):
+    import sys
+    import types
+
     import backend.eval.metrics as metrics_mod
 
     captured_create = {}
@@ -228,14 +231,17 @@ def test_build_judge_llm_passes_temperature(monkeypatch):
         def __init__(self, **kwargs):
             captured_eval.update(kwargs)
 
+    # ragas 在 eval extra 里，CI 的 pytest 任务不装它。函数内部才 import
+    # wrapper，所以这里塞一个假模块就能钉住 temperature，不必下载 ragas。
+    ragas_base = types.ModuleType("ragas.llms.base")
+    ragas_base.LangchainLLMWrapper = lambda llm: llm
+    monkeypatch.setitem(sys.modules, "ragas", types.ModuleType("ragas"))
+    monkeypatch.setitem(sys.modules, "ragas.llms", types.ModuleType("ragas.llms"))
+    monkeypatch.setitem(sys.modules, "ragas.llms.base", ragas_base)
     monkeypatch.setattr(
         "backend.infrastructure.streaming_llm.create_llm", fake_create_llm,
     )
     monkeypatch.setattr(metrics_mod, "EvalLLM", _CaptureEval)
-    monkeypatch.setattr(
-        "ragas.llms.base.LangchainLLMWrapper",
-        lambda llm: llm,
-    )
 
     metrics_mod.build_judge_llm("my-judge", temperature=0.0)
     assert captured_create.get("temperature") == 0.0

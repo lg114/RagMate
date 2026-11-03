@@ -330,6 +330,8 @@ ragmate-eval evaluate --testset ../eval/testsets/testset.json \
 
 评测指标包括忠实度、答案相关性、上下文精确率、上下文召回率和事实正确性。配合 `--threshold`，总分低于阈值时命令以非零状态退出，适合作为 CI 门禁。测试集与报告输出在仓库根目录的 `eval/` 下，已被 git 忽略。
 
+拉取请求上的检索质量是另一条命令：`ragmate-eval retrieval-gate`。它对已入库的 98 题样本做确定性 BM25 重放（不连 Milvus、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 `eval/README.md`。GitHub Actions 在 pytest 之后运行这条命令。
+
 ---
 
 ## 开发

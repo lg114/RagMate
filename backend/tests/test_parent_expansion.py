@@ -37,9 +37,8 @@ def _hit(text: str, parent_text: str | None = None, source: str = "a.pdf",
 class TestDoSearchRequestsParentText:
     """回归：output_fields 漏掉 parent_text 时，父片段会被静默丢弃。"""
 
-    @patch("backend.core.retriever.RRFRanker")
     @patch("backend.core.retriever.AnnSearchRequest")
-    def test_hybrid_search_requests_parent_text(self, mock_ann, mock_ranker, override_settings):
+    def test_hybrid_search_requests_parent_text(self, mock_ann, override_settings):
         override_settings(HYBRID_SEARCH_ENABLED=True)
         client = MagicMock()
         client.hybrid_search.return_value = [[]]

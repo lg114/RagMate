@@ -330,6 +330,8 @@ ragmate-eval evaluate --testset ../eval/testsets/testset.json \
 
 Metrics cover faithfulness, answer relevancy, context precision, context recall, and factual correctness. `--threshold` makes the command exit non-zero below the score, which works well as a CI gate. Test sets and reports are written under `eval/` at the repository root and are git-ignored.
 
+Retrieval quality on pull requests is a separate command, `ragmate-eval retrieval-gate`. It replays the committed 98-question sample with deterministic BM25 (no Milvus, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in `eval/README.md`. GitHub Actions runs this command after pytest.
+
 ---
 
 ## Development
