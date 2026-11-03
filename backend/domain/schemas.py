@@ -32,11 +32,15 @@ class ChatResponse(BaseModel):
     response: str
     session_id: str
     # 检索置信度：{"level": "high|medium|low", "score": float, "chunks": int}
-    # 无检索发生（如简单查询直连 LLM）或检索失败时为 None
+    # 无检索发生（如简单查询直连 LLM）时为 None
     confidence: dict | None = None
     # 忠实度校验未通过的声明：[{"claim": str, "supported": false}, ...]
-    # 仅当 FAITHFULNESS_CHECK 开启且确实存在无依据声明时出现
+    # 默认开启 FAITHFULNESS_CHECK；未校验、全部通过、或已拒答时为 None
     unsupported_claims: list[dict] | None = None
+    # 实际检索到的来源：[{"source": "文件名", "page": 1}, ...]，页码从 1 开始
+    citations: list[dict] | None = None
+    # refused=无依据拒答；hedged=低置信保留；grounded=正常 RAG 回答
+    grounding: str | None = None
 
 
 class IngestRequest(BaseModel):

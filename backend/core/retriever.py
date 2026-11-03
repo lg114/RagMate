@@ -68,6 +68,18 @@ def reset_retrieval_metrics():
     _metrics.last = None
 
 
+def _store_retrieval_metrics(top_score: float, candidates: int, returned: int, threshold: float | None = None):
+    """写入本次检索的质量指标，供置信度计算读取。空结果也要写，避免被当成「没检索」。"""
+    if threshold is None:
+        threshold = settings.RERANK_SCORE_THRESHOLD
+    _metrics.last = {
+        "top_score": round(float(top_score), 3),
+        "candidates": int(candidates),
+        "returned": int(returned),
+        "threshold": round(float(threshold), 3),
+    }
+
+
 _CONTEXTUALIZE_PROMPT = """根据以下对话历史，将用户的最新问题改写为一个独立、完整的搜索查询。
 要求：
 - 补全省略的指代（如"它"、"这个"、"那个"）为具体实体
@@ -531,6 +543,7 @@ def retrieve(query: str, k: int = None) -> list[dict]:
         client = init_milvus()
         if client is None:
             logger.info("Retrieval: collection does not exist, returning empty")
+            _store_retrieval_metrics(0.0, 0, 0)
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
@@ -543,6 +556,7 @@ def retrieve(query: str, k: int = None) -> list[dict]:
 
         if not candidates:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")
+            _store_retrieval_metrics(0.0, 0, 0)
             return []
 
         # 打分用小片段：阈值、断崖、压缩门槛都是在片段粒度上校准的
@@ -553,6 +567,7 @@ def retrieve(query: str, k: int = None) -> list[dict]:
 
         if not result:
             logger.info(f"Retrieval: len={len(query)} → top_score={top_score:.3f} < {threshold}")
+            _store_retrieval_metrics(top_score, len(candidates), 0, threshold)
             return []
 
         # 先裁到最终要交付的片段，再换成父片段，最后压缩。
@@ -565,13 +580,7 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             f"candidates={len(candidates)}, returned={len(result)}"
         )
 
-        # 存储检索质量指标
-        _metrics.last = {
-            "top_score": round(top_score, 3),
-            "candidates": len(candidates),
-            "returned": len(result),
-            "threshold": round(threshold, 3),
-        }
+        _store_retrieval_metrics(top_score, len(candidates), len(result), threshold)
 
         return result
 

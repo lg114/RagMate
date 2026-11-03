@@ -42,7 +42,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - **Reranked, filtered context** — cross-encoder reranking, dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression.
 - **Title-path + parent-child chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees.
 - **Agentic chat** — Deep Agents workflow with multi-turn sessions, SSE streaming, and retrieval exposed as a tool.
-- **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) and optional faithfulness verification that flags unsupported claims.
+- **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
 - **Built-in evaluation** — optional RAGAS CLI for test-set generation, scoring, and CI quality gates.
 - **Self-hosted by design** — PostgreSQL, Redis, Milvus, and MinIO run through Docker Compose.
@@ -191,7 +191,7 @@ flowchart LR
 
 **Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against Milvus → BGE-M3 dense + sparse encoding → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
-**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense + sparse ANN search with RRF fusion → cross-encoder reranking (logits converted with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → agent and LLM → citation normalization → optional faithfulness check.
+**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense + sparse ANN search with RRF fusion → cross-encoder reranking (logits converted with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → agent and LLM → citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge.
 
 Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
 
@@ -240,15 +240,18 @@ curl -X POST http://localhost:8000/chat \
 data: {"token": "Retrieval-augmented generation..."}   // incremental text
 
 data: {"done": true, "session_id": "...",
+       "response": "final grounded answer…",
        "confidence": {"level": "high", "score": 0.87, "chunks": 6},
+       "citations": [{"source": "guide.pdf", "page": 3}],
+       "grounding": "grounded",
        "unsupported_claims": [{"claim": "...", "supported": false}]}
 
 data: {"error": "..."}                                 // terminal error
 ```
 
-Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence` and `unsupported_claims` appear only on the `done` event; `unsupported_claims` is present only when `FAITHFULNESS_CHECK` is enabled and some claim failed verification.
+Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, `citations`, `grounding`, and `unsupported_claims` appear only on the `done` event. `response` on that event is the text after grounding (refusal, hedge, and the real source line) — clients should replace the streamed tokens with it. `unsupported_claims` is present when faithfulness checking flagged a claim. `grounding` is `refused`, `hedged`, `grounded`, or omitted when no retrieval ran.
 
-The non-streaming `POST /chat` returns the same `confidence` and `unsupported_claims` values in its JSON body. Both are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
+The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
 ---
 
@@ -285,7 +288,7 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 | `CONTEXTUAL_COMPRESSION` | `true` | Keep only relevant sentences inside a chunk |
 | `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-ups into standalone queries |
 | `QUERY_ROUTING_ENABLED` | `true` | Skip the agent for greetings and chitchat |
-| `FAITHFULNESS_CHECK` | `false` | Adds one extra LLM call per answer |
+| `FAITHFULNESS_CHECK` | `true` | One extra LLM call per RAG answer; failures are ignored and the answer is still returned |
 
 <details>
 <summary><strong>Full variable list</strong> — chunking, embedding, agent, and tracing</summary>

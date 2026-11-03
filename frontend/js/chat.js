@@ -200,7 +200,12 @@ export const ChatPanel = {
   finalizeStreamMessage(div, fullText, doneData = {}) {
     div._streamDone = true;
     const content = div.querySelector('.msg-content');
-    content.innerHTML = renderAssistantMarkdown(fullText || '没有收到回复');
+    // done.response 是服务端落地后的文本（拒答、低置信保留、补上的引用）
+    const text = (doneData.response != null && doneData.response !== '')
+      ? doneData.response
+      : (fullText || '没有收到回复');
+    div._finalText = text;
+    content.innerHTML = renderAssistantMarkdown(text);
 
     if (doneData.confidence) {
       const level = doneData.confidence.level;
@@ -210,6 +215,18 @@ export const ChatPanel = {
       badge.textContent = label;
       badge.title = `最高相关度: ${doneData.confidence.score}, 引用片段: ${doneData.confidence.chunks}`;
       content.appendChild(badge);
+    }
+
+    if (doneData.citations && doneData.citations.length > 0) {
+      const row = document.createElement('div');
+      row.className = 'citation-row';
+      doneData.citations.forEach((c) => {
+        const chip = document.createElement('span');
+        chip.className = 'source-chip';
+        chip.textContent = c.page ? `${c.source} · 第${c.page}页` : c.source;
+        row.appendChild(chip);
+      });
+      content.appendChild(row);
     }
 
     if (doneData.unsupported_claims && doneData.unsupported_claims.length > 0) {
@@ -237,7 +254,7 @@ export const ChatPanel = {
 
     if (copyBtn) {
       copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(fullText || '').then(() => {
+        navigator.clipboard.writeText(div._finalText || text || '').then(() => {
           copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已复制`;
           setTimeout(() => {
             copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> 复制`;
