@@ -842,5 +842,845 @@
     ],
     "question_type": "unanswerable",
     "source_doc": ""
+  },
+  {
+    "user_input": "本地编排里那个对外提供 HTTP 的服务，宿主机要从哪个地址打开页面？",
+    "reference": "web 服务端口映射为 8000:8000，浏览器访问 http://localhost:8000 即可打开前端页面；接口文档在 http://localhost:8000/docs。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "web 端口映射 8000:8000",
+      "浏览器访问 http://localhost:8000 打开前端"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "排序或哈希操作默认能用多少内存？调大之后怎样判断已经回到内存排序？",
+    "reference": "work_mem 默认 4MB，是每个排序或哈希操作可用的内存；超过后会走磁盘外部归并排序，EXPLAIN ANALYZE 出现 external merge Disk。临时 SET work_mem='64MB' 后排序改回内存 quicksort。",
+    "gold_chunks": [
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "work_mem 默认 4MB，按每个排序/哈希操作计",
+      "调到 64MB 后排序改回内存 quicksort"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "02-postgres-index.md"
+  },
+  {
+    "user_input": "大批量 key 在同一时刻失效、数据库被打爆，文档建议怎么把失效时刻打散？",
+    "reference": "这是缓存雪崩：在基础 TTL 上加 0–60 秒随机抖动，例如 300 秒 TTL 实际为 300–360 秒，把过期时刻打散；还可加进程内本地缓存做多级缓存。",
+    "gold_chunks": [
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "过期时间加 0–60 秒随机抖动打散失效时刻",
+      "可再加进程内本地缓存做多级缓存"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "03-redis-cache.md"
+  },
+  {
+    "user_input": "想把同时在途的 HTTP 调用压在十个以内，协程侧怎么写？",
+    "reference": "用 asyncio.Semaphore(10)，在 async with sem 块内发请求；最多 10 个协程同时持有许可，第 11 个在 async with 处等待。",
+    "gold_chunks": [
+      {
+        "source": "04-python-asyncio.md",
+        "page": null,
+        "chunk_index": 4
+      }
+    ],
+    "expected_claims": [
+      "用 asyncio.Semaphore(10) 限制并发",
+      "第 11 个协程在 async with sem 处等待"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "04-python-asyncio.md"
+  },
+  {
+    "user_input": "响应头写了「3600 秒内新鲜」，浏览器在这段时间会不会还去问服务器？",
+    "reference": "不会。max-age=3600 表示 3600 秒内响应新鲜，浏览器直接用缓存，不向服务器发任何请求。",
+    "gold_chunks": [
+      {
+        "source": "05-http-cache.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "max-age=3600 时浏览器直接用缓存，不向服务器发请求"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "05-http-cache.md"
+  },
+  {
+    "user_input": "短命的调用凭证和长命的续期凭证各自活多久？为什么要这样拆？",
+    "reference": "access token 有效期 15 分钟，每次 API 调用都带，泄露窗口小；refresh token 有效期 7 天，只在换取新 access token 时用，泄露后可在服务端吊销。",
+    "gold_chunks": [
+      {
+        "source": "06-jwt-oauth.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "access token 15 分钟、refresh token 7 天",
+      "短 access 缩小泄露窗口，长 refresh 可吊销"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "06-jwt-oauth.md"
+  },
+  {
+    "user_input": "想让进程有机会收尾再退出，该发哪种信号？哪种信号连清理机会都不给？",
+    "reference": "SIGTERM（15）可捕获，进程可做完清理再退出；SIGKILL（9）不可捕获不可忽略，内核立即终止，不给清理机会。",
+    "gold_chunks": [
+      {
+        "source": "07-linux-process.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "SIGTERM 可捕获、可清理后退出",
+      "SIGKILL 不可捕获、内核立即终止"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "07-linux-process.md"
+  },
+  {
+    "user_input": "误删分支或 reset 过头之后，本地还能靠什么找回旧提交？默认能留多久？",
+    "reference": "靠 reflog：它记录 HEAD 每次移动的位置，可从中找到旧 commit 哈希再恢复；条目默认保留 90 天，只存在本地，不随 push/fetch 同步。",
+    "gold_chunks": [
+      {
+        "source": "08-git-internals.md",
+        "page": null,
+        "chunk_index": 4
+      }
+    ],
+    "expected_claims": [
+      "用 reflog 找旧 commit 哈希恢复",
+      "条目默认保留 90 天，只存在本地"
+    ],
+    "question_type": "paraphrase",
+    "source_doc": "08-git-internals.md"
+  },
+  {
+    "user_input": "单个热点缓存条目刚好失效、大量并发一起回源，和大批量条目同时失效有何不同？各自怎么挡？",
+    "reference": "单个热点失效是缓存击穿，用互斥锁（SET NX，30 秒过期）只让一个请求回源；大批量同时失效是缓存雪崩，用 TTL 随机抖动（0–60 秒）和多级本地缓存缓解。",
+    "gold_chunks": [
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 2
+      },
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "击穿是单热点失效，用互斥锁挡并发回源",
+      "雪崩是大量 key 同时过期，用 TTL 抖动与多级缓存"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "03-redis-cache.md"
+  },
+  {
+    "user_input": "「存了也要先问服务器」和「根本不存」分别对应哪个 Cache-Control 指令？",
+    "reference": "no-cache 是响应可以存进缓存，但每次使用前必须先向服务器验证；no-store 是请求与响应完全不写入任何缓存。",
+    "gold_chunks": [
+      {
+        "source": "05-http-cache.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "no-cache：可存但每次使用前须验证",
+      "no-store：根本不存"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "05-http-cache.md"
+  },
+  {
+    "user_input": "子进程退出后表项还在、以及父进程先退出后子进程被谁收养，这两种分别叫什么？",
+    "reference": "前者是僵尸进程（Z）：父进程未 wait 回收，只占进程表项；后者是孤儿进程：被 PID 1（init/systemd）收养并由其 wait 回收，孤儿继续正常运行。",
+    "gold_chunks": [
+      {
+        "source": "07-linux-process.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "未 wait 回收产生僵尸进程（Z）",
+      "父先退出则子成孤儿，由 PID 1 收养"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "07-linux-process.md"
+  },
+  {
+    "user_input": "想保留分叉历史、以及想把历史改成一条直线，分别该用哪种整合方式？哪种会改哈希？",
+    "reference": "保留分叉用 merge，产生合并提交，已有 commit 哈希不变；改成直线用 rebase，每个被重放的提交生成新对象、哈希全变。已推送公共分支不要 rebase。",
+    "gold_chunks": [
+      {
+        "source": "08-git-internals.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "merge 保留分叉、哈希不变",
+      "rebase 历史线性、哈希全变"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "08-git-internals.md"
+  },
+  {
+    "user_input": "等值范围排序该建哪种索引？全文和 JSONB 包含又该建哪种？",
+    "reference": "等值、范围与排序用 B-tree；全文检索、JSONB 与数组包含查询用 GIN。GIN 写入代价更高，更新频繁的表要先评估写入量。",
+    "gold_chunks": [
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 2
+      },
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "B-tree 适合等值、范围与排序",
+      "GIN 适合全文检索与 JSONB/数组包含"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "02-postgres-index.md"
+  },
+  {
+    "user_input": "对称签名和非对称签名各自谁能签发、谁能验签？多服务验签该选哪个？",
+    "reference": "HS256 对称：签发与验签用同一密钥；RS256 非对称：私钥签发、公钥验签，适合一个签发方、多个验签方。RagMate 用 RS256。",
+    "gold_chunks": [
+      {
+        "source": "06-jwt-oauth.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "HS256 同一密钥签发与验签",
+      "RS256 私钥签发、公钥验签，适合多验签方"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "06-jwt-oauth.md"
+  },
+  {
+    "user_input": "浏览器短缓存、CDN 长缓存时，该靠哪个指令区分，它和 max-age 谁覆盖谁？",
+    "reference": "用 s-maxage：只对共享缓存（CDN、代理）生效并覆盖 max-age；私有缓存（浏览器）忽略 s-maxage。例如 max-age=60、s-maxage=3600 时 CDN 按 3600 秒、浏览器按 60 秒。",
+    "gold_chunks": [
+      {
+        "source": "05-http-cache.md",
+        "page": null,
+        "chunk_index": 4
+      }
+    ],
+    "expected_claims": [
+      "s-maxage 只对共享缓存生效并覆盖 max-age",
+      "浏览器忽略 s-maxage"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "05-http-cache.md"
+  },
+  {
+    "user_input": "一组互相独立的 HTTP 请求和一个失败就该整体停的入库步骤，分别更适合 gather 还是 TaskGroup？",
+    "reference": "彼此独立的任务用 gather：一个失败其他继续跑；有依赖、失败后继续无意义的用 TaskGroup：任一任务抛异常会取消其余并重抛第一个异常。",
+    "gold_chunks": [
+      {
+        "source": "04-python-asyncio.md",
+        "page": null,
+        "chunk_index": 2
+      },
+      {
+        "source": "04-python-asyncio.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "独立任务用 gather，失败不取消其他",
+      "有依赖的用 TaskGroup，失败取消其余"
+    ],
+    "question_type": "ambiguous",
+    "source_doc": "04-python-asyncio.md"
+  },
+  {
+    "user_input": "web 连数据库该写 localhost 还是服务名？db 的数据落在哪个卷、删容器会不会丢？",
+    "reference": "服务之间用服务名作主机名，web 连数据库主机名是 db 而不是 localhost；db 数据在具名卷 pgdata，删除容器不会丢数据，只有 docker volume rm 或 down -v 才会删卷。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 4
+      },
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 6
+      }
+    ],
+    "expected_claims": [
+      "web 用主机名 db 连数据库，不是 localhost",
+      "数据在 pgdata 卷，删容器不丢，volume rm / down -v 才丢"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "Compose 里 db 与 redis 的重启策略分别是什么？和 web/worker 有何不同？",
+    "reference": "db 与 redis 的重启策略是 always：无论何种原因停止都会被守护进程拉起；web 与 worker 是 unless-stopped：异常退出自动重启，但手动 stop 后宿主机重启时不会自动拉起。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 2
+      },
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 4
+      },
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "db/redis 重启策略 always",
+      "web/worker 是 unless-stopped"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "部分索引和覆盖索引各解决什么问题？各自有什么前提或代价？",
+    "reference": "部分索引只对满足 WHERE 的行建索引，更小更快，但查询谓词须与索引 WHERE 一致；覆盖索引让查询列全在索引里可走 Index Only Scan，依赖 visibility map，VACUUM 后效果最好，索引列越多写入代价越高。",
+    "gold_chunks": [
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 4
+      },
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 7
+      }
+    ],
+    "expected_claims": [
+      "部分索引只索引热点子集，查询谓词须匹配",
+      "覆盖索引可 Index Only Scan，列越多写入越贵"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "02-postgres-index.md"
+  },
+  {
+    "user_input": "缓存穿透和缓存击穿分别指什么？文档各推荐什么手段？",
+    "reference": "穿透是查根本不存在的数据，缓存与库都没有，每次都打到库，用布隆过滤器与短 TTL 空值缓存；击穿是单个热点 key 过期瞬间大量并发回源，用互斥锁（SET NX）只让一个请求重建。",
+    "gold_chunks": [
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 3
+      },
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 4
+      }
+    ],
+    "expected_claims": [
+      "穿透：不存在的数据，用布隆过滤器与空值缓存",
+      "击穿：热点 key 过期并发回源，用互斥锁"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "03-redis-cache.md"
+  },
+  {
+    "user_input": "Queue 背压靠什么形成？生产者结束后消费者怎么干净退出？",
+    "reference": "put() 在队列满时挂起生产者形成背压，须显式设 maxsize（maxsize=0 无界）；生产者结束后放哨兵值 None，消费者读到 None 退出循环；处理异常也要在 finally 里 task_done，否则 join 永远等待。",
+    "gold_chunks": [
+      {
+        "source": "04-python-asyncio.md",
+        "page": null,
+        "chunk_index": 7
+      }
+    ],
+    "expected_claims": [
+      "满队列时 put 挂起形成背压，须设 maxsize",
+      "用哨兵 None 让消费者退出；finally 里 task_done"
+    ],
+    "question_type": "factoid",
+    "source_doc": "04-python-asyncio.md"
+  },
+  {
+    "user_input": "强制缓存过期后浏览器怎么验证资源有没有变？ETag 和 Last-Modified 谁优先？",
+    "reference": "走协商缓存：带 If-None-Match（ETag）或 If-Modified-Since（Last-Modified）；一致返回 304 不带响应体，不一致返回 200 与新响应。两者同时存在时 ETag 优先；协商缓存仍有往返延迟。",
+    "gold_chunks": [
+      {
+        "source": "05-http-cache.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "协商缓存用 If-None-Match 或 If-Modified-Since",
+      "ETag 与 Last-Modified 同时存在时 ETag 优先"
+    ],
+    "question_type": "factoid",
+    "source_doc": "05-http-cache.md"
+  },
+  {
+    "user_input": "公开客户端没有 client_secret 时授权码流程缺什么？PKCE 如何补上？",
+    "reference": "缺的是后端保管的 client_secret，授权码被拦截后可直接换 token。PKCE：客户端生成 code_verifier，发送 code_challenge=BASE64URL(SHA256(code_verifier))；换 token 时带原始 verifier，授权服务器重算比对一致才发 token。",
+    "gold_chunks": [
+      {
+        "source": "06-jwt-oauth.md",
+        "page": null,
+        "chunk_index": 4
+      },
+      {
+        "source": "06-jwt-oauth.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "公开客户端存不住 client_secret，授权码可被直接换 token",
+      "PKCE 用 code_verifier/challenge 堵住该缺口"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "06-jwt-oauth.md"
+  },
+  {
+    "user_input": "fork 之后内存为何不立刻翻倍？父子怎么区分自己是谁？",
+    "reference": "写时复制：fork 瞬间共享物理页，任一方写入某页时内核才为写入方复制该页，只读数据一直共享。返回值区分：父拿到子 PID（正数），子拿到 0，失败返回 -1。",
+    "gold_chunks": [
+      {
+        "source": "07-linux-process.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "fork 后写时复制共享物理页，写入才复制",
+      "父返回子 PID，子返回 0"
+    ],
+    "question_type": "factoid",
+    "source_doc": "07-linux-process.md"
+  },
+  {
+    "user_input": "blob、tree、commit 各存什么？改名不改内容会不会产生新 blob？",
+    "reference": "blob 存文件内容不含文件名；tree 存目录快照（名字、模式、子对象哈希）；commit 存根 tree、父 commit、作者与说明等元数据。内容相同则同一 blob，改名不改内容不产生新 blob。",
+    "gold_chunks": [
+      {
+        "source": "08-git-internals.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "blob/tree/commit 分别存内容、目录快照、提交元数据",
+      "改名不改内容不产生新 blob"
+    ],
+    "question_type": "factoid",
+    "source_doc": "08-git-internals.md"
+  },
+  {
+    "user_input": "Compose 给 web 设 memory limit 2G，和 Linux OOM killer 选进程的标准分别是什么？",
+    "reference": "Compose 的 limits.memory=2G 是容器硬上限，超限会被 OOM 杀掉；reservations.memory=512M 只是调度预留，宿主机可用内存不足时容器不会被调度到该节点。cpus:\"2.0\" 表示最多使用两个 CPU 核心的时间配额，不是独占核心。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 9
+      }
+    ],
+    "expected_claims": [
+      "limits.memory=2G 超限会被 OOM 杀掉",
+      "reservations 是调度预留，cpus 是时间配额不是独占核"
+    ],
+    "question_type": "factoid",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "Redis 单机互斥锁和跨节点 Redlock 各自何时用？Redlock 成功条件是什么？",
+    "reference": "单机用 SET NX 加锁即可；跨多个 Redis 节点才用 Redlock：向 5 个独立节点申请锁，拿到超过半数（至少 3 个）才算成功，否则释放已拿到的锁并重试。Redlock 依赖节点时钟大致同步。",
+    "gold_chunks": [
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 3
+      },
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "单机用 SET NX，跨节点用 Redlock",
+      "Redlock 需拿到超过半数（≥3/5）节点的锁"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "03-redis-cache.md"
+  },
+  {
+    "user_input": "编排里哪两个服务只应在开发环境由 Compose 管？生产应怎样？",
+    "reference": "db 与 redis 只在开发环境由 Compose 管理，生产环境应改用托管服务。编排共含 web、worker、db、redis 四个服务。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "db 与 redis 仅开发环境由 Compose 管理",
+      "生产应改用托管服务"
+    ],
+    "question_type": "factoid",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "worker 和 web 是否共用镜像？worker 对外暴露端口吗？二者如何协作？",
+    "reference": "worker 与 web 共用同一镜像但启动命令不同，负责耗时入库任务；worker 不对外暴露端口，只通过 Redis 队列与 web 协作；重启策略同样是 unless-stopped。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 3
+      }
+    ],
+    "expected_claims": [
+      "worker 与 web 共用镜像、启动命令不同",
+      "worker 不暴露端口，经 Redis 队列协作"
+    ],
+    "question_type": "factoid",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "覆盖文件里写了 ports，和基准文件的端口映射是合并还是替换？",
+    "reference": "ports、volumes 这类列表是替换而非追加：覆盖文件写了 ports，基准文件的端口映射会被整个替换掉，不是两个都生效。标量与映射按服务名深度合并。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 10
+      }
+    ],
+    "expected_claims": [
+      "ports/volumes 列表是替换不是追加",
+      "标量与映射按服务名深度合并"
+    ],
+    "question_type": "factoid",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "大批量导入后优化器还选错计划，文档要求执行什么？只读场景能否简化？",
+    "reference": "导入完成后执行 VACUUM ANALYZE documents：ANALYZE 更新行数与列分布统计，VACUUM 回收死元组。只读查询为主时可只跑 ANALYZE，跳过 VACUUM。",
+    "gold_chunks": [
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 6
+      }
+    ],
+    "expected_claims": [
+      "导入后执行 VACUUM ANALYZE 更新统计并回收死元组",
+      "只读场景可只跑 ANALYZE"
+    ],
+    "question_type": "factoid",
+    "source_doc": "02-postgres-index.md"
+  },
+  {
+    "user_input": "Cache-Aside 写路径为什么是删缓存而不是更新缓存？商品详情 TTL 设多少？",
+    "reference": "写流程先更新数据库再删除对应缓存 key，下一次读再回源加载；删除而非更新是为了避免并发写导致缓存长期残留旧值。商品详情类 key TTL 设为 300 秒。",
+    "gold_chunks": [
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "写路径先更新库再删缓存，避免并发写残留旧值",
+      "商品详情 TTL 300 秒"
+    ],
+    "question_type": "factoid",
+    "source_doc": "03-redis-cache.md"
+  },
+  {
+    "user_input": "asyncio.timeout(5) 超时后会发生什么？它会影响同循环里其他任务吗？",
+    "reference": "超过 5 秒未完成时当前任务被取消并抛出 TimeoutError；timeout() 只取消它包裹的那个任务，不影响同事件循环里的其他任务。超时从进入 async with 块开始算，块内多次 await 共享同一截止时间。",
+    "gold_chunks": [
+      {
+        "source": "04-python-asyncio.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "超时取消当前任务并抛 TimeoutError",
+      "不影响同循环其他任务"
+    ],
+    "question_type": "factoid",
+    "source_doc": "04-python-asyncio.md"
+  },
+  {
+    "user_input": "协程里调用 requests.get 或 time.sleep 会怎样？正确做法是什么？",
+    "reference": "同步阻塞会堵住事件循环，整个应用并发停摆；应改用 asyncio.to_thread 扔到线程池，或换异步库。create_task 创建的任务若无人持有引用可能被垃圾回收静默消失。",
+    "gold_chunks": [
+      {
+        "source": "04-python-asyncio.md",
+        "page": null,
+        "chunk_index": 6
+      }
+    ],
+    "expected_claims": [
+      "同步阻塞会堵住事件循环",
+      "改用 to_thread 或异步库"
+    ],
+    "question_type": "factoid",
+    "source_doc": "04-python-asyncio.md"
+  },
+  {
+    "user_input": "带内容哈希的静态 JS 文件该用什么 Cache-Control？HTML 文档呢？",
+    "reference": "带内容哈希的静态资源用 max-age=31536000, immutable，一年强制缓存且浏览器连条件请求都不发；HTML 文档用 no-cache，每次使用前必须向服务器验证。",
+    "gold_chunks": [
+      {
+        "source": "05-http-cache.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "哈希静态资源用 max-age=31536000, immutable",
+      "HTML 用 no-cache，每次使用前验证"
+    ],
+    "question_type": "factoid",
+    "source_doc": "05-http-cache.md"
+  },
+  {
+    "user_input": "JWT 的 payload 是否加密？能不能放密码？",
+    "reference": "三段都是 Base64URL 编码而不是加密，payload 任何人都能解码看到，不要在里面放密码、密钥等敏感信息。",
+    "gold_chunks": [
+      {
+        "source": "06-jwt-oauth.md",
+        "page": null,
+        "chunk_index": 1
+      }
+    ],
+    "expected_claims": [
+      "Base64URL 只是编码不是加密",
+      "payload 不要放密码等敏感信息"
+    ],
+    "question_type": "factoid",
+    "source_doc": "06-jwt-oauth.md"
+  },
+  {
+    "user_input": "nice 值影响的是硬性执行顺序还是时间片权重？CPU 空闲时低优先级进程能跑满吗？",
+    "reference": "nice 影响的是 CPU 时间分配权重，不是硬性执行顺序；高优先级在争用时分到更多时间片，CPU 空闲时低优先级进程一样全速跑。范围 -20 到 19，值越小优先级越高。",
+    "gold_chunks": [
+      {
+        "source": "07-linux-process.md",
+        "page": null,
+        "chunk_index": 4
+      }
+    ],
+    "expected_claims": [
+      "nice 影响时间片权重而非硬性顺序",
+      "CPU 空闲时低优先级也可全速跑"
+    ],
+    "question_type": "factoid",
+    "source_doc": "07-linux-process.md"
+  },
+  {
+    "user_input": "什么是 detached HEAD？要长期在该状态工作应先做什么？",
+    "reference": "HEAD 直接指向某个 commit 哈希而不是分支，新提交不在任何分支上；checkout 到别处后只能靠 reflog 找回，久了会被 gc 清理。长期工作应先 git switch -c 建新分支。",
+    "gold_chunks": [
+      {
+        "source": "08-git-internals.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "detached HEAD 直接指向 commit 而非分支",
+      "长期工作先 git switch -c 建分支"
+    ],
+    "question_type": "factoid",
+    "source_doc": "08-git-internals.md"
+  },
+  {
+    "user_input": "git gc --aggressive 和默认 gc 有何不同？什么时候才手动跑？",
+    "reference": "默认 gc 在 commit/merge 等操作后按需自动触发，松散对象过多时自动打包；--aggressive 用更激进压缩参数重打全部 pack，耗时长，大仓库可能跑几分钟，只在仓库明显臃肿时手动用。",
+    "gold_chunks": [
+      {
+        "source": "08-git-internals.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "默认 gc 按需自动触发",
+      "--aggressive 更激进重打 pack，只在仓库臃肿时用"
+    ],
+    "question_type": "factoid",
+    "source_doc": "08-git-internals.md"
+  },
+  {
+    "user_input": "复合索引 (status, uploaded_at) 能单独服务只按 uploaded_at 过滤的查询吗？",
+    "reference": "不能。复合索引遵循最左前缀原则：(status, uploaded_at) 能服务 WHERE status=? ORDER BY uploaded_at，但单独查 uploaded_at 时用不上这条索引。",
+    "gold_chunks": [
+      {
+        "source": "02-postgres-index.md",
+        "page": null,
+        "chunk_index": 2
+      }
+    ],
+    "expected_claims": [
+      "复合索引遵循最左前缀",
+      "单独查 uploaded_at 用不上 (status, uploaded_at)"
+    ],
+    "question_type": "factoid",
+    "source_doc": "02-postgres-index.md"
+  },
+  {
+    "user_input": "过期 key 的惰性删除和定期采样分别怎么工作？",
+    "reference": "惰性删除：访问某 key 时检查过期则删除；冷 key 可能长期占内存。定期采样：约每 100 毫秒从过期集合随机抽 20 个检查，过期比例超 25% 则重复，直到比例下降或单次触及 25 毫秒上限。",
+    "gold_chunks": [
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 7
+      }
+    ],
+    "expected_claims": [
+      "惰性删除在访问时检查过期",
+      "定期采样每约 100ms 抽 20 个，过期超 25% 继续抽"
+    ],
+    "question_type": "factoid",
+    "source_doc": "03-redis-cache.md"
+  },
+  {
+    "user_input": "开发编排里 Redis 如何持久化？缓存文档对 appendfsync 的推荐又是什么？",
+    "reference": "Compose 里 redis 启动参数开启 AOF（appendonly yes）；缓存文档推荐 appendfsync=everysec，每秒刷盘一次，崩溃最多丢 1 秒写命令，是性能与安全的折中。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 5
+      },
+      {
+        "source": "03-redis-cache.md",
+        "page": null,
+        "chunk_index": 6
+      }
+    ],
+    "expected_claims": [
+      "Compose 中 redis 开启 AOF（appendonly yes）",
+      "推荐 appendfsync=everysec，最多丢 1 秒"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "容器内存硬上限和内核按评分杀进程，文档分别在哪里、怎么描述？",
+    "reference": "Compose 生产覆盖里 web 的 limits.memory=2G 是硬上限，超限 OOM 杀容器；Linux 文档里 OOM killer 按 oom_score 选进程，内存多、运行短优先，db 还可设 oom_score_adj: -500 优先保库。",
+    "gold_chunks": [
+      {
+        "source": "01-docker-compose.md",
+        "page": null,
+        "chunk_index": 9
+      },
+      {
+        "source": "07-linux-process.md",
+        "page": null,
+        "chunk_index": 5
+      }
+    ],
+    "expected_claims": [
+      "Compose limits.memory 硬上限超限杀容器",
+      "内核 OOM killer 按 oom_score，db 可调 oom_score_adj"
+    ],
+    "question_type": "multi-hop",
+    "source_doc": "01-docker-compose.md"
+  },
+  {
+    "user_input": "Milvus 的 IVF_FLAT 和 HNSW 索引该如何选择 nprobe？",
+    "reference": "提供的文档中没有 Milvus 向量索引调参相关内容，无法依据语料回答这个问题。",
+    "gold_chunks": [],
+    "expected_claims": [
+      "提供的文档中没有 Milvus 向量索引调参相关内容"
+    ],
+    "question_type": "unanswerable",
+    "source_doc": ""
+  },
+  {
+    "user_input": "Kafka 消费者组 rebalance 时 sticky assignor 有什么优势？",
+    "reference": "提供的文档中没有 Kafka 相关内容，无法依据语料回答这个问题。",
+    "gold_chunks": [],
+    "expected_claims": [
+      "提供的文档中没有 Kafka 相关内容"
+    ],
+    "question_type": "unanswerable",
+    "source_doc": ""
+  },
+  {
+    "user_input": "Ceph RGW 的多站点同步是怎么做的？",
+    "reference": "提供的文档中没有 Ceph 相关内容，无法依据语料回答这个问题。",
+    "gold_chunks": [],
+    "expected_claims": [
+      "提供的文档中没有 Ceph 相关内容"
+    ],
+    "question_type": "unanswerable",
+    "source_doc": ""
+  },
+  {
+    "user_input": "eBPF 里用 XDP 做 DDoS 防护的基本路径是什么？",
+    "reference": "提供的文档中没有 eBPF 或 XDP 相关内容，无法依据语料回答这个问题。",
+    "gold_chunks": [],
+    "expected_claims": [
+      "提供的文档中没有 eBPF 或 XDP 相关内容"
+    ],
+    "question_type": "unanswerable",
+    "source_doc": ""
+  },
+  {
+    "user_input": "Istio 的 mTLS STRICT 模式如何强制服务间加密？",
+    "reference": "提供的文档中没有 Istio 相关内容，无法依据语料回答这个问题。",
+    "gold_chunks": [],
+    "expected_claims": [
+      "提供的文档中没有 Istio 相关内容"
+    ],
+    "question_type": "unanswerable",
+    "source_doc": ""
   }
 ]

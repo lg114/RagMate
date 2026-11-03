@@ -23,11 +23,15 @@ from .retrieval_eval import (
     build_retrieval_report,
     compare_with_manifest,
     load_golden_testset,
+    load_retrieval_checkpoint,
+    print_cutoff_report,
     print_retrieval_report,
     run_retrieval_eval,
+    simulate_final_ks,
     validate_gold_schema,
     verify_gold_in_index,
     verify_gold_in_inventory,
+    write_cutoff_report,
     write_retrieval_checkpoint,
     write_retrieval_markdown,
 )
@@ -231,6 +235,63 @@ def cmd_rescore(args):
         json.dump(new_report, f, ensure_ascii=False, indent=2)
 
     print_report(new_report)
+
+
+def cmd_cutoff(args):
+    """Simulate FINAL_CONTEXT_K cutoffs from a retrieval checkpoint (no re-retrieval)."""
+    checkpoint_path = resolve_path(args.checkpoint)
+    if not checkpoint_path.exists():
+        print(f"Error: Checkpoint not found: {checkpoint_path}")
+        sys.exit(1)
+    try:
+        checkpoint = load_retrieval_checkpoint(checkpoint_path)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    testset_arg = args.testset
+    if not testset_arg:
+        testset_arg = checkpoint.get("manifest", {}).get("testset", {}).get("path")
+    if not testset_arg:
+        print("Error: --testset required (checkpoint has no testset path)")
+        sys.exit(1)
+    testset_path = resolve_path(testset_arg)
+    if not testset_path.exists():
+        print(f"Error: Test set not found: {testset_path}")
+        sys.exit(1)
+    try:
+        cases = load_golden_testset(testset_path)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    final_ks = tuple(sorted({k for k in args.final_ks if k > 0}))
+    if not final_ks:
+        print("Error: --final-ks must list at least one positive k")
+        sys.exit(1)
+    stages = None
+    if args.stages:
+        stages = [s.strip() for s in args.stages.split(",") if s.strip()]
+        unknown = [s for s in stages if s not in STAGES]
+        if unknown:
+            print(f"Error: --stages must be a subset of {STAGES}, got {args.stages!r}")
+            sys.exit(1)
+
+    try:
+        result = simulate_final_ks(checkpoint, cases, final_ks, stages=stages)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    output_path = resolve_path(args.output) if args.output else checkpoint_path.with_name(
+        checkpoint_path.name.replace(".retrieval.json", "") + "-cutoff.json"
+        if checkpoint_path.name.endswith(".retrieval.json")
+        else checkpoint_path.stem + "-cutoff.json"
+    )
+    write_cutoff_report(result, checkpoint_path, output_path)
+    print_cutoff_report(result)
+    print(f"\nCutoff report saved to {output_path}")
+    print(f"Markdown table saved to {Path(output_path).with_suffix('.md')}")
 
 
 def cmd_retrieval(args):

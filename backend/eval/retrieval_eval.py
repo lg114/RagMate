@@ -503,3 +503,199 @@ def compare_with_manifest(manifest: dict, previous_report_path) -> dict:
         previous = json.load(f)
     previous_manifest = previous.get("meta", {})
     return diff_manifests(previous_manifest, manifest)
+
+
+# ── 最终 k 截断模拟（只读 checkpoint，不重跑检索） ───────────────────────────
+
+def load_retrieval_checkpoint(path) -> dict:
+    """读 `.retrieval.json` 排序落盘；结构不对则抛 ValueError。"""
+    with open(path, "r", encoding="utf-8") as f:
+        checkpoint = json.load(f)
+    if not isinstance(checkpoint, dict) or "stages" not in checkpoint:
+        raise ValueError(f"Not a retrieval checkpoint (missing stages): {path}")
+    return checkpoint
+
+
+def simulate_final_ks(checkpoint: dict, cases: list[dict], final_ks,
+                      stages=None) -> dict:
+    """把每阶段排序截到 final_k，当作生产最终上下文窗口重算指标。
+
+    不重跑编码/检索/重排：直接用 checkpoint 里已落盘的 rank。每个 final_k
+    只在该截断长度上算 hit/recall/nDCG/MRR（即 hit@{k} 的 k = final_k）。
+    incomplete 列表 = answerable 且 recall@{k} < 1 的题（多证据被截断的样例）。
+    """
+    stages = list(stages) if stages is not None else list(
+        checkpoint.get("manifest", {}).get("harness", {}).get("stages", STAGES)
+    )
+    stage_lists = checkpoint["stages"]
+    if len(cases) != len(checkpoint.get("cases", cases)):
+        # cases 来自 testset；checkpoint.cases 可能只有 user_input。长度必须一致。
+        n_cp = len(checkpoint.get("cases", []))
+        if n_cp and n_cp != len(cases):
+            raise ValueError(
+                f"Test set has {len(cases)} cases but checkpoint has {n_cp}; "
+                "use the same testset that produced the checkpoint."
+            )
+
+    by_k = {}
+    for final_k in final_ks:
+        if final_k <= 0:
+            raise ValueError(f"final_k must be positive, got {final_k}")
+        stage_results = {}
+        for stage in stages:
+            items = []
+            for idx, tc in enumerate(cases):
+                records = stage_lists[str(idx)][stage][:final_k]
+                items.append({
+                    "user_input": tc.get("user_input", ""),
+                    "source_doc": tc.get("source_doc", ""),
+                    "question_type": tc.get("question_type", ""),
+                    "ranked": [normalize_key(r) for r in records],
+                    "gold": [normalize_key(g) for g in tc.get("gold_chunks", [])],
+                })
+            evaluation = evaluate_questions(items, ks=(final_k,))
+            incomplete = [
+                {
+                    "index": p["index"],
+                    "question_type": p["question_type"],
+                    "user_input": p["user_input"],
+                    "recall": p["scores"].get(f"recall@{final_k}"),
+                    "hit": p["scores"].get(f"hit@{final_k}"),
+                    "mrr": p["scores"].get("mrr"),
+                }
+                for p in evaluation["per_question"]
+                if not p["unanswerable"]
+                and p["scores"].get(f"recall@{final_k}", 1.0) < 1.0
+            ]
+            summary = evaluation["summary"]
+            stage_results[stage] = {
+                "summary": {
+                    "hit": summary.get(f"hit@{final_k}"),
+                    "recall": summary.get(f"recall@{final_k}"),
+                    "ndcg": summary.get(f"ndcg@{final_k}"),
+                    "mrr": summary.get("mrr"),
+                    "failure_rate": round(1.0 - summary[f"recall@{final_k}"], 4)
+                    if summary.get(f"recall@{final_k}") is not None else None,
+                },
+                "by_question_type": {
+                    qt: {
+                        "hit": metrics.get(f"hit@{final_k}"),
+                        "recall": metrics.get(f"recall@{final_k}"),
+                        "ndcg": metrics.get(f"ndcg@{final_k}"),
+                        "mrr": metrics.get("mrr"),
+                    }
+                    for qt, metrics in evaluation["by_question_type"].items()
+                },
+                "n_incomplete": len(incomplete),
+                "incomplete": incomplete,
+                "n_answerable": evaluation["n_answerable"],
+                "n_unanswerable": evaluation["n_unanswerable"],
+            }
+        by_k[str(final_k)] = stage_results
+    return {
+        "final_ks": list(final_ks),
+        "stages": stages,
+        "n_questions": len(cases),
+        "by_final_k": by_k,
+    }
+
+
+def write_cutoff_report(result: dict, checkpoint_path, output_path) -> Path:
+    """落盘 JSON + 同名 Markdown 表。"""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "meta": {
+            "checkpoint_path": str(checkpoint_path),
+            "final_ks": result["final_ks"],
+            "stages": result["stages"],
+            "n_questions": result["n_questions"],
+            "note": (
+                "Simulated FINAL_CONTEXT_K cutoffs from a retrieval checkpoint; "
+                "no re-retrieval. Metrics are hit/recall/nDCG/MRR on the truncated list."
+            ),
+        },
+        "by_final_k": result["by_final_k"],
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    md_path = output_path.with_suffix(".md")
+    lines = [
+        "# Final-k cutoff simulation (from retrieval checkpoint)",
+        "",
+        f"Checkpoint: `{checkpoint_path}`",
+        f"Questions: {result['n_questions']}, final_ks={result['final_ks']}",
+        "",
+        "Each row truncates that stage's ranked list to final_k (as if "
+        "`FINAL_CONTEXT_K=final_k`), then scores hit/recall/nDCG/MRR on the "
+        "truncated list. incomplete = answerable questions with recall < 1.",
+        "",
+    ]
+    for final_k in result["final_ks"]:
+        lines.append(f"## final_k = {final_k}")
+        lines.append("")
+        lines.append("| stage | hit | recall | nDCG | MRR | incomplete |")
+        lines.append("|---|---|---|---|---|---|")
+        for stage in result["stages"]:
+            block = result["by_final_k"][str(final_k)][stage]
+            sm = block["summary"]
+            lines.append(
+                f"| {stage} | {sm['hit']:.4f} | {sm['recall']:.4f} | "
+                f"{sm['ndcg']:.4f} | {sm['mrr']:.4f} | {block['n_incomplete']} |"
+            )
+        lines.append("")
+        # Call out incomplete on reranked (production-like) first
+        focus = "reranked" if "reranked" in result["stages"] else result["stages"][-1]
+        incomplete = result["by_final_k"][str(final_k)][focus]["incomplete"]
+        lines.append(f"### Incomplete under `{focus}` @ {final_k} ({len(incomplete)})")
+        if not incomplete:
+            lines.append("")
+            lines.append("_none_")
+        else:
+            for item in incomplete:
+                lines.append(
+                    f"- [{item['index']}] ({item['question_type']}) "
+                    f"recall={item['recall']:.2f}: {item['user_input']}"
+                )
+        lines.append("")
+        # multi-hop recall row
+        lines.append(f"### multi-hop recall by stage @ {final_k}")
+        lines.append("")
+        lines.append("| stage | multi-hop recall | multi-hop nDCG |")
+        lines.append("|---|---|---|")
+        for stage in result["stages"]:
+            mh = result["by_final_k"][str(final_k)][stage]["by_question_type"].get(
+                "multi-hop"
+            )
+            if not mh:
+                lines.append(f"| {stage} | — | — |")
+            else:
+                lines.append(
+                    f"| {stage} | {mh['recall']:.4f} | {mh['ndcg']:.4f} |"
+                )
+        lines.append("")
+    md_path.write_text("\n".join(lines), encoding="utf-8")
+    return output_path
+
+
+def print_cutoff_report(result: dict):
+    """控制台打印各 final_k × stage 的截断指标。"""
+    print("\n=== Final-k cutoff simulation (no re-retrieval) ===")
+    print(f"Questions: {result['n_questions']}, final_ks={result['final_ks']}")
+    for final_k in result["final_ks"]:
+        print(f"\nfinal_k={final_k}")
+        for stage in result["stages"]:
+            block = result["by_final_k"][str(final_k)][stage]
+            sm = block["summary"]
+            print(
+                f"  {stage:<10} hit={sm['hit']:.4f} recall={sm['recall']:.4f} "
+                f"nDCG={sm['ndcg']:.4f} MRR={sm['mrr']:.4f} "
+                f"incomplete={block['n_incomplete']}"
+            )
+            mh = block["by_question_type"].get("multi-hop")
+            if mh:
+                print(
+                    f"             multi-hop recall={mh['recall']:.4f} "
+                    f"nDCG={mh['ndcg']:.4f}"
+                )
