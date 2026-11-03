@@ -62,20 +62,26 @@ async def lifespan(app: FastAPI):
         logger.error(f"Database initialization failed: {e}")
         raise
 
-    # 后台预热模型
+    # 后台预热本地模型。远程嵌入 / 远程 rerank 不在 API 进程里加载权重。
     def _warmup_models():
-        try:
-            from backend.core.retriever import get_reranker
-            get_reranker()
-            logger.info("Reranker model warmed up")
-        except Exception as e:
-            logger.warning(f"Reranker warmup failed: {e}")
-        try:
-            from backend.infrastructure.encoding import get_bge_m3
-            get_bge_m3()
-            logger.info("BGE-M3 model warmed up")
-        except Exception as e:
-            logger.warning(f"BGE-M3 warmup failed: {e}")
+        if settings.RERANKER_PROVIDER == "local":
+            try:
+                from backend.core.retriever import get_reranker
+                get_reranker()
+                logger.info("Reranker model warmed up")
+            except Exception as e:
+                logger.warning(f"Reranker warmup failed: {e}")
+        else:
+            logger.info("Skipping local reranker warmup (RERANKER_PROVIDER=%s)", settings.RERANKER_PROVIDER)
+        from backend.infrastructure.encoding import get_bge_m3, uses_remote_embeddings
+        if uses_remote_embeddings():
+            logger.info("Skipping local BGE-M3 warmup (EMBEDDING_PROVIDER=%s)", settings.EMBEDDING_PROVIDER)
+        else:
+            try:
+                get_bge_m3()
+                logger.info("BGE-M3 model warmed up")
+            except Exception as e:
+                logger.warning(f"BGE-M3 warmup failed: {e}")
 
     _warmup_task = asyncio.get_running_loop().run_in_executor(None, _warmup_models)
 

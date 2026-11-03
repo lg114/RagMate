@@ -304,9 +304,9 @@ Overlap must be smaller than its chunk size, otherwise startup fails with a vali
 
 **Reranker tuning** — `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
 
-**Embedding** — `EMBEDDING_PROVIDER` (`huggingface`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY`, `EMBEDDING_API_BASE_URL`.
+**Embedding** — `EMBEDDING_PROVIDER` (`huggingface`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY`, `EMBEDDING_API_BASE_URL`, `EMBEDDING_API_TIMEOUT` (`60`).
 
-`EMBEDDING_DEVICE` (`cpu`) applies to the HuggingFace embeddings path used by the evaluation CLI. The indexing and retrieval path loads BGE-M3 through FlagEmbedding and does not currently honour this setting.
+`huggingface` (also `local` / `flagembedding`) loads BGE-M3 inside the API process with FlagEmbedding. `EMBEDDING_DEVICE` (`cpu` or `cuda`) is passed to that loader. `remote` or `openai` calls `POST {EMBEDDING_API_BASE_URL}/embeddings` instead, and startup does not warm a local BGE model. Pair it with `RERANKER_PROVIDER=api` so rerank stays off-process too. If the service includes `sparse` (or `lexical_weights`) on each result, those weights are stored; otherwise RagMate fills a stable hashed sparse vector. That hash is not BGE-M3 lexical weight, so re-ingest after switching providers. A sidecar can be any OpenAI-compatible embeddings server plus a `/rerank` endpoint (see the commented block in `backend/.env.example`). CI does not need a GPU or those services: the default remains local FlagEmbedding, and tests mock the HTTP client.
 
 **Agent** — `AGENT_RECURSION_LIMIT` (`30`).
 
@@ -380,7 +380,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 - **No authentication or multi-tenancy.** Every session and document is visible to anyone who can reach the API.
 - **Schema changes need a manual rebuild.** If the Milvus collection schema does not match, startup raises a validation error instead of migrating; the collection must be dropped and recreated.
 - **No migration tool.** Schema changes are applied with `create_all` plus a small hand-written column-migration list in `infrastructure/database.py`.
-- **CPU inference is slow.** Embedding and reranking run locally; expect seconds per query on CPU-only machines.
+- **CPU inference is slow when models stay in-process.** The default loads BGE-M3 and the reranker locally. Point `EMBEDDING_PROVIDER=remote` and `RERANKER_PROVIDER=api` at a sidecar if the API process should not load those weights.
 
 ---
 

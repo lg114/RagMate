@@ -304,9 +304,9 @@ data: {"error": "..."}                               // 终止性错误
 
 **重排序调参** — `HIGH_SCORE_RATIO` (`0.6`)、`SOURCE_DOMINANCE_THRESHOLD` (`0.9`)、`SOURCE_DOMINANCE_BOOST` (`1.5`)、`DROP_RATIO_SEARCH` (`0.2`)、`COMPRESSION_SCORE_THRESHOLD` (`0.4`)、`COMPRESSION_MIN_CHARS` (`300`)。
 
-**嵌入** — `EMBEDDING_PROVIDER` (`huggingface`)、`EMBEDDING_MODEL` (`BAAI/bge-m3`)、`EMBEDDING_NORMALIZE` (`true`)、`HF_TOKEN`、`EMBEDDING_API_KEY`、`EMBEDDING_API_BASE_URL`。
+**嵌入** — `EMBEDDING_PROVIDER` (`huggingface`)、`EMBEDDING_MODEL` (`BAAI/bge-m3`)、`EMBEDDING_NORMALIZE` (`true`)、`HF_TOKEN`、`EMBEDDING_API_KEY`、`EMBEDDING_API_BASE_URL`、`EMBEDDING_API_TIMEOUT` (`60`)。
 
-`EMBEDDING_DEVICE` (`cpu`) 只作用于评测 CLI 使用的 HuggingFace embeddings 路径；入库与检索链路通过 FlagEmbedding 加载 BGE-M3，目前不读取该设置。
+`huggingface`（以及 `local` / `flagembedding`）在 API 进程里用 FlagEmbedding 加载 BGE-M3，`EMBEDDING_DEVICE`（`cpu` 或 `cuda`）会传给这个加载器。`remote` 或 `openai` 改为请求 `POST {EMBEDDING_API_BASE_URL}/embeddings`，启动时不再预热本地 BGE。配合 `RERANKER_PROVIDER=api` 可以把重排也移出进程。服务如果在每条结果里带了 `sparse`（或 `lexical_weights`）就用它；否则用稳定的词哈希补稀疏向量。这个哈希不是 BGE-M3 的 lexical weights，切换嵌入方式后必须重新入库。侧车可以是任意 OpenAI 兼容的 embeddings 服务，再加一个 `/rerank` 端点（示例见 `backend/.env.example` 里的注释）。默认仍是本地 FlagEmbedding，CI 不需要 GPU。
 
 **Agent** — `AGENT_RECURSION_LIMIT` (`30`)。
 
@@ -380,7 +380,7 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 - **无认证与多租户。** 任何能访问 API 的人都可看到全部会话与文档。
 - **Schema 变更需手动重建。** Milvus 集合 schema 不匹配时启动会抛出校验错误而不是自动迁移，需要删除集合后重建。
 - **没有迁移工具。** 表结构变更通过 `create_all` 加上 `infrastructure/database.py` 中一份手写的补列清单完成。
-- **CPU 推理较慢。** 嵌入与重排序在本地执行，纯 CPU 环境下单次查询需要数秒。
+- **模型留在进程内时，CPU 推理较慢。** 默认在本地加载 BGE-M3 和 reranker。若不想让 API 进程加载这些权重，把 `EMBEDDING_PROVIDER=remote` 和 `RERANKER_PROVIDER=api` 指到侧车。
 
 ---
 
