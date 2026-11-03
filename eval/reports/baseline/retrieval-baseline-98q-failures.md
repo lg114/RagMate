@@ -74,5 +74,8 @@
 
 1. **先改评测读法：** multi-hop 主看「全部 gold 的 recall@5/10」，不要被 hit@5=1.0 骗过。  
 2. **生产截断：** 已用 checkpoint 扫过最终 k，见 `retrieval-baseline-98q-cutoff.md`：`reranked` 下 final_k=5 仍丢题 67；**k=10/15 全部 gold 齐**。当前默认 `FINAL_CONTEXT_K=15` 够兜住，不必为题 67 再加大；k=5 才危险。  
-3. **切块实验（已做）：** `title_path` 对比见 `retrieval-baseline-98q-titlepath-compare.md`——题 67 在 reranked@5 下三 gold 齐全；sparse multi-hop recall@5 0.88→1.00。  
-4. **查询改写：** 题 67 已被切块实验明显缓解；改写优先级下降，除非还有「多实体并列且同节」的新失败题。
+3. **切块实验（已做）：** `title_path` 已成默认；主索引重建 + 回归见 `retrieval-baseline-98q-titlepath-rerun.*`。  
+4. **两层打分（已做）：**  
+   - 交付层：`ragmate-eval delivery` → `retrieval-baseline-98q-titlepath-delivery.md`——filter/dedup **0 题丢 gold**；主索引 parent==child。  
+   - parent 重排：`retrieval-baseline-98q-parent-rerank.md`（c300）——parent 打分会改序（top1 flip 14%），确认生产应继续 child 打分再展开。  
+5. **查询改写：** 题 67 已被 title_path 缓解；改写优先级下降。下一件更划算的是 P1「生成/打分分离」或 P2 融合调参。

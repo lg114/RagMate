@@ -71,6 +71,24 @@ Markdown 默认 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路径: 
 `reports/baseline/retrieval-baseline-98q-titlepath-compare.md`。改策略后必须重建
 Milvus 集合，否则检索正文与标注切块不一致。
 
+## 两层打分：排序层 vs 生产交付（不重跑检索）
+
+检索基线的 `reranked` 停在排序；生产还会做阈值、同源去重、`FINAL_CONTEXT_K`
+截断，再父展开。用同一 checkpoint 对照两层，抓「排序有 gold、交付丢 gold」：
+
+```bash
+ragmate-eval delivery \
+  --checkpoint eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.retrieval.json
+```
+
+若报告里 `parent_text == child` 接近 100%，说明当前 `CHUNK_SIZE` 下父展开是空操作；
+要验「用 parent 正文重排是否稀释」需另建更小切块集合（如 c300）：
+
+```bash
+python -m backend.eval.run_parent_rerank_experiment
+# → eval/reports/baseline/retrieval-baseline-98q-parent-rerank.md
+```
+
 ## 最终 k 截断模拟（不重跑检索）
 
 用已落盘的 `.retrieval.json`，把每阶段排序截到 `FINAL_CONTEXT_K` 候选值再算分：

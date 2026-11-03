@@ -237,6 +237,76 @@ def cmd_rescore(args):
     print_report(new_report)
 
 
+def cmd_delivery(args):
+    """Two-layer scoring: child rerank vs production filter/dedup delivery."""
+    from .delivery_eval import run_delivery_from_paths
+
+    checkpoint_path = resolve_path(args.checkpoint)
+    if not checkpoint_path.exists():
+        print(f"Error: Checkpoint not found: {checkpoint_path}")
+        sys.exit(1)
+
+    from .retrieval_eval import load_retrieval_checkpoint
+    try:
+        checkpoint = load_retrieval_checkpoint(checkpoint_path)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    testset_arg = args.testset
+    if not testset_arg:
+        testset_arg = checkpoint.get("manifest", {}).get("testset", {}).get("path")
+    if not testset_arg:
+        print("Error: --testset required (checkpoint has no testset path)")
+        sys.exit(1)
+    testset_path = resolve_path(testset_arg)
+    if not testset_path.exists():
+        print(f"Error: Test set not found: {testset_path}")
+        sys.exit(1)
+    try:
+        cases = load_golden_testset(testset_path)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    output_path = resolve_path(args.output) if args.output else checkpoint_path.with_name(
+        checkpoint_path.name.replace(".retrieval.json", "") + "-delivery.json"
+        if checkpoint_path.name.endswith(".retrieval.json")
+        else checkpoint_path.stem + "-delivery.json"
+    )
+    result = run_delivery_from_paths(
+        checkpoint_path,
+        cases,
+        output_path,
+        expand=not args.no_expand,
+        load_parents=not args.no_parents,
+    )
+    pc = result.get("parent_child") or {}
+    print("=== Two-layer delivery scoring ===")
+    print(f"Checkpoint: {checkpoint_path}")
+    if pc:
+        print(
+            f"Parent==child: {pc.get('identical_parent_child')}/{pc.get('n_chunks')} "
+            f"(median len ratio {pc.get('median_len_ratio')})"
+        )
+    cs = result["child"]["summary"]
+    ds = result["delivered"]["summary"]
+    print(
+        f"child     recall@5={cs.get('recall@5')} MRR={cs.get('mrr')} "
+        f"fail@20={cs.get('failure_rate@20')}"
+    )
+    print(
+        f"delivered recall@5={ds.get('recall@5')} MRR={ds.get('mrr')} "
+        f"fail@20={ds.get('failure_rate@20')}"
+    )
+    print(f"Questions losing gold after filter/dedup: {result['n_dropped_questions']}")
+    for d in result["dropped"][:10]:
+        lost = ", ".join(f"{x['source']}:{x['chunk_index']}" for x in d["lost_gold"])
+        print(f"  #{d['index']} [{d['question_type']}] lost {lost}")
+    print(f"\nReport saved to {output_path}")
+    print(f"Markdown saved to {Path(output_path).with_suffix('.md')}")
+
+
 def cmd_cutoff(args):
     """Simulate FINAL_CONTEXT_K cutoffs from a retrieval checkpoint (no re-retrieval)."""
     checkpoint_path = resolve_path(args.checkpoint)
@@ -487,6 +557,31 @@ def main():
     check_gold_parser.add_argument("--corpus", type=str, default="eval/testsets/sample/corpus", help="Corpus directory used to reproduce chunking")
     check_gold_parser.add_argument("--live", action="store_true", help="Also verify gold chunks exist in the live Milvus index")
 
+    delivery_parser = subparsers.add_parser(
+        "delivery",
+        help="Two-layer scoring: child rerank vs production filter/dedup (from checkpoint)",
+    )
+    delivery_parser.add_argument(
+        "--checkpoint", type=str, required=True,
+        help="Path to <report>.retrieval.json ranked-list checkpoint",
+    )
+    delivery_parser.add_argument(
+        "--testset", type=str, default=None,
+        help="Golden test set (defaults to path recorded in the checkpoint manifest)",
+    )
+    delivery_parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output JSON path (default: <checkpoint-stem>-delivery.json)",
+    )
+    delivery_parser.add_argument(
+        "--no-expand", action="store_true",
+        help="Skip parent expand after filter/dedup (IDs unchanged either way)",
+    )
+    delivery_parser.add_argument(
+        "--no-parents", action="store_true",
+        help="Do not load parent_text from Milvus (skip parent==child stats)",
+    )
+
     cutoff_parser = subparsers.add_parser(
         "cutoff",
         help="Simulate FINAL_CONTEXT_K cutoffs from a .retrieval.json checkpoint (no re-retrieval)",
@@ -524,5 +619,7 @@ def main():
         cmd_retrieval(args)
     elif args.command == "check-gold":
         cmd_check_gold(args)
+    elif args.command == "delivery":
+        cmd_delivery(args)
     elif args.command == "cutoff":
         cmd_cutoff(args)
