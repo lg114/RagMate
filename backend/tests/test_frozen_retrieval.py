@@ -52,6 +52,6 @@ def test_help_lists_only_deterministic_commands(capsys, monkeypatch):
         cli.main()
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "{retrieval,check-gold,retrieval-gate,delivery,cutoff}" in out
+    assert "{retrieval,check-gold,retrieval-gate,delivery,cutoff,chunks,annotate}" in out
     assert "[shelved]" not in out
     assert "ragas" not in out.lower()

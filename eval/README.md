@@ -100,6 +100,43 @@ reranked 那一臂要 cross-encoder，词法重放对不齐）。余量 `0.015`�
 3. 确认 `ragmate-eval retrieval-gate` 对当前语料退出码为 0。词法重放过不了
    新门槛时，先看切块或排序是不是真的退步了，不要把 `ALLOWANCE` 调大来换绿灯。
 
+## 标注流程：新增题目（人工定 gold）
+
+gold 标注是人工判断，没有生成工具：读 chunk 文本，判断哪几块能回答这道题。
+工具只校验和落盘。流程：
+
+```bash
+# 1. 新文档放进语料目录（chunk_index 按文件独立编号，不改已有 gold）
+cp new-doc.md eval/testsets/sample/corpus/
+
+# 2. 列出生产切分复现的 chunk 清单，读文本定 gold
+ragmate-eval chunks --corpus eval/testsets/sample/corpus --source new-doc.md
+ragmate-eval chunks --corpus eval/testsets/sample/corpus --source new-doc.md --full
+
+# 3. 追加一道题（--gold 可重复；答不出题用 --type unanswerable 且不给 --gold）
+ragmate-eval annotate --testset eval/testsets/sample/testset.json \
+  --question "……" --reference "……" --type factoid \
+  --gold new-doc.md:3 --claims "……" --claims "……"
+```
+
+`annotate` 写盘前校验四件事，任一不过就拒绝写盘：题干不重复、schema
+完整（`reference` / `expected_claims` / 类型齐全，答不出题的 gold 必须为空、
+其余题至少一块 gold）、每块 gold 都在复现的 chunk 清单里。`--dry-run`
+只校验不写盘。写盘是原子的（临时文件 + 替换），不会写坏已有题集。
+
+题集一改，门禁在基线更新前一定失败：门禁按题干对齐题集与基线报告，
+题数或题干变了就报错。后续三步缺一不可：
+
+1. `ragmate-eval check-gold --testset eval/testsets/sample/testset.json`
+  （重建线上索引后再加 `--live` 验 pgvector 里也有这些 gold）。
+2. 把语料重建进 pgvector，重跑 `ragmate-eval retrieval`，按上面「有意更新
+   基线」替换钉住的报告文件与 `PINNED_FUSED`。
+3. `ragmate-eval retrieval-gate` 退出码为 0。
+
+不要手改基线报告凑门禁，不要把 `ALLOWANCE` 调大来换绿灯。一次扩题的量
+以能分辨为准：98 题时 1 题约 1 分，3–5 分的改进需要 100–150 题的规模；
+先扩到 130 题左右，再看分辨力够不够。
+
 ## 实验纪律：manifest + 一次只改一个变量 + 噪声带宽
 
 每次 `retrieval` 运行都在报告里写一份 manifest：题库文件 SHA-256、全部
