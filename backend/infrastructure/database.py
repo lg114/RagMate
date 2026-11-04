@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from sqlalchemy import create_engine, inspect, make_url, text
+from sqlalchemy import create_engine, inspect, insert, make_url, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -52,8 +52,27 @@ _MIGRATIONS = [
 ]
 
 
+def _ensure_ingest_row(sync_conn):
+    """保证 ingest_control 有且仅有 id=1 的控制行。终态留在这行上，不按 TTL 删除。"""
+    from backend.domain.models import IngestControl
+
+    found = sync_conn.execute(select(IngestControl.id).where(IngestControl.id == 1)).first()
+    if found:
+        return
+    sync_conn.execute(
+        insert(IngestControl).values(
+            id=1,
+            status="idle",
+            detail={"status": "idle", "last_ingest": None},
+            cancel_requested=False,
+        )
+    )
+
+
 async def init_db():
     """初始化数据库：create_all 建表 + 增量迁移补列。"""
+    import backend.domain.models  # noqa: F401 — 注册 ORM 表，含 ingest_control
+
     async with engine.begin() as conn:
         # 1. create_all：已存在的表自动跳过，只建新表
         await conn.run_sync(Base.metadata.create_all)
@@ -75,3 +94,4 @@ async def init_db():
                     ))
 
         await conn.run_sync(_run_migrations)
+        await conn.run_sync(_ensure_ingest_row)

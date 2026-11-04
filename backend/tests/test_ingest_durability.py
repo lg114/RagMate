@@ -1,4 +1,4 @@
-"""入库状态、心跳和取消标志放在 Redis，而不是进程内的 task 句柄。"""
+"""入库状态、心跳和取消标志放在 Postgres 的控制行，而不是进程内的 task 句柄。"""
 import asyncio
 import threading
 from datetime import datetime, timedelta, timezone
@@ -158,7 +158,7 @@ def test_reconcile_leaves_a_live_task_untouched(monkeypatch):
     assert result["progress"] == 2
 
 
-def test_cancel_request_reaches_redis_without_a_local_task(monkeypatch):
+def test_cancel_request_reaches_the_store_without_a_local_task(monkeypatch):
     called = {"n": 0}
 
     async def fake_mark():
@@ -220,6 +220,58 @@ def test_load_and_split_stops_before_touching_files(tmp_path, monkeypatch):
     assert chunks == []
     assert failed == []
     assert counter["a.txt"] == 0
+
+
+def test_watch_loop_treats_a_successful_renew_as_alive(monkeypatch):
+    """续期成功时不能因为返回值是空就停掉任务。取消标志要在下一轮才生效。"""
+    event = threading.Event()
+    calls = {"renew": 0, "reads": 0}
+
+    async def renew(_token):
+        calls["renew"] += 1
+        return True
+
+    async def beat(_token):
+        return True
+
+    async def task():
+        calls["reads"] += 1
+        if calls["reads"] >= 2:
+            return {"token": "t", "cancel": "1"}
+        return {"token": "t", "cancel": "0"}
+
+    async def sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(ingest_manager, "renew_ingest_lock", renew)
+    monkeypatch.setattr(ingest_manager, "heartbeat_ingest_task", beat)
+    monkeypatch.setattr(ingest_manager, "get_ingest_task", task)
+    monkeypatch.setattr(ingest_manager.asyncio, "sleep", sleep)
+
+    asyncio.run(ingest_manager._watch_lock("t", event))
+    assert event.is_set()
+    assert calls["renew"] >= 2
+    assert calls["reads"] == 2
+
+
+def test_watch_loop_stops_when_the_lock_renewal_fails(monkeypatch):
+    event = threading.Event()
+
+    async def renew(_token):
+        return False
+
+    async def beat(_token):
+        return True
+
+    async def sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(ingest_manager, "renew_ingest_lock", renew)
+    monkeypatch.setattr(ingest_manager, "heartbeat_ingest_task", beat)
+    monkeypatch.setattr(ingest_manager.asyncio, "sleep", sleep)
+
+    asyncio.run(ingest_manager._watch_lock("t", event))
+    assert event.is_set()
 
 
 def test_encode_documents_honours_cancel_without_loading_the_model(monkeypatch):

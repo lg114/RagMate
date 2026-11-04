@@ -44,16 +44,8 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from backend.infrastructure.redis_client import get_redis, close_sync_redis
+    from backend.infrastructure.redis_client import close_redis
     from backend.application.ingest_manager import cancel_ingest, reconcile_stale_ingest
-
-    # 心跳已死的 running 收成 interrupted，并放开对应的锁；活着的其他 worker 不动。
-    try:
-        state = await reconcile_stale_ingest()
-        if state.get("status") == "interrupted":
-            logger.warning("Reconciled a stale ingest task on startup: %s", state.get("error"))
-    except Exception as e:
-        logger.warning(f"Failed to reconcile ingest state on startup: {e}")
 
     try:
         await init_db()
@@ -61,6 +53,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
+
+    # 表就绪后再对账：心跳已死的 running 收成 interrupted，并放开对应的锁。
+    try:
+        state = await reconcile_stale_ingest()
+        if state.get("status") == "interrupted":
+            logger.warning("Reconciled a stale ingest task on startup: %s", state.get("error"))
+    except Exception as e:
+        logger.warning(f"Failed to reconcile ingest state on startup: {e}")
 
     # 后台预热本地模型。远程嵌入 / 远程 rerank 不在 API 进程里加载权重。
     def _warmup_models():
@@ -90,14 +90,9 @@ async def lifespan(app: FastAPI):
     finally:
         await cancel_ingest()
         try:
-            r = await get_redis()
-            await r.aclose()
+            await close_redis()
         except Exception:
             logger.debug("Failed to close async Redis on shutdown", exc_info=True)
-        try:
-            close_sync_redis()
-        except Exception:
-            logger.debug("Failed to close sync Redis on shutdown", exc_info=True)
         try:
             await engine.dispose()
         except Exception:

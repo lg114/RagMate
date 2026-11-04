@@ -12,7 +12,7 @@ from backend.domain.errors import AppError
 from backend.infrastructure.database import async_session
 from backend.infrastructure.config import settings
 from backend.domain.models import ChatHistory
-from backend.infrastructure.redis_client import load_session, save_session
+from backend.infrastructure.session_store import append_messages, load_session, save_session
 
 logger = logging.getLogger("ragmate")
 
@@ -40,13 +40,8 @@ def extract_text(response: dict) -> str:
 
 
 async def _persist_messages(session_id: str, messages: list[tuple[str, str]]):
-    """批量持久化消息到 PostgreSQL（role, content pairs）。"""
-    async with async_session() as session:
-        session.add_all(
-            ChatHistory(session_id=session_id, role=role, content=content)
-            for role, content in messages
-        )
-        await session.commit()
+    """把这一轮写入 PostgreSQL。save_session 已经写过同样的末尾时不会再插一次。"""
+    await append_messages(session_id, messages)
 
 
 async def _delete_last_persisted_turn(session_id: str):

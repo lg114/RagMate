@@ -13,7 +13,6 @@ from backend.infrastructure.config import settings
 from backend.infrastructure.database import async_session
 from backend.domain.models import ChatHistory
 from backend.infrastructure.rate_limiter import check_rate_limit
-from backend.infrastructure.redis_client import get_redis
 from backend.domain.schemas import ChatRequest, ChatResponse, validate_session_id
 
 logger = logging.getLogger("ragmate")
@@ -136,12 +135,6 @@ async def get_history(session_id: str):
 @router.delete("/chat/sessions/{session_id}")
 async def delete_session(session_id: str):
     validate_session_id(session_id)
-    try:
-        r = await get_redis()
-        await r.delete(f"ragmate:session:{session_id}")
-    except Exception:
-        logger.debug("Failed to delete Redis session cache", exc_info=True)
-
     async with async_session() as session:
         await session.execute(delete(ChatHistory).where(ChatHistory.session_id == session_id))
         await session.commit()

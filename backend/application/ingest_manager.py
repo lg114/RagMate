@@ -1,8 +1,9 @@
-"""入库任务生命周期：Redis 中的锁、心跳、取消标志，以及本进程里的执行任务。
+"""入库任务生命周期：Postgres 里的锁、心跳、取消标志，以及本进程里的执行任务。
 
-跨 worker 的事实来源是 Redis，而不是进程内的 asyncio.Task。
-持锁进程负责跑入库循环；任意进程都能读状态、请求取消。
+跨 worker 的事实来源是 ingest_control 这一行，而不是进程内的 asyncio.Task。
+持锁进程负责跑入库循环并写进度；任意进程都能读状态、请求取消。
 持锁进程退出后，心跳过期，下一次状态查询会把 running 收成 interrupted 并放开锁。
+终态和失败原因留在这一行上，不按 TTL 删除。
 """
 
 import asyncio
@@ -15,7 +16,7 @@ from datetime import datetime, timezone
 
 from backend.application.ingest.pipeline import ingest_documents
 from backend.infrastructure.config import settings
-from backend.infrastructure.redis_client import (
+from backend.infrastructure.ingest_store import (
     acquire_ingest_lock,
     clear_ingest_task,
     force_release_ingest_lock,
@@ -91,7 +92,7 @@ async def reconcile_stale_ingest() -> dict:
         except Exception:
             logger.debug("Failed to clear stale ingest task", exc_info=True)
     elif lock_token and task is None:
-        # 没有任务哈希时无法对 token。刚 acquire、尚未写入任务的窗口里 TTL 仍接近满值；
+        # 还没有任务记录时无法对 token。刚 acquire、尚未写入任务的窗口里租约仍接近满值；
         # 超过一个心跳周期还没人续期，就当成崩溃遗留的锁直接删掉。
         ttl = await get_ingest_lock_ttl()
         stale_ttl = settings.INGEST_LOCK_TTL - settings.INGEST_HEARTBEAT_STALE
@@ -104,7 +105,7 @@ async def reconcile_stale_ingest() -> dict:
 
 
 async def _watch_lock(token: str, cancel_event: threading.Event):
-    """续期锁和心跳，并在 Redis 取消标志出现或锁丢失时置位本地取消事件。"""
+    """续期锁和心跳，并在数据库取消标志出现或锁丢失时置位本地取消事件。"""
     while not cancel_event.is_set():
         await asyncio.sleep(settings.INGEST_HEARTBEAT_INTERVAL)
         if cancel_event.is_set():
@@ -130,7 +131,7 @@ async def _watch_lock(token: str, cancel_event: threading.Event):
 
 
 async def _run_ingest(filenames: list[str] | None, token: str):
-    """在后台线程中执行入库。锁与取消标志以 Redis 为准。"""
+    """在后台线程中执行入库。锁与取消标志以 Postgres 的 ingest_control 为准。"""
     global _ingest_lock_token, _ingest_cancel_event, _ingest_task
 
     cancel_event = threading.Event()
@@ -202,7 +203,7 @@ async def start_ingest(filenames: list[str] | None = None) -> dict:
 async def request_ingest_cancellation() -> dict:
     """请求取消正在运行的入库。任意 worker 都可以调用。
 
-    持锁进程在心跳循环里看到 Redis 标志后停止；若取消请求正好落在本进程，也会立刻置位本地事件。
+    持锁进程在心跳循环里看到数据库标志后停止；若取消请求正好落在本进程，也会立刻置位本地事件。
     """
     requested = await mark_ingest_cancel()
     if _ingest_cancel_event is not None:

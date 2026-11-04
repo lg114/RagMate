@@ -16,7 +16,11 @@ services:
       timeout: 5s
       retries: 10
 
+  # 可选。入库状态和会话都在 Postgres，默认不启动 Redis。
+  # 只有多个 worker 要共享限流时才需要：docker compose --profile redis up -d
+  # 并在 backend/.env 里设置 REDIS_URL=redis://localhost:6379/0
   redis:
+    profiles: ["redis"]
     container_name: ragmate-redis
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]

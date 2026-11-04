@@ -20,6 +20,14 @@ def client():
         "backend.infrastructure.database.async_session"
     ) as mock_session, patch(
         "backend.infrastructure.milvus.check_milvus_available", return_value=True
+    ), patch(
+        "backend.application.chat.load_session", new=AsyncMock(return_value=[])
+    ), patch(
+        "backend.application.chat.save_session", new=AsyncMock()
+    ), patch(
+        "backend.application.chat._persist_messages", new=AsyncMock()
+    ), patch(
+        "backend.application.chat._direct_llm_reply", return_value="ok"
     ):
         redis_instance = AsyncMock()
         redis_instance.exists = AsyncMock(return_value=False)

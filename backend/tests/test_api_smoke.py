@@ -119,14 +119,14 @@ class TestIngestEndpoints:
 
     def test_ingest_status(self, client, mock_infrastructure):
         """GET /ingest/status 应返回入库状态。"""
-        # Mock Redis 返回状态
-        mock_redis = mock_infrastructure["redis"].return_value
-        mock_redis.get = AsyncMock(return_value=None)
-
-        response = client.get("/ingest/status")
+        with patch(
+            "backend.api.ingest.reconcile_stale_ingest",
+            new=AsyncMock(return_value={"status": "idle", "last_ingest": None}),
+        ):
+            response = client.get("/ingest/status")
         assert response.status_code == 200
         data = response.json()
-        assert "status" in data
+        assert data["status"] == "idle"
 
 
 class TestErrorHandling:
