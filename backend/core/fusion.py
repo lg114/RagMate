@@ -1,26 +1,15 @@
-"""稠密/稀疏结果融合：RRF 与加权，供生产 hybrid_search 与离线扫参共用。"""
+"""稠密/稀疏结果融合：RRF 与加权。
+
+生产路径在 pgvector 上分别取稠密、稀疏的内积名次，再用 RRF 合并（默认 k=60）。
+`weighted_fuse_score_lists` 是离线扫参用的归一化加权，不是线上默认。
+线上 `FUSION_MODE=weighted` 对原始内积加权，不走这里的 min-max。
+"""
 from __future__ import annotations
 
-from pymilvus import RRFRanker, WeightedRanker
 
-from backend.infrastructure.config import settings
-
-
-def make_milvus_ranker(
-    *,
-    mode: str | None = None,
-    rrf_k: int | None = None,
-    dense_weight: float | None = None,
-):
-    """构造 Milvus hybrid_search 的 ranker（与 settings 对齐）。"""
-    mode = (mode or settings.FUSION_MODE or "rrf").strip().lower()
-    if mode == "weighted":
-        w_d = settings.FUSION_DENSE_WEIGHT if dense_weight is None else float(dense_weight)
-        w_d = min(1.0, max(0.0, w_d))
-        w_s = 1.0 - w_d
-        return WeightedRanker(w_d, w_s)
-    k = settings.RRF_K if rrf_k is None else int(rrf_k)
-    return RRFRanker(k)
+def rrf_contribution(rank: int, k: int) -> float:
+    """0-based 名次 → 1/(k+rank+1)，与名次从 1 计的标准 RRF 一致。"""
+    return 1.0 / (k + rank + 1)
 
 
 def rrf_fuse_rank_lists(
@@ -37,9 +26,9 @@ def rrf_fuse_rank_lists(
     """
     scores: dict[tuple, float] = {}
     for rank, key in enumerate(dense_ranked):
-        scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+        scores[key] = scores.get(key, 0.0) + rrf_contribution(rank, k)
     for rank, key in enumerate(sparse_ranked):
-        scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+        scores[key] = scores.get(key, 0.0) + rrf_contribution(rank, k)
     ordered = sorted(scores.keys(), key=lambda key: scores[key], reverse=True)
     return ordered[:limit]
 

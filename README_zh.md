@@ -6,7 +6,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Milvus](https://img.shields.io/badge/Milvus-2.5-2A6FB0)](https://milvus.io/)
+[![pgvector](https://img.shields.io/badge/pgvector-Postgres-336791)](https://github.com/pgvector/pgvector)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4C566A)](LICENSE)
 
 [English](README.md) · [中文](README_zh.md)
@@ -29,6 +29,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - [评测](#评测)
 - [开发](#开发)
 - [数据、备份与安全](#数据备份与安全)
+- [从 Milvus 迁出](#从-milvus-迁出)
 - [已知约束](#已知约束)
 - [常见问题](#常见问题)
 - [许可证](#许可证)
@@ -38,14 +39,14 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 
 ## 项目亮点
 
-- **混合检索** — 稠密 + 稀疏检索，在 Milvus 中用 RRF 融合。嵌入默认走 OpenAI 兼容 API；进程内 BGE-M3 需显式打开。
+- **混合检索** — 稠密 + 稀疏检索，在 pgvector 里用 RRF（k=60）融合。嵌入默认走 OpenAI 兼容 API；进程内 BGE-M3 需显式打开。
 - **重排序与过滤后的上下文** — 默认远程重排，加上动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。本地交叉编码器需显式打开。
 - **标题路径分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。该策略已冻结。
 - **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。只有 `DEEP_AGENTS_ENABLED=true` 才走 Deep Agents。
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
 - **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 98 题样本。RAGAS 打分代码仍在仓库里，但不是 CI 门禁。
-- **自托管设计** — PostgreSQL、Milvus、MinIO 通过 Docker Compose 运行。Redis 可选，只用于多进程共享限流。
+- **自托管设计** — 一套带 pgvector 的 Postgres 存放文档、会话和向量。Redis 可选，只用于多进程共享限流。
 
 ---
 
@@ -56,7 +57,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - Python 3.12+
 - Docker Desktop，或支持 Compose v2 的 Docker Engine
 - 一个 OpenAI 兼容的 LLM 接口及 API Key
-- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 启动 Milvus、PostgreSQL 和 MinIO，不负责这两个模型服务。默认不启动 Redis。
+- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 启动带 pgvector 的 Postgres，不负责这两个模型服务。默认不启动 Redis。
 - 本地 FlagEmbedding 是可选项。这条路径在 CPU 上大约需要 8 GB 内存；知识库较大时建议使用 GPU。
 
 ### 1. 启动基础设施
@@ -68,7 +69,7 @@ docker compose up -d
 docker compose ps
 ```
 
-服务端口：PostgreSQL `5432`、Milvus `19530`、MinIO `9000` / `9001`、Attu `8080`。这条默认路径不含 Redis。开发时应用本身运行在宿主机上。
+服务端口：PostgreSQL `5432`（含 pgvector）。这条默认路径不含 Redis。开发时应用本身运行在宿主机上。应用第一次启动时会执行 `CREATE EXTENSION vector` 并建好向量表。
 
 入库状态、锁、取消标志和失败原因都在 PostgreSQL。会话历史也在 PostgreSQL。`REDIS_URL` 留空即可。限流这时用进程内计数，单进程够用。要在多个 worker 之间共享计数，设置 `REDIS_URL=redis://localhost:6379/0` 并启动可选服务：
 
@@ -129,7 +130,7 @@ RERANKER_PROVIDER=api
 RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-默认数据库和 Milvus 配置与 Docker Compose 保持一致。没有启用 Redis profile 时 `REDIS_URL` 留空。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
+默认数据库地址与 Docker Compose 保持一致。向量写在同一个库的 `VECTOR_TABLE`（默认 `ragmate_docs`）。没有启用 Redis profile 时 `REDIS_URL` 留空。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
 
 ### 4. 启动 RagMate
 
@@ -151,7 +152,7 @@ uvicorn backend.app:app --reload --port 8000
 2. 入库未处理的文件，等页面上的进度条结束。
 3. 打开 **对话**，针对已索引文档提问。
 4. 点击引用，查看来源文件、页码、入库状态；打开检索调试时还可以看到命中的片段。
-5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL 和 Milvus 是否就绪。只有设置了 `REDIS_URL` 时，列表里才会出现 Redis。
+5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL 和 pgvector 是否就绪。只有设置了 `REDIS_URL` 时，列表里才会出现 Redis。
 
 界面是一层薄演示壳：零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。检索调试是开发模式轨迹（`"debug": true`），正常演示保持关闭。检索参数不在页面上，它们是下面冻结的服务端默认值。
 
@@ -163,7 +164,7 @@ uvicorn backend.app:app --reload --port 8000
 
 ```
 RagMate/
-├── docker-compose.yml      # PostgreSQL、Milvus、MinIO、etcd、Attu；Redis 在 profile "redis"
+├── docker-compose.yml      # Postgres + pgvector；Redis 在 profile "redis"
 ├── backend/
 │   ├── app.py              # 应用工厂：中间件、异常处理、静态文件挂载
 │   ├── api/                # HTTP 路由：chat、documents、ingest、health
@@ -171,7 +172,7 @@ RagMate/
 │   │   └── ingest/         # pipeline（加载 → 切分 → 去重 → 编码）、loaders、db_sync
 │   ├── core/               # RAG 内核：retriever、agent、prompts/researcher.md
 │   ├── domain/             # ORM 模型、Pydantic schema、错误类型
-│   ├── infrastructure/     # config、database、可选 redis、milvus、encoding、model_factory
+│   ├── infrastructure/     # config、database、pgvector、可选 redis、encoding、model_factory
 │   ├── eval/               # retrieval-gate，以及已搁置的 RAGAS 打分
 │   └── tests/
 └── frontend/               # 零构建界面（对话 / 文档 / 设置），由 FastAPI 挂在 /
@@ -189,13 +190,13 @@ RagMate/
 | 应用层 | `application/` | 用例编排：对话流程、文档 CRUD、入库生命周期 |
 | 核心层 | `core/` | RAG 领域逻辑：检索管线、Agent、系统提示词 |
 | 领域层 | `domain/` | ORM 模型、Pydantic schema、`AppError` 体系 |
-| 基础设施层 | `infrastructure/` | 外部系统：Milvus、PostgreSQL、可选 Redis、模型、配置 |
+| 基础设施层 | `infrastructure/` | 外部系统：PostgreSQL + pgvector、可选 Redis、模型、配置 |
 
 ```mermaid
 flowchart LR
     D[文档] --> P[加载与分块]
     P --> E[嵌入 API]
-    E --> V[(Milvus 向量)]
+    E --> V[(pgvector)]
     P --> M[(PostgreSQL 元数据)]
     Q[用户问题] --> R[混合检索 + RRF]
     R --> RR[重排、压缩、过滤]
@@ -203,9 +204,9 @@ flowchart LR
     A --> O[带引用的回答]
 ```
 
-**入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 Milvus 去重 → 经嵌入 API 做稠密 + 稀疏编码（只有显式打开时才在进程内用 FlagEmbedding）→ 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
+**入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 pgvector 表去重 → 经嵌入 API 做稠密 + 稀疏编码（只有显式打开时才在进程内用 FlagEmbedding）→ 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
 
-**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 + 稀疏 ANN 检索并用 RRF 融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。
+**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加稀疏精确内积，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。多查询默认关闭，除非 `MULTI_QUERY_ENABLED=true`。
 
 简单的寒暄类问题会绕过 Agent，直接路由到 LLM。
 
@@ -227,7 +228,7 @@ flowchart LR
 | POST | `/ingest/cancel` | 请求持锁 worker 停止入库 |
 | GET | `/ingest/status` | 查询入库状态与进度（进程重启后仍然可读） |
 | GET | `/health` | 存活探针 |
-| GET | `/ready` | 就绪探针（PostgreSQL、Milvus；仅当设置了 `REDIS_URL` 时才检查 Redis） |
+| GET | `/ready` | 就绪探针（PostgreSQL、pgvector；仅当设置了 `REDIS_URL` 时才检查 Redis） |
 
 ### 对话请求体
 
@@ -290,8 +291,7 @@ data: {"error": "..."}                               // 终止性错误
 | `LLM_API_BASE_URL` | 空 | 自定义 OpenAI 兼容端点 |
 | `LLM_TEMPERATURE` | `0.01` | 保持低温度以提升事实性 |
 | `REDIS_URL` | 空 | 可选。只在多个 worker 共享限流时填写。入库和对话不用它 |
-| `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | 向量数据库地址 |
-| `MILVUS_COLLECTION` | `ragmate_docs` | 集合名称 |
+| `VECTOR_TABLE` | `ragmate_docs` | 与 `DATABASE_URL` 同一个库里的 pgvector 表 |
 | `DOCUMENTS_DIR` | `backend/documents` | 上传目录 |
 | `CORS_ORIGINS` | `http://localhost:8000,...` | 逗号分隔；生产环境务必收紧 |
 
@@ -348,7 +348,7 @@ CI 不需要 GPU，也不需要真的嵌入服务。测试 mock 了 HTTP 客户�
 ragmate-eval retrieval-gate
 ```
 
-它对已入库的 98 题样本做确定性 BM25 重放（不连 Milvus、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 [`eval/README.md`](eval/README.md)。GitHub Actions 在 pytest 之后运行这条命令。
+它对已入库的 98 题样本做确定性 BM25 重放（不查 pgvector、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 [`eval/README.md`](eval/README.md)。GitHub Actions 在 pytest 之后运行这条命令。这次换向量库没有降低门槛。
 
 RAGAS（`generate`、`evaluate`、`rescore`、`patch-raw`，以及 `ragmate-eval interactive`）仍留在仓库里。只有还想用这个 judge 时才安装 `pip install -e ".[eval]"`。它已搁置：不是 CI 门禁，也不用来调检索。judge 分数会跟着模型漂移。Python 3.14 上的 RAGAS 问题不在范围内。不带参数的 `ragmate-eval` 会打印这条门禁，不再进入 RAGAS 菜单。
 
@@ -367,13 +367,13 @@ pytest -v
 > [!NOTE]
 > `ruff` 与 `mypy` 尚未在 `pyproject.toml` 中配置。代码遵循 PEP 8、4 空格缩进，公共函数使用中文 docstring。
 
-所有阻塞调用（模型推理、Milvus I/O、入库）都通过 `asyncio.to_thread` 丢到线程中执行，请勿在协程里直接加入阻塞逻辑。
+所有阻塞调用（模型推理、向量 I/O、入库）都通过 `asyncio.to_thread` 丢到线程中执行，请勿在协程里直接加入阻塞逻辑。
 
 ---
 
 ## 数据、备份与安全
 
-Docker 数据卷写入 `volumes/`，包含 PostgreSQL、Milvus 和 MinIO 的数据（若启用了 Redis profile，还有 Redis）。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。
+Docker 数据卷写入 `volumes/`，包含 PostgreSQL 的数据（向量表也在里面；若启用了 Redis profile，还有 Redis）。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。`volumes/etcd`、`volumes/minio`、`volumes/milvus` 是旧栈留下的，不再使用。
 
 如果要从 localhost 暴露到外部网络：
 
@@ -382,7 +382,36 @@ Docker 数据卷写入 `volumes/`，包含 PostgreSQL、Milvus 和 MinIO 的数�
 - 在 API 前面增加一层认证。
 - 检查上传与限流设置 —— 当前对话、上传、删除、入库均为每 IP 每分钟 30 次。未设置 `REDIS_URL` 时，这个计数只在单个进程内。
 
-RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径穿越拒绝、Milvus 过滤表达式注入防护、50 MB 上传上限，但它本身不构成完整的公网安全边界。
+RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径穿越拒绝、向量过滤使用参数化查询、50 MB 上传上限，但它本身不构成完整的公网安全边界。
+
+---
+
+## 从 Milvus 迁出
+
+`docker compose up` 不再启动 Milvus、etcd、MinIO 或 Attu。切块存在 `VECTOR_TABLE` 指定的 Postgres 表里（默认 `ragmate_docs`）。`VECTOR_TABLE` 为空时，旧的 `MILVUS_COLLECTION` 仍会当作表名。
+
+**Milvus 还在跑**时，可以拷一次。拷贝不会删 Milvus 里的数据。已经有相同 `(source, chunk_index, content_hash)` 的行会跳过，所以这条命令可以再跑：
+
+```bash
+pip install 'pymilvus>=2.5'
+python -m backend.infrastructure.migrate_from_milvus --host localhost --port 19530 --collection ragmate_docs
+```
+
+**Milvus 已经拆掉**时，用磁盘上的文件重新入库。增量入库会跳过 `documents` 里已经是 `ingested` 的文件，即使向量表是空的。先清掉这个标记，再入库：
+
+```sql
+UPDATE documents SET status = 'uploaded';
+```
+
+然后在页面上入库，或调用 `POST /ingest`。新向量写入 pgvector。删除文档时仍然先删向量，确认完成后再提交数据库删除。
+
+原来的 `volumes/postgres`（`postgres:15`）可以留着。把容器换到带扩展文件的镜像上：
+
+```bash
+docker compose up -d --force-recreate postgres
+```
+
+执行 `CREATE EXTENSION vector` 的数据库用户需要相应权限。Compose 里的 `postgres` 用户可以。拷贝或重新入库之后，可以删掉 `volumes/etcd`、`volumes/minio`、`volumes/milvus`。
 
 ---
 
@@ -390,7 +419,8 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 
 - **同一时间只有一个 worker 在入库。** 状态、锁、进度、取消标志和失败原因都在 Postgres 的一行（`ingest_control`）里，任意 uvicorn worker 都能读进度并发起取消。只有持锁的 worker 写进度和终态，并按 `INGEST_HEARTBEAT_INTERVAL`（默认 5 秒）刷新心跳。该进程退出后，下一次状态查询会在 `INGEST_HEARTBEAT_STALE`（默认 30 秒）后把任务标成 `interrupted` 并释放锁。这一行没有 TTL，失败或中断的结果在重启之后还在。
 - **无认证与多租户。** 任何能访问 API 的人都可看到全部会话与文档。
-- **Schema 变更需手动重建。** Milvus 集合 schema 不匹配时启动会抛出校验错误而不是自动迁移，需要删除集合后重建。
+- **向量表结构变更需手动重建。** pgvector 表缺列，或 `vector` / `sparsevec` 类型不对时，启动会抛出校验错误而不是改这些列。删表后重新入库。
+- **稀疏检索是精确内积。** 稠密检索用 HNSW（内积）。稀疏检索对 `sparsevec` 做精确内积，因为当前 pgvector 没有稀疏 ANN 索引。查询侧仍按 `DROP_RATIO_SEARCH`（默认 0.2）丢掉最小的一批稀疏权重。RRF 仍是 k=60。
 - **没有迁移工具。** 表结构变更通过 `create_all` 加上 `infrastructure/database.py` 中一份手写的补列清单完成。
 - **进程内嵌入和重排是可选项，CPU 推理较慢。** 默认请求远程嵌入和 `/rerank`，不加载 torch。只有希望本进程加载 BGE-M3 和交叉编码器时，才设置 `EMBEDDING_PROVIDER=huggingface` 和 `RERANKER_PROVIDER=local`。
 
@@ -403,7 +433,7 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 | `/ready` 返回 `degraded` | `docker compose ps`，再执行 `docker compose logs <service>` |
 | 启动报 "Required env vars not set" | 检查 `backend/.env` 中的 `DATABASE_URL`、`LLM_API_KEY`，以及（未改成本地模型时）`EMBEDDING_API_BASE_URL` 与 `RERANKER_API_BASE_URL` |
 | 本地模型下载或 CPU 推理很慢 | 保持默认的远程提供方，或在本地模式下设置 `EMBEDDING_DEVICE=cuda` |
-| 对话没有检索到内容 | 确认入库已完成，且 `MILVUS_HOST`、`DATABASE_URL` 指向正在运行的服务 |
+| 对话没有检索到内容 | 确认入库已完成，且 `DATABASE_URL` 指向存着 pgvector 表的 Postgres |
 | 端口冲突 | 修改 `docker-compose.yml` 的宿主机端口，并同步更新 `.env` |
 | 入库卡在 `running` | 状态由 Postgres 心跳对账。worker 退出后默认 30 秒（`INGEST_HEARTBEAT_STALE`）会变成 `interrupted`；`POST /ingest/cancel` 可请求仍在运行的 worker 停止 |
 
@@ -417,4 +447,4 @@ MIT License，详见 [LICENSE](LICENSE)。
 
 ## 致谢
 
-[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [Milvus](https://milvus.io/) · [BGE](https://github.com/FlagOpen/FlagEmbedding)
+[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [pgvector](https://github.com/pgvector/pgvector) · [BGE](https://github.com/FlagOpen/FlagEmbedding)

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from pydantic import Field, model_validator
@@ -10,6 +11,19 @@ _ENV_FILE = _BACKEND_DIR / ".env"
 # huggingface / local / flagembedding：本进程 FlagEmbedding。openai / remote：HTTP，不加载 BGE。
 LOCAL_EMBEDDING_PROVIDERS = ("huggingface", "local", "flagembedding")
 REMOTE_EMBEDDING_PROVIDERS = ("openai", "remote")
+# 表名加上 _dense_hnsw 后仍须落在 Postgres 63 字符标识符限制内。
+_VECTOR_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$")
+
+
+def resolve_vector_table(vector_table: str, legacy_collection: str = "") -> str:
+    """VECTOR_TABLE 优先；空则用旧的 MILVUS_COLLECTION；再空则 ragmate_docs。"""
+    table = (vector_table or "").strip() or (legacy_collection or "").strip() or "ragmate_docs"
+    if not _VECTOR_TABLE_RE.fullmatch(table):
+        raise ValueError(
+            "VECTOR_TABLE must be a SQL identifier of at most 40 characters, "
+            f"got {table!r}"
+        )
+    return table
 
 
 class Settings(BaseSettings):
@@ -47,11 +61,10 @@ class Settings(BaseSettings):
     # 留空则不连接 Redis。入库和会话都在 PostgreSQL；限流退回本进程内存。
     REDIS_URL: str = ""
 
-    # Milvus
-    MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: int = Field(default=19530, ge=1, le=65535)
-    MILVUS_COLLECTION: str = "ragmate_docs"
-    MILVUS_TIMEOUT: float = Field(default=10.0, gt=0)
+    # pgvector 表，建在 DATABASE_URL 的同一个 Postgres 里。
+    # 留空则用 ragmate_docs；若只设置了旧的 MILVUS_COLLECTION，用那个名字。
+    VECTOR_TABLE: str = ""
+    MILVUS_COLLECTION: str = ""
 
     # Ingestion
     CHUNK_SIZE: int = Field(default=1000, gt=0)
@@ -158,6 +171,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_required(self):
+        object.__setattr__(
+            self, "VECTOR_TABLE", resolve_vector_table(self.VECTOR_TABLE, self.MILVUS_COLLECTION)
+        )
         if self.RERANKER_PROVIDER not in ("local", "api"):
             raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")
         if self.EMBEDDING_PROVIDER not in LOCAL_EMBEDDING_PROVIDERS + REMOTE_EMBEDDING_PROVIDERS:

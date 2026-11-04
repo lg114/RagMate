@@ -1,7 +1,10 @@
 services:
+  # Postgres 15 + pgvector（sparsevec 需要扩展 >= 0.7）。
+  # 文档、会话、入库状态和向量都在这一个库里。API 启动时 CREATE EXTENSION vector。
+  # 从旧的 postgres:15 数据卷换过来时：docker compose up -d --force-recreate postgres
   postgres:
     container_name: ragmate-postgres
-    image: postgres:15
+    image: pgvector/pgvector:0.8.7-pg15
     environment:
       POSTGRES_DB: ragmate
       POSTGRES_USER: postgres
@@ -33,88 +36,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
-  etcd:
-    container_name: milvus-etcd
-    image: quay.io/coreos/etcd:v3.5.18
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    volumes:
-      - ./volumes/etcd:/etcd
-    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  minio:
-    container_name: milvus-minio
-    # MinIO 社区版已于 2026-09-11 从 Docker Hub 撤下（minio/minio 与 minio/mc 全部 tag 失效），
-    # quay.io/minio 随后也不再支持匿名拉取——实测任何 tag 与 tags/list 均返回 401，
-    # 而 quay 上 etcd / node-exporter 等仓库返回 200，可确认是 MinIO 侧关闭而非 registry 故障。
-    # 改用 Milvus 官方自托管的同源镜像：环境变量、端口、启动命令与原配置完全一致。
-    # 出处：milvus-io/milvus master 分支 deployments/docker/standalone/docker-compose.yml
-    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    ports:
-      - "9001:9001"
-      - "9000:9000"
-    volumes:
-      - ./volumes/minio:/minio_data
-    command: minio server /minio_data --console-address ":9001"
-    healthcheck:
-      # 新版 MinIO 镜像不再内置 curl，改用镜像自带的 mc 客户端探活
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  milvus:
-    container_name: milvus-standalone
-    image: milvusdb/milvus:v2.5.14
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      MINIO_REGION: us-east-1
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-    volumes:
-      - ./volumes/milvus:/var/lib/milvus
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      start_period: 90s
-      timeout: 20s
-      retries: 3
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    depends_on:
-      etcd:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  attu:
-    container_name: milvus-attu
-    image: zilliz/attu:v2.5.11
-    environment:
-      - MILVUS_URL=milvus:19530
-      - PORT=3000
-    ports:
-      - "8080:3000"
-    depends_on:
-      milvus:
-        condition: service_healthy
-    networks:
-      - default
 
 networks:
   default:

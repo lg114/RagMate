@@ -1,4 +1,4 @@
-"""入库主流程：文件发现 → 加载 → 切分 → 去重 → 编码 → 写入 Milvus → 同步 PostgreSQL。"""
+"""入库主流程：文件发现 → 加载 → 切分 → 去重 → 编码 → 写入 pgvector → 同步文档表。"""
 import hashlib
 import logging
 import os
@@ -15,12 +15,11 @@ from backend.domain.errors import ServiceUnavailableError
 from backend.domain.models import Document
 from backend.infrastructure.encoding import EncodingCancelled, encode_documents
 from backend.infrastructure.ingest_store import ingest_cancel_requested_sync, set_ingest_status_sync
-from backend.infrastructure.milvus import (
-    check_milvus_available,
+from backend.infrastructure.vector_store import (
+    check_vector_store_available,
     deduplicate_chunks,
     delete_old_chunks,
-    ensure_collection,
-    get_milvus_client,
+    get_vector_store,
     insert_chunks,
 )
 from .db_sync import sync_documents_table
@@ -247,7 +246,7 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
 
 
 def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_event=None) -> dict:
-    """读取文档，切分，向量入库到 Milvus。增量模式：只处理新文件。
+    """读取文档，切分，向量入库到 pgvector。增量模式：只处理新文件。
 
     Args:
         cancel_event: threading.Event，设置后尽早终止入库流程。
@@ -262,17 +261,15 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
     if not all_files:
         return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
 
-    if not check_milvus_available():
-        raise ServiceUnavailableError(
-            f"Milvus 服务不可达 ({settings.MILVUS_HOST}:{settings.MILVUS_PORT})",
-        )
+    if not check_vector_store_available():
+        raise ServiceUnavailableError("向量库不可用（PostgreSQL 未就绪或未安装 pgvector）")
 
     # 2. 增量检测
     new_files, ingested_info = _detect_new_files(docs_dir, all_files)
     if not new_files:
         return {
             "status": "success", "document_count": 0, "chunk_count": 0,
-            "filenames": [], "chunk_counts": {}, "collection": settings.MILVUS_COLLECTION,
+            "filenames": [], "chunk_counts": {}, "collection": settings.VECTOR_TABLE,
             "message": "All documents already ingested",
         }
 
@@ -291,7 +288,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         chunk.metadata["ingest_batch_id"] = ingest_batch_id
 
     # 4. 内容去重
-    client = get_milvus_client()
+    client = get_vector_store()
     # 同名文件重新入库时，即使部分 chunk 内容未变化，也必须重新插入到本批次。
     # 否则后续清理旧向量会把这些“未重新插入”的 chunk 一并删掉。
     reingested_files = set(new_files).intersection(ingested_info)
@@ -302,8 +299,8 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         force_include_sources=reingested_files,
     )
 
-    # 5. 确保 collection 存在
-    ensure_collection(client)
+    # 5. 确保向量表存在
+    client.ensure_schema()
 
     # 6. 如果全部去重，提前返回（不删除任何旧向量）
     if not chunks:
@@ -360,7 +357,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
             "ingest_batch_id": ingest_batch_id,
             "chunk_count": len(chunks),
             "failed": failed_files,
-            "collection": settings.MILVUS_COLLECTION,
+            "collection": settings.VECTOR_TABLE,
         }
         set_ingest_status_sync(result)
         return result
@@ -382,7 +379,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         "chunk_counts": dict(chunk_counter),
         "skipped": skipped_list,
         "failed": failed_files,
-        "collection": settings.MILVUS_COLLECTION,
+        "collection": settings.VECTOR_TABLE,
         "ingest_batch_id": ingest_batch_id,
     }
     set_ingest_status_sync(result)

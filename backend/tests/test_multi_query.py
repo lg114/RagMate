@@ -102,7 +102,7 @@ class TestRetrieveIntegration:
             return [[_hit("a.md", 0, "短文本")]]
 
         with patch("backend.infrastructure.model_factory.get_llm", return_value=llm), patch.object(
-            retriever, "init_milvus", return_value=object()
+            retriever, "init_vector_store", return_value=object()
         ), patch.object(retriever, "encode_query", return_value=([0.0], {})), patch.object(
             retriever, "_do_search", side_effect=fake_search
         ), patch.object(

@@ -95,3 +95,10 @@ async def init_db():
 
         await conn.run_sync(_run_migrations)
         await conn.run_sync(_ensure_ingest_row)
+
+        def _ensure_vectors(sync_conn):
+            from backend.infrastructure.vector_store import ensure_schema_conn
+
+            ensure_schema_conn(sync_conn)
+
+        await conn.run_sync(_ensure_vectors)

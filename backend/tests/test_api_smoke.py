@@ -24,7 +24,7 @@ def mock_infrastructure():
          patch("backend.infrastructure.redis_client.get_redis", new_callable=AsyncMock) as mock_redis, \
          patch("backend.infrastructure.database.async_session") as mock_session, \
          patch("backend.api.documents.async_session") as mock_documents_session, \
-         patch("backend.infrastructure.milvus.check_milvus_available") as mock_milvus:
+         patch("backend.infrastructure.vector_store.check_vector_store_available") as mock_vectors:
 
         # Redis mock
         redis_instance = AsyncMock()
@@ -45,14 +45,13 @@ def mock_infrastructure():
         # 请求会真去连 Postgres。必须同时 patch 路由模块里的名字。
         mock_documents_session.side_effect = lambda: _AsyncSessionCM(session_instance)
 
-        # Milvus mock
-        mock_milvus.return_value = True
+        mock_vectors.return_value = True
 
         yield {
             "init_db": mock_init_db,
             "redis": mock_redis,
             "session": mock_session,
-            "milvus": mock_milvus,
+            "pgvector": mock_vectors,
         }
 
 

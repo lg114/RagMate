@@ -16,7 +16,7 @@ from pathlib import Path
 
 from backend.core.retriever import _expand_to_parent, _filter_and_dedup
 from backend.infrastructure.config import settings
-from backend.infrastructure.milvus import get_milvus_client, init_milvus
+from backend.infrastructure.vector_store import PgVectorStore, init_vector_store
 
 from .deterministic_metrics import evaluate_questions, normalize_key
 from .retrieval_eval import load_retrieval_checkpoint
@@ -25,22 +25,15 @@ from .retrieval_eval import load_retrieval_checkpoint
 def load_chunk_text_maps(collection: str | None = None) -> tuple[dict[tuple, str], dict[tuple, str]]:
     """返回 (parent_map, child_map)，key 均为 (source, page, chunk_index)。
 
-    checkpoint 往往只落 text_preview，长度统计必须用索引里的完整 text / parent_text。
+    checkpoint 往往只落 text_preview，长度统计必须用表里的完整 text / parent_text。
     """
-    init_milvus()
-    client = get_milvus_client()
-    name = collection or settings.MILVUS_COLLECTION
-    rows = client.query(
-        collection_name=name,
-        filter="",
-        output_fields=["text", "parent_text", "metadata"],
-        limit=16384,
-    )
+    init_vector_store()
+    store = PgVectorStore(collection) if collection else PgVectorStore()
+    rows = store.fetch_chunks(limit=16384)
     parent_map: dict[tuple, str] = {}
     child_map: dict[tuple, str] = {}
     for row in rows:
-        meta = row.get("metadata") or {}
-        key = (meta.get("source", ""), meta.get("page"), meta.get("chunk_index"))
+        key = (row.get("source") or "", row.get("page"), row.get("chunk_index"))
         child = row.get("text") or ""
         child_map[key] = child
         parent_map[key] = row.get("parent_text") or child
@@ -167,7 +160,7 @@ def simulate_delivery(
             "SCORE_GAP_THRESHOLD": settings.SCORE_GAP_THRESHOLD,
             "DYNAMIC_THRESHOLD_RATIO": settings.DYNAMIC_THRESHOLD_RATIO,
             "expand": expand,
-            "MILVUS_COLLECTION": settings.MILVUS_COLLECTION,
+            "VECTOR_TABLE": settings.VECTOR_TABLE,
             "CHUNKING_STRATEGY": settings.CHUNKING_STRATEGY,
             "CHUNK_SIZE": settings.CHUNK_SIZE,
         },
@@ -218,7 +211,7 @@ def write_delivery_report(result: dict, checkpoint_path, output_path) -> Path:
         "# Two-layer delivery scoring (child rank vs production filter)",
         "",
         f"Checkpoint: `{checkpoint_path}`",
-        f"Collection: `{cfg.get('MILVUS_COLLECTION')}`, "
+        f"Table: `{cfg.get('VECTOR_TABLE')}`, "
         f"CHUNK_SIZE={cfg.get('CHUNK_SIZE')}, strategy={cfg.get('CHUNKING_STRATEGY')}",
         f"Delivery: FINAL_CONTEXT_K={cfg.get('FINAL_CONTEXT_K')}, "
         f"threshold={cfg.get('RERANK_SCORE_THRESHOLD')}, "

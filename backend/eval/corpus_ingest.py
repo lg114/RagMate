@@ -1,6 +1,6 @@
-"""评测用语料入库：切分 → 编码 → 写入指定 Milvus collection，不碰 PostgreSQL。
+"""评测用语料入库：切分 → 编码 → 写入指定 pgvector 表，不碰 documents 表。
 
-用于切块策略 A/B（独立 collection），避免增量 mtime / 文档表状态干扰实验。
+用于切块策略实验（独立表），避免增量 mtime / 文档表状态干扰。
 """
 from __future__ import annotations
 
@@ -10,20 +10,19 @@ from pathlib import Path
 from backend.application.ingest import pipeline as ingest_pipeline
 from backend.infrastructure.config import settings
 from backend.infrastructure.encoding import encode_documents
-from backend.infrastructure.milvus import (
-    ensure_collection,
-    get_milvus_client,
+from backend.infrastructure.vector_store import (
+    PgVectorStore,
     insert_chunks,
-    reset_collection_loaded_flag,
+    reset_vector_store_cache,
 )
 
 logger = logging.getLogger("ragmate")
 
 
 def ingest_corpus_to_collection(corpus_dir, collection_name: str | None = None) -> dict:
-    """把 corpus_dir 下全部文件按当前 CHUNKING_STRATEGY 写入 collection。
+    """把 corpus_dir 下全部文件按当前 CHUNKING_STRATEGY 写入向量表。
 
-    若目标 collection 已存在则先 drop 再建，保证实验可复现。
+    目标表已存在则先 drop 再建，保证实验可复现。collection_name 是表名。
     """
     corpus_dir = Path(corpus_dir)
     if not corpus_dir.is_dir():
@@ -32,16 +31,15 @@ def ingest_corpus_to_collection(corpus_dir, collection_name: str | None = None) 
     if not files:
         raise ValueError(f"No files in corpus directory: {corpus_dir}")
 
-    target = collection_name or settings.MILVUS_COLLECTION
-    previous = settings.MILVUS_COLLECTION
-    settings.MILVUS_COLLECTION = target
-    reset_collection_loaded_flag()
+    target = collection_name or settings.VECTOR_TABLE
+    previous = settings.VECTOR_TABLE
+    settings.VECTOR_TABLE = target
+    reset_vector_store_cache()
     try:
-        client = get_milvus_client()
-        if client.has_collection(target):
-            logger.info("Dropping existing collection %s for clean ingest", target)
-            client.drop_collection(target)
-        ensure_collection(client)
+        store = PgVectorStore(target)
+        logger.info("Dropping vector table %s for clean ingest", target)
+        store.drop_table()
+        store.ensure_schema()
 
         original_reporter = ingest_pipeline.set_ingest_status_sync
         ingest_pipeline.set_ingest_status_sync = lambda data: None
@@ -59,26 +57,15 @@ def ingest_corpus_to_collection(corpus_dir, collection_name: str | None = None) 
 
         texts = [c.page_content for c in chunks]
         dense_vecs, sparse_vecs = encode_documents(texts)
-        insert_chunks(client, chunks, dense_vecs, sparse_vecs)
-        # standalone Milvus 上 get_collection_stats 有时短期仍报 0；flush + 点查确认可检索。
-        try:
-            client.flush(collection_name=target)
-        except Exception:
-            logger.debug("flush after ingest failed", exc_info=True)
-        client.load_collection(target)
-        probe = client.query(
-            collection_name=target,
-            filter="",
-            output_fields=["metadata"],
-            limit=16384,
-        )
+        insert_chunks(store, chunks, dense_vecs, sparse_vecs)
         return {
             "collection": target,
             "strategy": settings.CHUNKING_STRATEGY,
             "files": len(files),
             "chunks": len(chunks),
             "chunk_counts": dict(chunk_counter),
-            "row_count": len(probe),
+            "row_count": store.count_rows(),
         }
     finally:
-        settings.MILVUS_COLLECTION = previous
+        settings.VECTOR_TABLE = previous
+        reset_vector_store_cache()

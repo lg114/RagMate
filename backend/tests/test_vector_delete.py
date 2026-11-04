@@ -7,7 +7,7 @@ import pytest
 from backend.application import document_service
 from backend.application.ingest import pipeline
 from backend.domain.errors import NotFoundError, ServiceUnavailableError
-from backend.infrastructure.milvus import delete_old_chunks, delete_source_vectors
+from backend.infrastructure.vector_store import delete_old_chunks, delete_source_vectors
 
 
 class _Doc:
@@ -33,27 +33,26 @@ class _Session:
         self.log.append("rollback")
 
 
-class _Milvus:
+class _Store:
     def __init__(self, log, *, exists=True, fail=False, leftover=False):
         self.log = log
         self.exists = exists
         self.fail = fail
         self.leftover = leftover
 
-    def has_collection(self, name):
-        self.log.append("has_collection")
+    def table_exists(self):
+        self.log.append("table_exists")
         return self.exists
 
-    def delete(self, **kwargs):
-        self.log.append("milvus_delete")
+    def delete_source(self, filename):
+        self.log.append("vector_delete")
         if self.fail:
-            raise RuntimeError("milvus down")
-        return {"delete_count": 1}
+            raise RuntimeError("vector store down")
 
-    def query(self, **kwargs):
-        self.log.append("milvus_query")
+    def source_rows(self, filename, limit=None):
+        self.log.append("vector_query")
         if self.leftover:
-            return [{"id": 7}]
+            return [{"id": 7, "ingest_batch_id": ""}]
         return []
 
 
@@ -69,20 +68,20 @@ def _session(log, doc=_Doc()):
     return session
 
 
-def test_delete_document_commits_only_after_milvus_confirms(tmp_path):
+def test_delete_document_commits_only_after_vectors_are_gone(tmp_path):
     log = []
     path = tmp_path / "notes.txt"
     path.write_text("hello")
     session = _session(log)
-    client = _Milvus(log)
+    client = _Store(log)
 
     asyncio.run(document_service.delete_document("notes.txt", str(tmp_path), session, client))
 
-    assert log == ["db_select", "has_collection", "milvus_delete", "milvus_query", "db_delete", "commit"]
+    assert log == ["db_select", "table_exists", "vector_delete", "vector_query", "db_delete", "commit"]
     assert not path.exists()
 
 
-def test_delete_document_keeps_row_when_milvus_delete_fails(tmp_path):
+def test_delete_document_keeps_row_when_vector_delete_fails(tmp_path):
     log = []
     path = tmp_path / "notes.txt"
     path.write_text("hello")
@@ -90,7 +89,7 @@ def test_delete_document_keeps_row_when_milvus_delete_fails(tmp_path):
 
     with pytest.raises(ServiceUnavailableError):
         asyncio.run(document_service.delete_document(
-            "notes.txt", str(tmp_path), session, _Milvus(log, fail=True),
+            "notes.txt", str(tmp_path), session, _Store(log, fail=True),
         ))
 
     assert "commit" not in log
@@ -107,7 +106,7 @@ def test_delete_document_keeps_row_when_vectors_remain(tmp_path):
 
     with pytest.raises(ServiceUnavailableError) as exc:
         asyncio.run(document_service.delete_document(
-            "notes.txt", str(tmp_path), session, _Milvus(log, leftover=True),
+            "notes.txt", str(tmp_path), session, _Store(log, leftover=True),
         ))
 
     assert exc.value.status_code == 503
@@ -129,37 +128,37 @@ def test_delete_document_missing_is_not_found():
     log = []
     session = _session(log, doc=None)
     with pytest.raises(NotFoundError):
-        asyncio.run(document_service.delete_document("notes.txt", "/tmp", session, _Milvus(log)))
-    assert "milvus_delete" not in log
+        asyncio.run(document_service.delete_document("notes.txt", "/tmp", session, _Store(log)))
+    assert "vector_delete" not in log
     assert "commit" not in log
 
 
-def test_delete_source_vectors_skips_missing_collection():
-    client = _Milvus([], exists=False)
+def test_delete_source_vectors_skips_missing_table():
+    client = _Store([], exists=False)
     delete_source_vectors(client, "notes.txt")
-    assert "milvus_delete" not in client.log
+    assert "vector_delete" not in client.log
 
 
 def test_delete_old_chunks_prefers_batch_id_over_keep_list():
     first = [
-        {"id": 1, "metadata": {"ingest_batch_id": "new"}},
-        {"id": 2, "metadata": {"ingest_batch_id": "old"}},
-        {"id": 3, "metadata": {}},
-        {"id": 4, "metadata": {"ingest_batch_id": ""}},
+        {"id": 1, "ingest_batch_id": "new"},
+        {"id": 2, "ingest_batch_id": "old"},
+        {"id": 3, "ingest_batch_id": ""},
+        {"id": 4, "ingest_batch_id": ""},
     ]
     second = [
-        {"id": 1, "metadata": {"ingest_batch_id": "new"}},
-        {"id": 4, "metadata": {"ingest_batch_id": ""}},
+        {"id": 1, "ingest_batch_id": "new"},
+        {"id": 4, "ingest_batch_id": ""},
     ]
     deleted = {}
 
     class Client:
-        def query(self, **kwargs):
+        def source_rows(self, filename, limit=None):
             return first if "seen" not in deleted else second
 
-        def delete(self, **kwargs):
+        def delete_ids(self, ids):
             deleted["seen"] = True
-            deleted["ids"] = kwargs.get("ids")
+            deleted["ids"] = ids
 
     delete_old_chunks(Client(), {"a.txt": [4]}, ingest_batch_id="new")
     assert deleted["ids"] == [2, 3]
@@ -169,11 +168,11 @@ def test_delete_old_chunks_raises_when_rows_remain():
     rows = [{"id": 2, "metadata": {"ingest_batch_id": "old"}}]
 
     class Client:
-        def query(self, **kwargs):
+        def source_rows(self, filename, limit=None):
             return rows
 
-        def delete(self, **kwargs):
-            return {"delete_count": 0}
+        def delete_ids(self, ids):
+            return None
 
     with pytest.raises(ServiceUnavailableError):
         delete_old_chunks(Client(), {"a.txt": [1]}, ingest_batch_id="new")
@@ -181,11 +180,11 @@ def test_delete_old_chunks_raises_when_rows_remain():
 
 def test_delete_old_chunks_raises_when_delete_throws():
     class Client:
-        def query(self, **kwargs):
-            return [{"id": 2, "metadata": {"ingest_batch_id": "old"}}]
+        def source_rows(self, filename, limit=None):
+            return [{"id": 2, "ingest_batch_id": "old"}]
 
-        def delete(self, **kwargs):
-            raise RuntimeError("milvus down")
+        def delete_ids(self, ids):
+            raise RuntimeError("vector store down")
 
     with pytest.raises(ServiceUnavailableError):
         delete_old_chunks(Client(), {"a.txt": [1]}, ingest_batch_id="new")
@@ -203,13 +202,16 @@ def _patch_ingest(monkeypatch, tmp_path, delete_impl):
     statuses = []
     synced = {"called": False}
 
-    monkeypatch.setattr(pipeline, "check_milvus_available", lambda: True)
+    class _IngestStore:
+        def ensure_schema(self):
+            return True
+
+    monkeypatch.setattr(pipeline, "check_vector_store_available", lambda: True)
     monkeypatch.setattr(pipeline, "ingest_cancel_requested_sync", lambda: False)
     monkeypatch.setattr(pipeline, "_detect_new_files", lambda docs_dir, files: (["a.txt"], {"a.txt": 1.0}))
     monkeypatch.setattr(pipeline, "_load_and_split", lambda *args, **kwargs: ([chunk], Counter({"a.txt": 1}), []))
-    monkeypatch.setattr(pipeline, "get_milvus_client", lambda: object())
+    monkeypatch.setattr(pipeline, "get_vector_store", lambda: _IngestStore())
     monkeypatch.setattr(pipeline, "deduplicate_chunks", lambda *args, **kwargs: ([chunk], {}))
-    monkeypatch.setattr(pipeline, "ensure_collection", lambda client: True)
     monkeypatch.setattr(pipeline, "encode_documents", lambda texts, cancel_event=None: ([[0.1]], [{}]))
     monkeypatch.setattr(pipeline, "insert_chunks", lambda *args, **kwargs: {"a.txt": [11]})
     monkeypatch.setattr(pipeline, "delete_old_chunks", delete_impl)

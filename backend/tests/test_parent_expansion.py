@@ -3,7 +3,7 @@
 背景：parent_text 曾被写入 Milvus 却从未在检索时请求，`or` 回退把缺陷静默吞掉，
 导致 README 宣称的 "small-to-big" 实际退化为纯小片段检索。这组测试锁定三件事：
 
-1. _do_search 必须显式请求 parent_text（否则父片段永远取不到）
+1. 稠密和稀疏查询都必须取出 parent_text（否则父片段永远取不到）
 2. _extract_candidates 必须把「打分文本」与「交付文本」分开保存
 3. 压缩必须作用在父片段上，而不是用于打分的小片段
 """
@@ -17,6 +17,7 @@ from backend.core.retriever import (
     _extract_candidates,
     retrieve,
 )
+from backend.infrastructure.vector_store import dense_search_sql, sparse_search_sql
 
 
 def _hit(text: str, parent_text: str | None = None, source: str = "a.pdf",
@@ -35,30 +36,25 @@ def _hit(text: str, parent_text: str | None = None, source: str = "a.pdf",
 
 
 class TestDoSearchRequestsParentText:
-    """回归：output_fields 漏掉 parent_text 时，父片段会被静默丢弃。"""
+    """回归：查询不取 parent_text 时，父片段会被静默丢弃。"""
 
-    @patch("backend.core.retriever.AnnSearchRequest")
-    def test_hybrid_search_requests_parent_text(self, mock_ann, override_settings):
+    def test_dense_and_sparse_sql_select_parent_text(self):
+        for sql in (dense_search_sql("ragmate_docs"), sparse_search_sql("ragmate_docs")):
+            assert "parent_text" in sql
+            assert "text" in sql
+
+    def test_hybrid_and_dense_only_use_those_searches(self, override_settings):
+        store = MagicMock()
+        store.search_hybrid.return_value = []
+        store.search_dense.return_value = []
+
         override_settings(HYBRID_SEARCH_ENABLED=True)
-        client = MagicMock()
-        client.hybrid_search.return_value = [[]]
+        assert _do_search(store, [0.1], {1: 0.2}, over_fetch=5) == [[]]
+        store.search_hybrid.assert_called_once()
 
-        _do_search(client, [0.1], MagicMock(), over_fetch=5)
-
-        output_fields = client.hybrid_search.call_args.kwargs["output_fields"]
-        assert "parent_text" in output_fields
-        assert "text" in output_fields
-
-    def test_dense_only_search_requests_parent_text(self, override_settings):
         override_settings(HYBRID_SEARCH_ENABLED=False)
-        client = MagicMock()
-        client.search.return_value = [[]]
-
-        _do_search(client, [0.1], MagicMock(), over_fetch=5)
-
-        output_fields = client.search.call_args.kwargs["output_fields"]
-        assert "parent_text" in output_fields
-        assert "text" in output_fields
+        assert _do_search(store, [0.1], {1: 0.2}, over_fetch=5) == [[]]
+        store.search_dense.assert_called_once()
 
 
 # ── 候选必须同时保留小片段与父片段 ────────────────────────────────────────────
@@ -156,7 +152,7 @@ class TestCompressionRunsOnParentText:
         small = "小片段"
         candidate = {"text": small, "context": parent, "source": "a.pdf", "score": 0.9}
 
-        with patch("backend.core.retriever.init_milvus") as mock_init, \
+        with patch("backend.core.retriever.init_vector_store") as mock_init, \
              patch("backend.core.retriever.encode_query", return_value=([0.1], None)), \
              patch("backend.core.retriever._do_search", return_value=[[]]), \
              patch("backend.core.retriever._extract_candidates", return_value=[dict(candidate)]), \
@@ -177,7 +173,7 @@ class TestCompressionRunsOnParentText:
         parent = "父片段内容。" * 50
         candidate = {"text": "小片段", "context": parent, "source": "a.pdf", "score": 0.9}
 
-        with patch("backend.core.retriever.init_milvus") as mock_init, \
+        with patch("backend.core.retriever.init_vector_store") as mock_init, \
              patch("backend.core.retriever.encode_query", return_value=([0.1], None)), \
              patch("backend.core.retriever._do_search", return_value=[[]]), \
              patch("backend.core.retriever._extract_candidates", return_value=[dict(candidate)]), \

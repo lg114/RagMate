@@ -1,4 +1,4 @@
-"""检索管线：Milvus 混合检索 + Reranking + 动态过滤。"""
+"""检索管线：pgvector 混合检索 + Reranking + 动态过滤。"""
 import contextvars
 import json
 import logging
@@ -8,15 +8,29 @@ import re
 import threading
 import urllib.request
 
-from pymilvus import AnnSearchRequest
-
-from backend.core.fusion import make_milvus_ranker
 from backend.domain.errors import AppError, ServiceUnavailableError
 from backend.infrastructure.config import settings
 from backend.infrastructure.encoding import encode_query
-from backend.infrastructure.milvus import check_milvus_available, canonical_source, get_milvus_client, init_milvus
+from backend.infrastructure.vector_store import init_vector_store
 
 logger = logging.getLogger("ragmate")
+
+
+def canonical_source(source: str) -> str:
+    """归一化来源文件名，用于检索去重。"""
+    if not source:
+        return ""
+    base, ext = os.path.splitext(source)
+    for suffix in ["_副本", " (副本)", "_copy", " (copy)"]:
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    # 仅匹配 "文件名 (数字).ext" 这种典型的副本后缀格式（空格+括号+纯数字）
+    if base.endswith(")") and " (" in base:
+        idx = base.rfind(" (")
+        if base[idx + 2 : -1].isdigit():
+            base = base[:idx]
+    return (base + ext).lower()
 
 # ── 检索质量指标（线程本地，供 confidence 计算） ──────────────────────────────
 class _MetricsLocal(threading.local):
@@ -269,54 +283,21 @@ def score_pairs(query: str, texts: list[str]) -> list[float]:
 
 # ── Search ──────────────────────────────────────────────────────────────────
 
-def _do_search(client, dense_vec: list[float], sparse_vec, over_fetch: int):
-    """执行一次混合检索或 dense 检索。
-    
-    Args:
-        client: Milvus 客户端实例
-        dense_vec: 稠密向量 (1024维)
-        sparse_vec: 稀疏向量 (scipy sparse matrix)
-        over_fetch: 过采样数量
-        
-    Returns:
-        搜索结果列表
+def _do_search(store, dense_vec: list[float], sparse_vec, over_fetch: int):
+    """执行一次混合检索或 dense 检索。返回与旧结果相同的 [hits] 包装。
+
+    混合检索：稠密 HNSW 内积 + 稀疏精确内积，再按 FUSION_MODE 融合（默认 RRF k=60）。
+    HYBRID_SEARCH_ENABLED 关闭时只走稠密。
     """
     if settings.HYBRID_SEARCH_ENABLED:
-        dense_req = AnnSearchRequest(
-            data=[dense_vec],
-            anns_field="dense",
-            param={"metric_type": "IP", "params": {}},
-            limit=over_fetch,
-        )
-        sparse_req = AnnSearchRequest(
-            data=[sparse_vec],
-            anns_field="sparse",
-            param={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
-            limit=over_fetch,
-        )
-        return client.hybrid_search(
-            collection_name=settings.MILVUS_COLLECTION,
-            reqs=[dense_req, sparse_req],
-            ranker=make_milvus_ranker(),
-            limit=over_fetch,
-            output_fields=["text", "parent_text", "metadata"],
-        )
+        hits = store.search_hybrid(dense_vec, sparse_vec, over_fetch)
     else:
-        # NOTE: MilvusClient.search takes `search_params`, not `param`
-        # (it forwards param= itself; a `param=` kwarg arrives twice and
-        # raises "got multiple values for keyword argument 'param'").
-        return client.search(
-            collection_name=settings.MILVUS_COLLECTION,
-            data=[dense_vec],
-            anns_field="dense",
-            search_params={"metric_type": "IP", "params": {}},
-            limit=over_fetch,
-            output_fields=["text", "parent_text", "metadata"],
-        )
+        hits = store.search_dense(dense_vec, over_fetch)
+    return [hits]
 
 
 def _extract_candidates(results) -> list[dict]:
-    """从 Milvus 结果中提取候选。
+    """从向量检索结果中提取候选。
 
     每个候选保留两份文本，对应 small-to-big 的两侧：
       - text：小片段，用于 rerank 打分、阈值判断与来源去重
@@ -325,7 +306,7 @@ def _extract_candidates(results) -> list[dict]:
     父片段必须在 _do_search 的 output_fields 中显式请求，否则取不到。
 
     Args:
-        results: Milvus 搜索结果
+        results: 检索结果，形状为 [hits]
 
     Returns:
         候选文档列表，每个包含 text, context, source, page, chunk_index
@@ -345,7 +326,7 @@ def _extract_candidates(results) -> list[dict]:
     return candidates
 
 
-def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
+def _search_multi(store, queries: list[str], over_fetch: int) -> list[dict]:
     """多路检索 + RRF 融合。
 
     每个 query 变体独立做一次混合检索，候选按 (source, page, chunk_index) 去重；
@@ -357,7 +338,7 @@ def _search_multi(client, queries: list[str], over_fetch: int) -> list[dict]:
     fused_scores: dict[tuple, float] = {}
     for q in queries:
         dense_vec, sparse_vec = encode_query(q)
-        results = _do_search(client, dense_vec, sparse_vec, over_fetch)
+        results = _do_search(store, dense_vec, sparse_vec, over_fetch)
         for rank, cand in enumerate(_extract_candidates(results)):
             key = (cand["source"], cand.get("page"), cand.get("chunk_index"))
             fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
@@ -712,9 +693,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
     reset_retrieval_metrics()
 
     try:
-        client = init_milvus()
+        client = init_vector_store()
         if client is None:
-            logger.info("Retrieval: collection does not exist, returning empty")
+            logger.info("Retrieval: vector table does not exist, returning empty")
             _store_retrieval_metrics(0.0, 0, 0)
             if retrieval_debug_enabled():
                 _last_debug.entry = build_retrieval_debug(query, [], [], settings.RERANK_SCORE_THRESHOLD, 0.0)

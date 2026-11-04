@@ -1,4 +1,4 @@
-"""确定性检索评测的测试：分阶段执行、gold 校验、报告落盘（假 Milvus）。"""
+"""确定性检索评测的测试：分阶段执行、gold 校验、报告落盘（假向量库）。"""
 import json
 
 import pytest
@@ -34,13 +34,17 @@ class _FakeClient:
         self._hits = hits
         self.calls = []
 
-    def search(self, **kwargs):
-        self.calls.append(("search", kwargs))
-        return [self._hits]
+    def search_dense(self, dense_vec, limit):
+        self.calls.append(("dense", limit))
+        return self._hits
 
-    def hybrid_search(self, **kwargs):
-        self.calls.append(("hybrid_search", kwargs))
-        return [self._hits]
+    def search_sparse(self, sparse_vec, limit):
+        self.calls.append(("sparse", limit))
+        return self._hits
+
+    def search_hybrid(self, dense_vec, sparse_vec, limit):
+        self.calls.append(("hybrid", limit))
+        return self._hits
 
 
 HITS = [
@@ -66,39 +70,18 @@ def test_run_stages_dense_sparse_fused_use_same_vectors(monkeypatch):
     out = run_stages(client, "q", ["dense", "sparse", "fused"], over_fetch=10)
     assert set(out) == {"dense", "sparse", "fused"}
     assert encoded == ["q"]
-    search_calls = [kw for kind, kw in client.calls if kind == "search"]
-    assert [kw["anns_field"] for kw in search_calls] == ["dense", "sparse"]
-    assert any(kind == "hybrid_search" for kind, _ in client.calls)
+    assert [kind for kind, _ in client.calls] == ["dense", "sparse", "hybrid"]
 
 
-def test_search_calls_use_search_params_not_param(monkeypatch):
-    """Regression: MilvusClient.search takes `search_params`; a `param=`
-    kwarg is forwarded twice by the client and raises TypeError."""
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
-    client = _FakeClient(HITS)
-    run_stages(client, "q", ["dense", "sparse"], over_fetch=10)
-    search_calls = [kw for kind, kw in client.calls if kind == "search"]
-    assert len(search_calls) == 2
-    for kw in search_calls:
-        assert "param" not in kw
-        assert kw["search_params"]["metric_type"] == "IP"
-    assert search_calls[0]["search_params"] == {"metric_type": "IP", "params": {}}
-    assert search_calls[1]["search_params"]["params"]["drop_ratio_search"] == 0.2
-
-
-def test_do_search_dense_branch_uses_search_params(override_settings):
-    """Same latent bug in the production dense-only path (hybrid off):
-    it must call client.search with `search_params`, not `param=`."""
+def test_do_search_dense_branch_skips_sparse(override_settings):
+    """HYBRID_SEARCH_ENABLED 关闭时生产路径只做稠密检索。"""
     from backend.core.retriever import _do_search
 
     override_settings(HYBRID_SEARCH_ENABLED=False)
     client = _FakeClient(HITS)
-    results = _do_search(client, [0.1], "sparse-vec", over_fetch=10)
+    results = _do_search(client, [0.1], {1: 0.2}, over_fetch=10)
     assert results == [HITS]
-    assert len(client.calls) == 1
-    _, kw = client.calls[0]
-    assert "param" not in kw
-    assert kw["search_params"] == {"metric_type": "IP", "params": {}}
+    assert [kind for kind, _ in client.calls] == ["dense"]
 
 
 def test_run_stages_reranked_reorders_by_score_pairs(monkeypatch):
@@ -172,7 +155,7 @@ def test_run_retrieval_eval_end_to_end_with_fake_client(monkeypatch, tmp_path):
     monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
     monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
                         lambda q, texts: [0.9] * len(texts))
-    monkeypatch.setattr("backend.eval.retrieval_eval.init_milvus", lambda: _FakeClient(HITS))
+    monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: _FakeClient(HITS))
     cases = [_valid_case(user_input="q1"), _valid_case(user_input="q2", gold_chunks=[])]
     cases[1]["question_type"] = "unanswerable"
     cases[1]["source_doc"] = ""
@@ -202,7 +185,7 @@ def test_run_retrieval_eval_end_to_end_with_fake_client(monkeypatch, tmp_path):
 
 
 def test_run_retrieval_eval_requires_existing_collection(monkeypatch):
-    monkeypatch.setattr("backend.eval.retrieval_eval.init_milvus", lambda: None)
+    monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: None)
     with pytest.raises(RuntimeError, match="does not exist"):
         run_retrieval_eval([_valid_case()], ["dense"], 10, 1, (5,), {})
 
