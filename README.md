@@ -45,7 +45,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
 - **Built-in evaluation** — optional RAGAS CLI for test-set generation, scoring, and CI quality gates.
-- **Self-hosted by design** — PostgreSQL, Redis, Milvus, and MinIO run through Docker Compose.
+- **Self-hosted by design** — PostgreSQL, Milvus, and MinIO run through Docker Compose. Redis is optional and only used for shared rate limits.
 
 ---
 
@@ -56,7 +56,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - Python 3.12+
 - Docker Desktop, or Docker Engine with Compose v2
 - An OpenAI-compatible LLM endpoint and API key
-- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose still runs Milvus, PostgreSQL, Redis, and MinIO; it does not serve these models.
+- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose runs Milvus, PostgreSQL, and MinIO; it does not serve these models. Redis is not started unless you opt in.
 - Local FlagEmbedding is optional. That path needs about 8 GB of RAM for CPU inference, and a GPU helps on larger collections.
 
 ### 1. Start the infrastructure
@@ -68,7 +68,13 @@ docker compose up -d
 docker compose ps
 ```
 
-The stack exposes PostgreSQL (`5432`), Redis (`6379`), Milvus (`19530`), MinIO (`9000` / `9001`), and Attu (`8080`). The application itself runs on your host during development.
+The stack exposes PostgreSQL (`5432`), Milvus (`19530`), MinIO (`9000` / `9001`), and Attu (`8080`). Redis is not part of this default path. The application itself runs on your host during development.
+
+Ingest status, the lock, cancel, and failure reasons live in PostgreSQL. Chat history does too. Leave `REDIS_URL` empty. Rate limits then use an in-process counter, which is enough for one uvicorn process. To share that counter across workers, set `REDIS_URL=redis://localhost:6379/0` and start the optional service:
+
+```bash
+docker compose --profile redis up -d
+```
 
 To stop services without deleting data:
 
@@ -127,7 +133,7 @@ RERANKER_PROVIDER=api
 RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-The default database, Redis, and Milvus values match the Docker Compose stack. See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
+The default database and Milvus values match the Docker Compose stack. `REDIS_URL` is empty unless you opted into the Redis profile. See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
 
 ### 4. Run RagMate
 
@@ -149,7 +155,7 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 2. Ingest the pending files and wait until the in-page status banner finishes.
 3. Open **对话** and ask questions about the indexed documents.
 4. Click a citation to open the source: file name, page, library status, and the retrieved passage when retrieval debug is on.
-5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL, Redis, and Milvus.
+5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL and Milvus. Redis appears in that list only when `REDIS_URL` is set.
 
 The UI is still the zero-build page at `frontend/index.html`, served at `/`. No frontend build step.
 
@@ -161,7 +167,7 @@ Supported formats: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.txt`, `.md`. Uploads are 
 
 ```
 RagMate/
-├── docker-compose.yml      # PostgreSQL, Redis, Milvus, MinIO, etcd, Attu
+├── docker-compose.yml      # PostgreSQL, Milvus, MinIO, etcd, Attu; Redis is profile "redis"
 ├── backend/
 │   ├── app.py              # App factory: middleware, exception handlers, static mount
 │   ├── api/                # HTTP routes: chat, documents, ingest, health
@@ -169,7 +175,7 @@ RagMate/
 │   │   └── ingest/         # pipeline (load → chunk → dedupe → encode), loaders, db_sync
 │   ├── core/               # RAG core: retriever, agent, prompts/researcher.md
 │   ├── domain/             # ORM models, Pydantic schemas, error types
-│   ├── infrastructure/     # config, database, redis, milvus, encoding, model_factory
+│   ├── infrastructure/     # config, database, optional redis, milvus, encoding, model_factory
 │   ├── eval/               # RAGAS evaluation CLI (optional dependency)
 │   └── tests/
 └── frontend/               # Zero-build UI (对话 / 文档 / 设置), served by FastAPI at /
@@ -187,7 +193,7 @@ The backend is strictly layered — each layer only calls downward:
 | Application | `application/` | Use-case orchestration: chat flow, document CRUD, ingestion lifecycle |
 | Core | `core/` | RAG domain logic: retrieval pipeline, agent, system prompts |
 | Domain | `domain/` | ORM models, Pydantic schemas, `AppError` hierarchy |
-| Infrastructure | `infrastructure/` | External systems: Milvus, PostgreSQL, Redis, models, config |
+| Infrastructure | `infrastructure/` | External systems: Milvus, PostgreSQL, optional Redis, models, config |
 
 ```mermaid
 flowchart LR
@@ -217,7 +223,7 @@ Simple greetings and other non-RAG messages are routed straight to the LLM, skip
 | POST | `/chat/stream` | SSE streaming answer |
 | GET | `/chat/sessions` | List the 50 most recent sessions |
 | GET | `/chat/sessions/{session_id}` | Full message history for a session |
-| DELETE | `/chat/sessions/{session_id}` | Delete a session (Redis cache + PostgreSQL) |
+| DELETE | `/chat/sessions/{session_id}` | Delete a session from PostgreSQL |
 | GET | `/documents` | List documents and their ingestion status |
 | POST | `/documents/upload` | Upload a single file (50 MB max) |
 | DELETE | `/documents/{filename}` | Delete a document, its file, and its vectors |
@@ -225,7 +231,7 @@ Simple greetings and other non-RAG messages are routed straight to the LLM, skip
 | POST | `/ingest/cancel` | Ask the worker that holds the ingest lock to stop |
 | GET | `/ingest/status` | Current ingestion status and progress (survives restarts) |
 | GET | `/health` | Liveness probe |
-| GET | `/ready` | Readiness probe across PostgreSQL, Redis, and Milvus |
+| GET | `/ready` | Readiness probe for PostgreSQL and Milvus. Redis is checked only when `REDIS_URL` is set |
 
 ### Chat request body
 
@@ -280,14 +286,14 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | **required** | Metadata and chat history |
+| `DATABASE_URL` | **required** | Metadata, chat history, and ingest control |
 | `LLM_API_KEY` | **required** | LLM provider credential |
 | `EMBEDDING_API_BASE_URL` | **required** by default | OpenAI-compatible `/embeddings`. Not required when `EMBEDDING_PROVIDER` is `huggingface`, `local`, or `flagembedding` |
 | `RERANKER_API_BASE_URL` | **required** by default | `/rerank` endpoint. Not required when `RERANKER_PROVIDER=local` |
 | `LLM_MODEL` | `gpt-4o` | Model exposed by the provider |
 | `LLM_API_BASE_URL` | empty | Custom OpenAI-compatible endpoint |
 | `LLM_TEMPERATURE` | `0.01` | Kept low for factual answers |
-| `REDIS_URL` | `redis://localhost:6379/0` | Sessions, ingestion lock, rate limits |
+| `REDIS_URL` | empty | Optional. Set only to share rate limits across workers. Ingest and chat do not use it |
 | `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | Vector database |
 | `MILVUS_COLLECTION` | `ragmate_docs` | Collection name |
 | `DOCUMENTS_DIR` | `backend/documents` | Upload target directory |
@@ -380,14 +386,14 @@ Every blocking call — model inference, Milvus I/O, ingestion — is pushed to 
 
 ## Data, backup, and security
 
-Docker volumes are written to `volumes/` and hold PostgreSQL, Redis, Milvus, and MinIO data. For a consistent backup, stop the stack, copy the directory, then restart it.
+Docker volumes are written to `volumes/` and hold PostgreSQL, Milvus, and MinIO data (plus Redis if that profile is running). For a consistent backup, stop the stack, copy the directory, then restart it.
 
 Before exposing the service beyond localhost:
 
 - Set `CORS_ORIGINS` to your real origin.
 - Replace the default infrastructure credentials in `docker-compose.yml`.
 - Put an authentication layer in front of the API.
-- Review upload and rate-limit settings — currently 30 requests per IP per minute on chat, upload, delete, and ingest.
+- Review upload and rate-limit settings — currently 30 requests per IP per minute on chat, upload, delete, and ingest. Without `REDIS_URL` that counter is per process.
 
 RagMate validates requests — filename allowlist, magic-byte checks, path-traversal rejection, Milvus filter-injection guards, and a 50 MB upload cap — but it is not a complete internet-facing security boundary on its own.
 
@@ -395,7 +401,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 
 ## Known constraints
 
-- **Ingest runs on one worker at a time.** Status, the lock, progress, and the cancel flag live in Redis, so any uvicorn worker can read progress and request cancellation. The worker that acquired the lock does the work and refreshes a heartbeat (`INGEST_HEARTBEAT_INTERVAL`, default 5s). If that process dies, the next status read marks the job `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30s) and releases the lock.
+- **Ingest runs on one worker at a time.** Status, the lock, progress, the cancel flag, and the failure reason live in one Postgres row (`ingest_control`), so any uvicorn worker can read progress and request cancellation. Only the worker that holds the lock writes progress and the terminal state. It refreshes a heartbeat (`INGEST_HEARTBEAT_INTERVAL`, default 5s). If that process dies, the next status read marks the job `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30s) and releases the lock. The row is not expired, so a failed or interrupted job is still there after a restart.
 - **No authentication or multi-tenancy.** Every session and document is visible to anyone who can reach the API.
 - **Schema changes need a manual rebuild.** If the Milvus collection schema does not match, startup raises a validation error instead of migrating; the collection must be dropped and recreated.
 - **No migration tool.** Schema changes are applied with `create_all` plus a small hand-written column-migration list in `infrastructure/database.py`.
@@ -410,9 +416,9 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 | `/ready` reports `degraded` | `docker compose ps`, then `docker compose logs <service>` |
 | Startup fails with "Required env vars not set" | `DATABASE_URL`, `LLM_API_KEY`, and — unless you opted into local models — `EMBEDDING_API_BASE_URL` and `RERANKER_API_BASE_URL` in `backend/.env` |
 | Local model download or CPU inference is slow | Stay on the default remote providers, or set `EMBEDDING_DEVICE=cuda` for the local opt-in |
-| Chat returns no useful context | Confirm ingestion finished and `MILVUS_HOST`, `DATABASE_URL`, `REDIS_URL` point at the running stack |
+| Chat returns no useful context | Confirm ingestion finished and `MILVUS_HOST` and `DATABASE_URL` point at the running stack |
 | Port conflicts | Change the host-side ports in `docker-compose.yml` and update the matching `.env` values |
-| Ingestion stuck in `running` | Status is reconciled from the Redis heartbeat. A dead worker becomes `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30); `POST /ingest/cancel` asks the live worker to stop |
+| Ingestion stuck in `running` | Status is reconciled from the Postgres heartbeat. A dead worker becomes `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30); `POST /ingest/cancel` asks the live worker to stop |
 
 ---
 

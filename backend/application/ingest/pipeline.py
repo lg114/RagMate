@@ -14,7 +14,7 @@ from backend.infrastructure.database import SyncSession
 from backend.domain.errors import ServiceUnavailableError
 from backend.domain.models import Document
 from backend.infrastructure.encoding import EncodingCancelled, encode_documents
-from backend.infrastructure.redis_client import ingest_cancel_requested_sync, set_ingest_status_sync
+from backend.infrastructure.ingest_store import ingest_cancel_requested_sync, set_ingest_status_sync
 from backend.infrastructure.milvus import (
     check_milvus_available,
     deduplicate_chunks,
@@ -30,7 +30,7 @@ logger = logging.getLogger("ragmate")
 
 
 def _stop_requested(cancel_event) -> bool:
-    """本地事件或 Redis 取消标志任一出现即停止，并把标志同步回本地事件。"""
+    """本地事件或数据库取消标志任一出现即停止，并把标志同步回本地事件。"""
     if cancel_event is not None and cancel_event.is_set():
         return True
     try:

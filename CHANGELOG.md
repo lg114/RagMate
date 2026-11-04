@@ -50,6 +50,7 @@ All notable changes to this project are documented here.
   同一次失败中被中断的其他镜像（postgres / redis / milvus / attu）属级联现象，无需改动。
 
 ### Changed
+- 入库控制面从 Redis 挪到 Postgres 的 `ingest_control`（单行）：状态、锁、心跳、取消标志和失败原因都写在这里，重启还在，终态不再被 2 小时 TTL 清掉。持锁 worker 写进度，任意 worker 可读状态并请求取消。会话历史直接用已有的 `chat_history`，不再做 Redis 缓存。`REDIS_URL` 留空即可跑通入库和对话；限流退回本进程内存。配了 Redis 但连不上时，限流返回明确的 503。`docker compose up -d` 不再启动 Redis，需要多 worker 共享限流时用 `docker compose --profile redis up -d`。
 - `config.py` — 嵌入与重排默认改为远程 HTTP：`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`。
   API 进程默认不再 import torch、FlagEmbedding 或 sentence-transformers。
   `EMBEDDING_API_BASE_URL` 与 `RERANKER_API_BASE_URL` 在对应 provider 为远程时必填，缺失则启动失败；

@@ -45,7 +45,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
 - **内置评测** — 可选 RAGAS CLI，支持测试集生成、打分和 CI 质量门禁。
-- **自托管设计** — PostgreSQL、Redis、Milvus、MinIO 全部通过 Docker Compose 运行。
+- **自托管设计** — PostgreSQL、Milvus、MinIO 通过 Docker Compose 运行。Redis 可选，只用于多进程共享限流。
 
 ---
 
@@ -56,7 +56,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - Python 3.12+
 - Docker Desktop，或支持 Compose v2 的 Docker Engine
 - 一个 OpenAI 兼容的 LLM 接口及 API Key
-- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 仍只启动 Milvus、PostgreSQL、Redis 和 MinIO，不负责这两个模型服务。
+- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 启动 Milvus、PostgreSQL 和 MinIO，不负责这两个模型服务。默认不启动 Redis。
 - 本地 FlagEmbedding 是可选项。这条路径在 CPU 上大约需要 8 GB 内存；知识库较大时建议使用 GPU。
 
 ### 1. 启动基础设施
@@ -68,7 +68,13 @@ docker compose up -d
 docker compose ps
 ```
 
-服务端口：PostgreSQL `5432`、Redis `6379`、Milvus `19530`、MinIO `9000` / `9001`、Attu `8080`。开发时应用本身运行在宿主机上。
+服务端口：PostgreSQL `5432`、Milvus `19530`、MinIO `9000` / `9001`、Attu `8080`。这条默认路径不含 Redis。开发时应用本身运行在宿主机上。
+
+入库状态、锁、取消标志和失败原因都在 PostgreSQL。会话历史也在 PostgreSQL。`REDIS_URL` 留空即可。限流这时用进程内计数，单进程够用。要在多个 worker 之间共享计数，设置 `REDIS_URL=redis://localhost:6379/0` 并启动可选服务：
+
+```bash
+docker compose --profile redis up -d
+```
 
 停止服务但保留数据：
 
@@ -127,7 +133,7 @@ RERANKER_PROVIDER=api
 RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-默认数据库、Redis 和 Milvus 配置与 Docker Compose 保持一致。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
+默认数据库和 Milvus 配置与 Docker Compose 保持一致。没有启用 Redis profile 时 `REDIS_URL` 留空。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
 
 ### 4. 启动 RagMate
 
@@ -149,7 +155,7 @@ uvicorn backend.app:app --reload --port 8000
 2. 入库未处理的文件，等页面上的进度条结束。
 3. 打开 **对话**，针对已索引文档提问。
 4. 点击引用，查看来源文件、页码、入库状态；打开检索调试时还可以看到命中的片段。
-5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL、Redis、Milvus 是否就绪。
+5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL 和 Milvus 是否就绪。只有设置了 `REDIS_URL` 时，列表里才会出现 Redis。
 
 界面仍是零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。
 
@@ -161,7 +167,7 @@ uvicorn backend.app:app --reload --port 8000
 
 ```
 RagMate/
-├── docker-compose.yml      # PostgreSQL、Redis、Milvus、MinIO、etcd、Attu
+├── docker-compose.yml      # PostgreSQL、Milvus、MinIO、etcd、Attu；Redis 在 profile "redis"
 ├── backend/
 │   ├── app.py              # 应用工厂：中间件、异常处理、静态文件挂载
 │   ├── api/                # HTTP 路由：chat、documents、ingest、health
@@ -169,7 +175,7 @@ RagMate/
 │   │   └── ingest/         # pipeline（加载 → 切分 → 去重 → 编码）、loaders、db_sync
 │   ├── core/               # RAG 内核：retriever、agent、prompts/researcher.md
 │   ├── domain/             # ORM 模型、Pydantic schema、错误类型
-│   ├── infrastructure/     # config、database、redis、milvus、encoding、model_factory
+│   ├── infrastructure/     # config、database、可选 redis、milvus、encoding、model_factory
 │   ├── eval/               # RAGAS 评测 CLI（可选依赖）
 │   └── tests/
 └── frontend/               # 零构建界面（对话 / 文档 / 设置），由 FastAPI 挂在 /
@@ -187,7 +193,7 @@ RagMate/
 | 应用层 | `application/` | 用例编排：对话流程、文档 CRUD、入库生命周期 |
 | 核心层 | `core/` | RAG 领域逻辑：检索管线、Agent、系统提示词 |
 | 领域层 | `domain/` | ORM 模型、Pydantic schema、`AppError` 体系 |
-| 基础设施层 | `infrastructure/` | 外部系统：Milvus、PostgreSQL、Redis、模型、配置 |
+| 基础设施层 | `infrastructure/` | 外部系统：Milvus、PostgreSQL、可选 Redis、模型、配置 |
 
 ```mermaid
 flowchart LR
@@ -217,7 +223,7 @@ flowchart LR
 | POST | `/chat/stream` | SSE 流式问答 |
 | GET | `/chat/sessions` | 列出最近 50 个会话 |
 | GET | `/chat/sessions/{session_id}` | 获取某会话的完整消息历史 |
-| DELETE | `/chat/sessions/{session_id}` | 删除会话（Redis 缓存 + PostgreSQL） |
+| DELETE | `/chat/sessions/{session_id}` | 删除会话（PostgreSQL） |
 | GET | `/documents` | 列出文档及入库状态 |
 | POST | `/documents/upload` | 上传单个文件（上限 50 MB） |
 | DELETE | `/documents/{filename}` | 删除文档、磁盘文件及其向量 |
@@ -225,7 +231,7 @@ flowchart LR
 | POST | `/ingest/cancel` | 请求持锁 worker 停止入库 |
 | GET | `/ingest/status` | 查询入库状态与进度（进程重启后仍然可读） |
 | GET | `/health` | 存活探针 |
-| GET | `/ready` | 就绪探针（PostgreSQL、Redis、Milvus） |
+| GET | `/ready` | 就绪探针（PostgreSQL、Milvus；仅当设置了 `REDIS_URL` 时才检查 Redis） |
 
 ### 对话请求体
 
@@ -280,14 +286,14 @@ data: {"error": "..."}                               // 终止性错误
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `DATABASE_URL` | **必填** | 元数据和聊天历史 |
+| `DATABASE_URL` | **必填** | 元数据、聊天历史和入库控制 |
 | `LLM_API_KEY` | **必填** | LLM 服务凭证 |
 | `EMBEDDING_API_BASE_URL` | 默认 **必填** | OpenAI 兼容的 `/embeddings`。`EMBEDDING_PROVIDER` 为 `huggingface`、`local` 或 `flagembedding` 时不需要 |
 | `RERANKER_API_BASE_URL` | 默认 **必填** | `/rerank` 地址。`RERANKER_PROVIDER=local` 时不需要 |
 | `LLM_MODEL` | `gpt-4o` | 服务商提供的模型名称 |
 | `LLM_API_BASE_URL` | 空 | 自定义 OpenAI 兼容端点 |
 | `LLM_TEMPERATURE` | `0.01` | 保持低温度以提升事实性 |
-| `REDIS_URL` | `redis://localhost:6379/0` | 会话、入库锁、限流 |
+| `REDIS_URL` | 空 | 可选。只在多个 worker 共享限流时填写。入库和对话不用它 |
 | `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | 向量数据库地址 |
 | `MILVUS_COLLECTION` | `ragmate_docs` | 集合名称 |
 | `DOCUMENTS_DIR` | `backend/documents` | 上传目录 |
@@ -380,14 +386,14 @@ pytest -v
 
 ## 数据、备份与安全
 
-Docker 数据卷写入 `volumes/`，包含 PostgreSQL、Redis、Milvus 和 MinIO 的数据。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。
+Docker 数据卷写入 `volumes/`，包含 PostgreSQL、Milvus 和 MinIO 的数据（若启用了 Redis profile，还有 Redis）。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。
 
 如果要从 localhost 暴露到外部网络：
 
 - 将 `CORS_ORIGINS` 设置为真实来源。
 - 替换 `docker-compose.yml` 中的默认基础设施凭证。
 - 在 API 前面增加一层认证。
-- 检查上传与限流设置 —— 当前对话、上传、删除、入库均为每 IP 每分钟 30 次。
+- 检查上传与限流设置 —— 当前对话、上传、删除、入库均为每 IP 每分钟 30 次。未设置 `REDIS_URL` 时，这个计数只在单个进程内。
 
 RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径穿越拒绝、Milvus 过滤表达式注入防护、50 MB 上传上限，但它本身不构成完整的公网安全边界。
 
@@ -395,7 +401,7 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 
 ## 已知约束
 
-- **同一时间只有一个 worker 在入库。** 状态、锁、进度和取消标志都在 Redis 里，任意 uvicorn worker 都能读进度并发起取消。拿到锁的 worker 负责执行，并按 `INGEST_HEARTBEAT_INTERVAL`（默认 5 秒）刷新心跳。该进程退出后，下一次状态查询会在 `INGEST_HEARTBEAT_STALE`（默认 30 秒）后把任务标成 `interrupted` 并释放锁。
+- **同一时间只有一个 worker 在入库。** 状态、锁、进度、取消标志和失败原因都在 Postgres 的一行（`ingest_control`）里，任意 uvicorn worker 都能读进度并发起取消。只有持锁的 worker 写进度和终态，并按 `INGEST_HEARTBEAT_INTERVAL`（默认 5 秒）刷新心跳。该进程退出后，下一次状态查询会在 `INGEST_HEARTBEAT_STALE`（默认 30 秒）后把任务标成 `interrupted` 并释放锁。这一行没有 TTL，失败或中断的结果在重启之后还在。
 - **无认证与多租户。** 任何能访问 API 的人都可看到全部会话与文档。
 - **Schema 变更需手动重建。** Milvus 集合 schema 不匹配时启动会抛出校验错误而不是自动迁移，需要删除集合后重建。
 - **没有迁移工具。** 表结构变更通过 `create_all` 加上 `infrastructure/database.py` 中一份手写的补列清单完成。
@@ -410,9 +416,9 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 | `/ready` 返回 `degraded` | `docker compose ps`，再执行 `docker compose logs <service>` |
 | 启动报 "Required env vars not set" | 检查 `backend/.env` 中的 `DATABASE_URL`、`LLM_API_KEY`，以及（未改成本地模型时）`EMBEDDING_API_BASE_URL` 与 `RERANKER_API_BASE_URL` |
 | 本地模型下载或 CPU 推理很慢 | 保持默认的远程提供方，或在本地模式下设置 `EMBEDDING_DEVICE=cuda` |
-| 对话没有检索到内容 | 确认入库已完成，且 `MILVUS_HOST`、`DATABASE_URL`、`REDIS_URL` 指向正在运行的服务 |
+| 对话没有检索到内容 | 确认入库已完成，且 `MILVUS_HOST`、`DATABASE_URL` 指向正在运行的服务 |
 | 端口冲突 | 修改 `docker-compose.yml` 的宿主机端口，并同步更新 `.env` |
-| 入库卡在 `running` | 状态由 Redis 心跳对账。worker 退出后默认 30 秒（`INGEST_HEARTBEAT_STALE`）会变成 `interrupted`；`POST /ingest/cancel` 可请求仍在运行的 worker 停止 |
+| 入库卡在 `running` | 状态由 Postgres 心跳对账。worker 退出后默认 30 秒（`INGEST_HEARTBEAT_STALE`）会变成 `interrupted`；`POST /ingest/cancel` 可请求仍在运行的 worker 停止 |
 
 ---
 
