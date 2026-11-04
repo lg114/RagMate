@@ -326,7 +326,7 @@ data: {"error": "..."}                               // 终止性错误
 
 `remote`（以及 `openai`）请求 `POST {EMBEDDING_API_BASE_URL}/embeddings`。启动时不 import torch，也不预热本地 BGE。`RERANKER_PROVIDER` 默认为 `api`，请求 `POST {RERANKER_API_BASE_URL}/rerank`（`RERANKER_API_KEY` 可选，`RERANKER_API_TIMEOUT` 为 `30`）。服务如果在每条结果里带了 `sparse`（或 `lexical_weights`）就用它；否则用稳定的词哈希补稀疏向量。这个哈希不是 BGE-M3 的 lexical weights，切换嵌入方式后必须重新入库。
 
-**本地可选** — `EMBEDDING_PROVIDER=huggingface`（`local` 与 `flagembedding` 是同一条路径）会在 API 进程里用 FlagEmbedding 加载 BGE-M3，`EMBEDDING_DEVICE`（`cpu` 或 `cuda`）只在这时生效。`RERANKER_PROVIDER=local` 会在进程内加载交叉编码器。打开其中任意一项都会在首次使用时 import torch，并在启动时预热对应权重。写法见 [`backend/.env.example`](backend/.env.example) 里的注释。
+**本地可选** — 先在 `backend/` 目录安装可选模型依赖：`pip install -e ".[local]"`，再设 `EMBEDDING_PROVIDER=huggingface`（`local` 与 `flagembedding` 是同一条路径）会在 API 进程里用 FlagEmbedding 加载 BGE-M3，`EMBEDDING_DEVICE`（`cpu` 或 `cuda`）只在这时生效。`RERANKER_PROVIDER=local` 会在进程内加载交叉编码器。打开其中任意一项都会在首次使用时 import torch，并在启动时预热对应权重。写法见 [`backend/.env.example`](backend/.env.example) 里的注释。
 
 CI 不需要 GPU，也不需要真的嵌入服务。测试 mock 了 HTTP 客户端，检索门禁走的是 BM25。工作流仍会导出占位 URL，因为配置在 import 时就会校验。
 

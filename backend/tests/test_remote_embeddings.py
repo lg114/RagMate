@@ -199,3 +199,55 @@ def test_default_import_does_not_load_torch_or_flagembedding():
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_local_model_deps_live_in_local_extra():
+    """本地模型依赖只在 .[local] 里，主依赖默认安装不拉 torch。"""
+    import re
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    project = pyproject["project"]
+
+    def names(deps):
+        return {re.split(r"[<>=!~;\s\[]", dep.strip())[0] for dep in deps}
+
+    main = names(project["dependencies"])
+    local = names(project["optional-dependencies"]["local"])
+    heavy = {"torch", "sentence-transformers", "FlagEmbedding", "langchain-huggingface"}
+    assert heavy <= local
+    assert heavy.isdisjoint(main)
+
+
+def test_local_paths_point_at_local_extra_when_packages_missing(monkeypatch, override_settings):
+    """没装 .[local] 时，本地路径报错要指明安装方式，而不是裸 ModuleNotFoundError。"""
+    import builtins
+
+    import pytest
+
+    import backend.core.retriever as retriever_module
+    from backend.infrastructure.encoding import get_bge_m3
+    from backend.infrastructure.model_factory import get_embeddings
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name.split(".")[0] in {"torch", "FlagEmbedding", "sentence_transformers", "langchain_huggingface"}:
+            raise ImportError(f"No module named '{name}'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    monkeypatch.setattr(retriever_module, "_reranker", None)
+    get_bge_m3.cache_clear()
+    get_embeddings.cache_clear()
+    override_settings(EMBEDDING_PROVIDER="huggingface")
+
+    with pytest.raises(ImportError, match=r"\[local\]"):
+        get_bge_m3()
+    with pytest.raises(ImportError, match=r"\[local\]"):
+        retriever_module.get_reranker()
+    with pytest.raises(ImportError, match=r"\[local\]"):
+        get_embeddings()

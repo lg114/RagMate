@@ -15,14 +15,9 @@ dependencies = [
     # 0.3.31 的约束是 langchain-core>=0.3.78,<2.0.0，与 deepagents 要求的 >=1.2.27 兼容，
     # 因此两边可以共存——这是同时满足主应用与评测依赖的唯一版本区间。
     "langchain-community>=0.3.31,<0.4.0",
-    "langchain-huggingface>=1.0.0,<2.0.0",
     "langchain-text-splitters>=1.0.0,<2.0.0",
     # ── Agent framework ──
     "deepagents>=0.5.0",
-    # ── Embedding & reranking ──
-    "torch>=2.0.0,<3.0.0",
-    "sentence-transformers>=2.2.0",
-    "FlagEmbedding>=0.1.0",
     # ── Web framework ──
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -43,6 +38,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 本地模型（opt-in）：默认走远程 embedding / rerank API，不加载 torch。
+# 只有 EMBEDDING_PROVIDER=huggingface/local/flagembedding 或 RERANKER_PROVIDER=local
+# 时才需要：pip install -e ".[local]"。这几个包只在函数内延迟 import。
+local = [
+    "torch>=2.0.0,<3.0.0",
+    "sentence-transformers>=2.2.0",
+    "FlagEmbedding>=0.1.0",
+    "langchain-huggingface>=1.0.0,<2.0.0",
+]
 # RAGAS 已搁置（不在 CI 上，也不追 Python 3.14）。可选 extra 仍会在 import 时执行
 #     from langchain_community.chat_models.vertexai import ChatVertexAI
 # 该模块在 langchain-community 0.4.0 中被移除，因此主依赖里把 langchain-community

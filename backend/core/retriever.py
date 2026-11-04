@@ -188,7 +188,13 @@ def get_reranker():
         return _reranker
     with _reranker_lock:
         if _reranker is None:
-            from sentence_transformers import CrossEncoder
+            try:
+                from sentence_transformers import CrossEncoder
+            except ImportError as exc:
+                raise ImportError(
+                    "Local reranking needs the 'local' extra: "
+                    'pip install -e ".[local]"'
+                ) from exc
 
             _reranker = CrossEncoder(
                 settings.RERANKER_MODEL,
