@@ -207,28 +207,174 @@ def deduplicate_chunks(client, chunks, chunk_counter, force_include_sources: set
     return chunks, skipped_files
 
 
-def build_stale_source_filter(filename: str, keep_ids: list[int]) -> str:
-    """构建删除同源旧向量的过滤表达式，保留本批次刚插入的 id。"""
-    if not keep_ids:
-        raise ValidationError(f"No inserted ids provided for source cleanup: {filename}")
-    if any(not isinstance(item_id, int) for item_id in keep_ids):
-        raise ValidationError(f"Invalid Milvus ids for source cleanup: {filename}")
-    keep_list = ", ".join(str(item_id) for item_id in keep_ids)
-    return f'{build_source_filter(filename)} and id not in [{keep_list}]'
+_QUERY_PAGE = 1000
+_QUERY_HARD_CAP = 100_000
+_DELETE_BATCH = 500
 
 
-def delete_old_chunks(client, keep_ids_by_source: dict[str, list[int]]):
-    """删除指定文件的旧向量，保留本批次刚插入的新向量。"""
+def _as_milvus_id(value) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _row_batch_id(row: dict) -> str:
+    """行上的 ingest_batch_id。字段不存在或为空时返回空串。"""
+    meta = row.get("metadata") or {}
+    if not isinstance(meta, dict):
+        return ""
+    batch = meta.get("ingest_batch_id")
+    if not isinstance(batch, str):
+        return ""
+    return batch.strip()
+
+
+def _query_rows_by_filter(
+    client,
+    filter_expr: str,
+    output_fields: list[str],
+    *,
+    page_limit: int | None = None,
+) -> list[dict]:
+    """按过滤条件读出向量。page_limit 给定时只取一页，用于删除后的存在性确认。"""
+    def _once(**extra):
+        batch = client.query(
+            collection_name=settings.MILVUS_COLLECTION,
+            filter=filter_expr,
+            output_fields=output_fields,
+            consistency_level="Strong",
+            **extra,
+        )
+        if not isinstance(batch, list):
+            raise ServiceUnavailableError("向量查询结果无法确认")
+        return batch
+
+    if page_limit is not None:
+        return _once(limit=page_limit)
+
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        batch = _once(limit=_QUERY_PAGE, offset=offset)
+        rows.extend(batch)
+        if len(batch) < _QUERY_PAGE:
+            return rows
+        offset += len(batch)
+        if offset > _QUERY_HARD_CAP:
+            raise ServiceUnavailableError("向量数量异常，无法确认旧向量已删除")
+
+
+def _stale_vector_ids(
+    rows: list[dict],
+    ingest_batch_id: str | None,
+    keep_ids: set[int],
+) -> list[int]:
+    """挑出要删除的主键。
+
+    行上有 ingest_batch_id 时，只保留最新批次。没有该字段（或为空）时，
+    退回「不在本批插入 id 里」的规则，用来清掉更早写入的向量。
+    """
+    stale: list[int] = []
+    for row in rows:
+        row_id = _as_milvus_id(row.get("id"))
+        batch = _row_batch_id(row)
+        if ingest_batch_id and batch:
+            if batch == ingest_batch_id:
+                continue
+            if row_id is None:
+                raise ServiceUnavailableError("旧向量缺少主键，无法确认删除")
+            stale.append(row_id)
+            continue
+        if row_id is not None and row_id in keep_ids:
+            continue
+        if row_id is None:
+            raise ServiceUnavailableError("旧向量缺少主键，无法确认删除")
+        stale.append(row_id)
+    return stale
+
+
+def _delete_ids(client, ids: list[int]) -> None:
+    for start in range(0, len(ids), _DELETE_BATCH):
+        client.delete(
+            collection_name=settings.MILVUS_COLLECTION,
+            ids=ids[start:start + _DELETE_BATCH],
+        )
+
+
+def delete_source_vectors(client, filename: str) -> None:
+    """删除某个文件的全部向量，并确认已经不存在。
+
+    失败抛 ServiceUnavailableError。调用方必须在此成功之后才能提交数据库删除。
+    """
+    if client is None:
+        raise ServiceUnavailableError("向量库不可用，已保留文档记录")
+    try:
+        exists = client.has_collection(settings.MILVUS_COLLECTION)
+    except Exception as e:
+        logger.error("Milvus unavailable during document delete for %s", filename, exc_info=True)
+        raise ServiceUnavailableError("向量库不可用，已保留文档记录") from e
+    if not exists:
+        return
+
+    source_filter = build_source_filter(filename)
+    try:
+        client.delete(
+            collection_name=settings.MILVUS_COLLECTION,
+            filter=source_filter,
+        )
+        leftover = _query_rows_by_filter(client, source_filter, ["id"], page_limit=1)
+    except ServiceUnavailableError:
+        raise
+    except Exception as e:
+        logger.error("Milvus delete failed for %s", filename, exc_info=True)
+        raise ServiceUnavailableError("向量删除失败，已保留文档记录") from e
+    if leftover:
+        logger.error("Milvus delete left vectors for %s", filename)
+        raise ServiceUnavailableError("向量删除未完成，已保留文档记录")
+
+
+def delete_old_chunks(
+    client,
+    keep_ids_by_source: dict[str, list[int]],
+    *,
+    ingest_batch_id: str | None = None,
+) -> None:
+    """删除指定文件的旧向量。
+
+    优先按 ingest_batch_id 去掉非最新批次。行上没有该字段时，保留本批插入的 id。
+    删除没有确认完成就抛 ServiceUnavailableError，调用方不得把入库记为成功。
+    """
     if not keep_ids_by_source:
         return
+    batch_id = None
+    if ingest_batch_id is not None:
+        if not isinstance(ingest_batch_id, str) or not ingest_batch_id.strip():
+            raise ServiceUnavailableError("入库批次号无效，无法删除旧向量")
+        batch_id = ingest_batch_id.strip()
+
     for filename, keep_ids in keep_ids_by_source.items():
+        keep = {item_id for item_id in (keep_ids or []) if isinstance(item_id, int)}
+        source_filter = build_source_filter(filename)
         try:
-            client.delete(
-                collection_name=settings.MILVUS_COLLECTION,
-                filter=build_stale_source_filter(filename, keep_ids),
-            )
-        except Exception:
-            logger.debug(f"Failed to delete old chunks for {filename}", exc_info=True)
+            rows = _query_rows_by_filter(client, source_filter, ["id", "metadata"])
+            stale = _stale_vector_ids(rows, batch_id, keep)
+            if not stale:
+                continue
+            _delete_ids(client, stale)
+            remaining = _query_rows_by_filter(client, source_filter, ["id", "metadata"])
+            left = _stale_vector_ids(remaining, batch_id, keep)
+            if left:
+                raise ServiceUnavailableError(f"旧向量删除未完成: {filename}")
+        except ServiceUnavailableError:
+            logger.error("Failed to delete old chunks for %s", filename, exc_info=True)
+            raise
+        except Exception as e:
+            logger.error("Failed to delete old chunks for %s", filename, exc_info=True)
+            raise ServiceUnavailableError(f"删除旧向量失败: {filename}") from e
 
 
 def insert_chunks(client, chunks, dense_vecs, sparse_vecs) -> dict[str, list[int]]:

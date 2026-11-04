@@ -41,6 +41,18 @@ def test_no_confidence_leaves_answer_unchanged():
     assert apply_grounding(text, None, None) == (text, None)
 
 
+def test_zero_chunks_refuse_even_when_level_is_not_low():
+    text = "根据常识，价格是 99 元。"
+    out, grounding = apply_grounding(
+        text,
+        {"level": "high", "score": 0.95, "chunks": 0},
+        [],
+    )
+    assert grounding == "refused"
+    assert "99" not in out
+    assert "没有找到足够相关的资料" in out
+
+
 def test_low_confidence_with_no_chunks_refuses():
     text = "根据常识，价格是 99 元。"
     out, grounding = apply_grounding(
@@ -130,3 +142,7 @@ def test_faithfulness_parses_unsupported_claim(monkeypatch):
 
 def test_faithfulness_defaults_on():
     assert type(settings).model_fields["FAITHFULNESS_CHECK"].default is True
+
+
+def test_deep_agents_default_off():
+    assert type(settings).model_fields["DEEP_AGENTS_ENABLED"].default is False

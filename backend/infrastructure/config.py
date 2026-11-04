@@ -106,7 +106,9 @@ class Settings(BaseSettings):
     QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
     MULTI_QUERY_ENABLED: bool = False  # 多查询扩展：LLM 生成改写变体，多路检索后 RRF 融合（默认关，开启前应先过评测对比）
     MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 改写变体数量（不含原始 query）
-    QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过 agent 直接回复
+    QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过检索，直接回复寒暄
+    # 默认一条链路：检索一次 → 生成一次 → 接地。显式打开才走 Deep Agents 工具循环。
+    DEEP_AGENTS_ENABLED: bool = False
 
     # 评测生成（evaluate / patch-raw）：短超时 + 有限重试，避免 503 干等半小时
     EVAL_LLM_TIMEOUT: float = Field(default=60.0, gt=0)  # 单次生成 HTTP 超时（秒）

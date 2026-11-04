@@ -198,11 +198,22 @@ def run_agent(messages: list[dict], thread_id: str = "default", debug: bool = Fa
             _retrieval_counts.pop(thread_id, None)
 
 
-def run_agent_streaming(messages: list[dict], thread_id: str = "default", debug: bool = False):
-    """流式运行 agent，只返回最终回复。过滤掉 agent thinking 和 tool_call 参数。
+def _is_tool_planning_chunk(msg_chunk) -> bool:
+    """工具调用片段（含参数流）不是最终答案。"""
+    if getattr(msg_chunk, "tool_calls", None):
+        return True
+    if getattr(msg_chunk, "tool_call_chunks", None):
+        return True
+    if getattr(msg_chunk, "invalid_tool_calls", None):
+        return True
+    return False
 
-    - 直接回答（无工具调用）：正常流式输出
-    - 工具调用后回答：丢弃中间过程，只输出工具调用后的最终回复
+
+def run_agent_streaming(messages: list[dict], thread_id: str = "default", debug: bool = False):
+    """流式运行 agent，只返回最终回复。
+
+    工具调用之前的规划文本先进入缓冲区，一旦出现 tool call 或 ToolMessage 就丢掉，
+    避免和工具之后的答案拼进同一条回复。流结束时只输出最后一段正文。
     """
     from langchain_core.messages import AIMessageChunk, ToolMessage
 
@@ -210,6 +221,7 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default", debug:
     from backend.infrastructure.config import settings
     _prepare_session(thread_id, messages)
     debug_token = set_retrieval_debug(debug)
+    segment: list[str] = []
     try:
         for msg_chunk, _ in get_agent().stream(
             {"messages": messages},
@@ -219,14 +231,14 @@ def run_agent_streaming(messages: list[dict], thread_id: str = "default", debug:
             },
             stream_mode="messages",
         ):
-            if isinstance(msg_chunk, ToolMessage):
+            if isinstance(msg_chunk, ToolMessage) or _is_tool_planning_chunk(msg_chunk):
+                segment.clear()
                 continue
             if isinstance(msg_chunk, AIMessageChunk):
-                if getattr(msg_chunk, "tool_calls", None):
-                    continue
                 text = extract_text_content(getattr(msg_chunk, "content", ""))
                 if text:
-                    yield text
+                    segment.append(text)
+        yield from segment
     except BaseException:
         with _contexts_lock:
             _contexts.pop(thread_id, None)

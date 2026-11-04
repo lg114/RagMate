@@ -41,7 +41,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - **Hybrid retrieval** — BGE-M3 dense + sparse search fused with RRF in Milvus.
 - **Reranked, filtered context** — cross-encoder reranking, dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression.
 - **Title-path + parent-child chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees.
-- **Agentic chat** — Deep Agents workflow with multi-turn sessions, SSE streaming, and retrieval exposed as a tool.
+- **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
 - **Built-in evaluation** — optional RAGAS CLI for test-set generation, scoring, and CI quality gates.
@@ -255,7 +255,7 @@ data: {"done": true, "session_id": "...",
 data: {"error": "..."}                                 // terminal error
 ```
 
-Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, `citations`, `grounding`, and `unsupported_claims` appear only on the `done` event. `response` on that event is the text after grounding (refusal, hedge, and the real source line) — clients should replace the streamed tokens with it. `unsupported_claims` is present when faithfulness checking flagged a claim. `grounding` is `refused`, `hedged`, `grounded`, or omitted when no retrieval ran.
+Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, `citations`, `grounding`, and `unsupported_claims` appear only on the `done` event. `response` on that event is the text after grounding (refusal, hedge, and the real source line) — clients should replace the streamed tokens with it. When retrieval keeps no chunks, the stream does not emit tokens first; the refusal arrives only on `done`. `unsupported_claims` is present when faithfulness checking flagged a claim. `grounding` is `refused`, `hedged`, `grounded`, or omitted when no retrieval ran.
 
 The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
@@ -295,7 +295,8 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 | `SCORE_GAP_THRESHOLD` | `0.15` | Stop at the first large score cliff |
 | `CONTEXTUAL_COMPRESSION` | `true` | Keep only relevant sentences inside a chunk |
 | `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-ups into standalone queries |
-| `QUERY_ROUTING_ENABLED` | `true` | Skip the agent for greetings and chitchat |
+| `QUERY_ROUTING_ENABLED` | `true` | Greetings skip retrieval and go straight to the LLM |
+| `DEEP_AGENTS_ENABLED` | `false` | Opt in to the Deep Agents tool loop. Default is one retrieve, one answer, then grounding |
 | `FAITHFULNESS_CHECK` | `true` | One extra LLM call per RAG answer; failures are ignored and the answer is still returned |
 
 <details>

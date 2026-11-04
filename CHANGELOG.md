@@ -5,6 +5,14 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Fixed
+- `document_service.py` + `milvus.py` — 删除文档时先确认 Milvus 向量已经删掉，再提交 PostgreSQL。
+  向量库不可用、删除报错或删完仍能查到残留时返回 503，数据库行和磁盘文件都保留。
+- `milvus.py` + `ingest/pipeline.py` — 重新入库删除旧向量改为按 `ingest_batch_id` 去掉非最新批次
+  （行上没有该字段时才退回本批 id）。删除失败会把入库标为 `failed`，不再吞掉异常后记成 `success`，
+  也不会把这些文件同步成已入库。
+- `chat.py` — 默认对话改为一次检索、一次生成、再 `apply_grounding`。检索没有留下片段时直接拒答，
+  不调用回答模型；流式响应也不会先吐出规划文本再替换。Deep Agents 仅在 `DEEP_AGENTS_ENABLED=true` 时启用。
+  工具规划 token 不再拼进最终保存的回答。
 - `infrastructure/config.py` + `infrastructure/streaming_llm.py` — 新增 `LLM_REASONING_EFFORT` 配置项，
   在 `ChatOpenAICompatible.__init__` 中统一注入 `reasoning_effort`（所有 LLM 实例含 RAGAS 的 `EvalLLM`
   都经过这里，改一处即覆盖全部调用方）。**背景**：Qwen3 等思考型模型把推理过程写入 `reasoning` 字段、
@@ -42,6 +50,7 @@ All notable changes to this project are documented here.
   同一次失败中被中断的其他镜像（postgres / redis / milvus / attu）属级联现象，无需改动。
 
 ### Changed
+- `config.py` — 新增 `DEEP_AGENTS_ENABLED`，默认 `false`。
 - `core/retriever.py` — 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩的目标是
   「减少传给 LLM 的噪声」，此前作用在用于打分的小片段上，与展开后的交付内容不一致；改为在展开之后执行。
   位置同时移到过滤之后，省掉了对必然被丢弃的候选的 reranker 调用。
