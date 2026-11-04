@@ -29,7 +29,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - [评测](#评测)
 - [开发](#开发)
 - [数据、备份与安全](#数据备份与安全)
-- [从 Milvus 迁出](#从-milvus-迁出)
+- [向量存储](#向量存储)
 - [已知约束](#已知约束)
 - [常见问题](#常见问题)
 - [许可证](#许可证)
@@ -386,18 +386,11 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 
 ---
 
-## 从 Milvus 迁出
+## 向量存储
 
-`docker compose up` 不再启动 Milvus、etcd、MinIO 或 Attu。切块存在 `VECTOR_TABLE` 指定的 Postgres 表里（默认 `ragmate_docs`）。`VECTOR_TABLE` 为空时，旧的 `MILVUS_COLLECTION` 仍会当作表名。
+切块存在 `VECTOR_TABLE` 指定的 Postgres 表里（默认 `ragmate_docs`）。`VECTOR_TABLE` 为空时，旧的 `MILVUS_COLLECTION` 仍会当作表名。
 
-**Milvus 还在跑**时，可以拷一次。拷贝不会删 Milvus 里的数据。已经有相同 `(source, chunk_index, content_hash)` 的行会跳过，所以这条命令可以再跑：
-
-```bash
-pip install 'pymilvus>=2.5'
-python -m backend.infrastructure.migrate_from_milvus --host localhost --port 19530 --collection ragmate_docs
-```
-
-**Milvus 已经拆掉**时，用磁盘上的文件重新入库。增量入库会跳过 `documents` 里已经是 `ingested` 的文件，即使向量表是空的。先清掉这个标记，再入库：
+要用磁盘上的文件重建向量，重新入库。增量入库会跳过 `documents` 里已经是 `ingested` 的文件，即使向量表是空的。先清掉这个标记，再入库：
 
 ```sql
 UPDATE documents SET status = 'uploaded';
@@ -411,7 +404,7 @@ UPDATE documents SET status = 'uploaded';
 docker compose up -d --force-recreate postgres
 ```
 
-执行 `CREATE EXTENSION vector` 的数据库用户需要相应权限。Compose 里的 `postgres` 用户可以。拷贝或重新入库之后，可以删掉 `volumes/etcd`、`volumes/minio`、`volumes/milvus`。
+执行 `CREATE EXTENSION vector` 的数据库用户需要相应权限。Compose 里的 `postgres` 用户可以。`volumes/etcd`、`volumes/minio`、`volumes/milvus` 是旧栈留下的，可以删掉。
 
 ---
 

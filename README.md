@@ -29,7 +29,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - [Evaluation](#evaluation)
 - [Development](#development)
 - [Data, backup, and security](#data-backup-and-security)
-- [Migrating from Milvus](#migrating-from-milvus)
+- [Vector storage](#vector-storage)
 - [Known constraints](#known-constraints)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -386,18 +386,11 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 
 ---
 
-## Migrating from Milvus
+## Vector storage
 
-`docker compose up` no longer starts Milvus, etcd, MinIO, or Attu. Chunks live in the Postgres table named by `VECTOR_TABLE` (default `ragmate_docs`). An existing `MILVUS_COLLECTION` value is still read as that table name when `VECTOR_TABLE` is empty.
+Chunks live in the Postgres table named by `VECTOR_TABLE` (default `ragmate_docs`). An existing `MILVUS_COLLECTION` value is still read as that table name when `VECTOR_TABLE` is empty.
 
-**If Milvus is still up**, copy the collection once. The copy does not delete Milvus data. Rows that already have the same `(source, chunk_index, content_hash)` are skipped, so the command can be run again:
-
-```bash
-pip install 'pymilvus>=2.5'
-python -m backend.infrastructure.migrate_from_milvus --host localhost --port 19530 --collection ragmate_docs
-```
-
-**If Milvus is already gone**, re-ingest from the files on disk. Incremental ingest skips a file whose `documents` row is already `ingested`, even when the vector table is empty. Clear that marker, then ingest again:
+To rebuild vectors from the files on disk, re-ingest. Incremental ingest skips a file whose `documents` row is already `ingested`, even when the vector table is empty. Clear that marker, then ingest again:
 
 ```sql
 UPDATE documents SET status = 'uploaded';
@@ -411,7 +404,7 @@ An existing `volumes/postgres` directory from `postgres:15` can stay. Recreate t
 docker compose up -d --force-recreate postgres
 ```
 
-The API user must be allowed to run `CREATE EXTENSION vector`. The Compose `postgres` user can. After you have copied or re-ingested, `volumes/etcd`, `volumes/minio`, and `volumes/milvus` can be deleted.
+The API user must be allowed to run `CREATE EXTENSION vector`. The Compose `postgres` user can. `volumes/etcd`, `volumes/minio`, and `volumes/milvus` are leftovers from the old stack and can be deleted.
 
 ---
 
