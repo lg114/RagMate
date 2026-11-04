@@ -206,7 +206,7 @@ flowchart LR
 
 **入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 pgvector 表去重 → 经嵌入 API 做稠密 + 稀疏编码（只有显式打开时才在进程内用 FlagEmbedding）→ 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
 
-**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加稀疏精确内积，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。多查询默认关闭，除非 `MULTI_QUERY_ENABLED=true`。
+**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加稀疏精确内积，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
 
 简单的寒暄类问题会绕过 Agent，直接路由到 LLM。
 
@@ -301,13 +301,13 @@ data: {"error": "..."}                               // 终止性错误
 
 | 部分 | 冻结值 |
 |---|---|
-| 稠密 + 稀疏混合 | `HYBRID_SEARCH_ENABLED=true` |
-| 融合 | RRF，`RRF_K=60`（`FUSION_MODE=rrf`）。加权融合不是默认 |
+| 稠密 + 稀疏混合 | 始终开启 |
+| 融合 | RRF，`RRF_K=60` |
 | 分块 | `CHUNKING_STRATEGY=title_path`，`CHUNK_SIZE=1000`，重叠 `200`，父块 `2500` / `300` |
 | 重排后过滤 | `RERANK_CANDIDATES=30`，`RERANK_SCORE_THRESHOLD=0.3`，`FINAL_CONTEXT_K=15` |
-| 查询扩展 | 关闭（`MULTI_QUERY_ENABLED=false`） |
+| 查询扩展 | 无（单查询） |
 
-`FUSION_MODE=weighted`、`FUSION_DENSE_WEIGHT`、`MULTI_QUERY_COUNT`、`CHUNKING_STRATEGY=parent_child`，以及折叠区里的过滤比例，都只是环境变量。它们和基线一起冻结。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要把多查询改成默认开启、不要再加切块策略。
+`CHUNKING_STRATEGY=parent_child` 只是环境变量，和基线一起冻结。折叠区里的过滤与压缩常量是写死在代码里的字面值。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要再加切块策略。
 
 那份 98 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
 
@@ -320,7 +320,7 @@ data: {"error": "..."}                               // 终止性错误
 
 重叠长度必须小于对应分块大小，否则启动时会抛出校验错误。
 
-**过滤与压缩** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`)、`MAX_PER_SOURCE` (`4`)、`MIN_PER_SOURCE` (`2`)、`SCORE_GAP_THRESHOLD` (`0.15`)、`CONTEXTUAL_COMPRESSION` (`true`)、`QUERY_CONTEXTUALIZE` (`true`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询)、`QUERY_ROUTING_ENABLED` (`true`)、`HIGH_SCORE_RATIO` (`0.6`)、`SOURCE_DOMINANCE_THRESHOLD` (`0.9`)、`SOURCE_DOMINANCE_BOOST` (`1.5`)、`DROP_RATIO_SEARCH` (`0.2`)、`COMPRESSION_SCORE_THRESHOLD` (`0.4`)、`COMPRESSION_MIN_CHARS` (`300`)。
+**过滤与压缩** — 冻结字面值：动态阈值 `0.5`×最高分、同源上限 `4`（最少 `2`）、主导度 `0.9`×`1.5`、断崖 `0.15`、高分比例 `0.6`；压缩阈值 `0.4`、最短 `300` 字符。`QUERY_CONTEXTUALIZE`（`true`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询）、`QUERY_ROUTING_ENABLED`（`true`）、`DROP_RATIO_SEARCH`（`0.2`）。
 
 **嵌入** — `EMBEDDING_PROVIDER`（`remote`）、`EMBEDDING_MODEL`（`BAAI/bge-m3`）、`EMBEDDING_NORMALIZE`（`true`）、`HF_TOKEN`、`EMBEDDING_API_KEY`（可选）、`EMBEDDING_API_BASE_URL`（`remote` / `openai` 时必填）、`EMBEDDING_API_TIMEOUT`（`60`）。
 

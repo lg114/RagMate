@@ -15,6 +15,18 @@ from backend.infrastructure.vector_store import init_vector_store
 
 logger = logging.getLogger("ragmate")
 
+# 冻结的过滤/压缩常量：与确定性基线一起钉死，不再是可调配置。
+# 改动需重跑 ragmate-eval retrieval 并更新门禁（见 eval/README.md）。
+_DYNAMIC_THRESHOLD_RATIO = 0.5
+_HIGH_SCORE_RATIO = 0.6
+_MAX_PER_SOURCE = 4
+_MIN_PER_SOURCE = 2
+_SCORE_GAP_THRESHOLD = 0.15
+_SOURCE_DOMINANCE_THRESHOLD = 0.9
+_SOURCE_DOMINANCE_BOOST = 1.5
+_COMPRESSION_SCORE_THRESHOLD = 0.4
+_COMPRESSION_MIN_CHARS = 300
+
 
 def canonical_source(source: str) -> str:
     """归一化来源文件名，用于检索去重。"""
@@ -203,45 +215,6 @@ def get_reranker():
         return _reranker
 
 
-_MULTI_QUERY_PROMPT = """为同一个问题生成 {count} 个语义相同但表述不同的检索查询变体，用于从文档库中多角度召回。
-要求：
-- 每行一个变体，不要编号、不要引号、不要任何解释
-- 变体之间尽量使用不同的关键词与句式
-- 保持与原始问题相同的语言
-
-原始问题：{query}"""
-
-_NUM_PREFIX_RE = re.compile(r"^\s*\d+[.、)）]\s*")
-
-
-def expand_queries(query: str) -> list[str]:
-    """多查询扩展：返回 [原 query] + LLM 生成的改写变体（去重、限量）。
-
-    MULTI_QUERY_ENABLED 关闭、或 LLM 调用失败/无有效变体时，只返回 [query]，
-    检索行为与未扩展时完全一致。
-    """
-    if not settings.MULTI_QUERY_ENABLED:
-        return [query]
-    try:
-        from backend.infrastructure.model_factory import get_llm
-
-        llm = get_llm()
-        prompt = _MULTI_QUERY_PROMPT.format(count=settings.MULTI_QUERY_COUNT, query=query)
-        response = llm.invoke(prompt)
-        variants: list[str] = []
-        for line in response.content.splitlines():
-            v = _NUM_PREFIX_RE.sub("", line).strip().strip('"').strip("\u201c\u201d").strip("'")
-            if v and v != query and v not in variants:
-                variants.append(v)
-        variants = variants[: settings.MULTI_QUERY_COUNT]
-        if variants:
-            logger.info(f"Multi-query: '{query}' → {variants}")
-            return [query] + variants
-    except Exception as e:
-        logger.warning(f"Multi-query expansion failed, using original only: {e}")
-    return [query]
-
-
 # ── Reranker 打分（本地 / 远程 API 两种 provider） ─────────────────────────────
 
 def _api_rerank_scores(query: str, texts: list[str]) -> list[float]:
@@ -290,15 +263,11 @@ def score_pairs(query: str, texts: list[str]) -> list[float]:
 # ── Search ──────────────────────────────────────────────────────────────────
 
 def _do_search(store, dense_vec: list[float], sparse_vec, over_fetch: int):
-    """执行一次混合检索或 dense 检索。返回与旧结果相同的 [hits] 包装。
+    """执行一次混合检索。返回与旧结果相同的 [hits] 包装。
 
-    混合检索：稠密 HNSW 内积 + 稀疏精确内积，再按 FUSION_MODE 融合（默认 RRF k=60）。
-    HYBRID_SEARCH_ENABLED 关闭时只走稠密。
+    稠密 HNSW 内积 + 稀疏精确内积，再用 RRF（k=60）融合。
     """
-    if settings.HYBRID_SEARCH_ENABLED:
-        hits = store.search_hybrid(dense_vec, sparse_vec, over_fetch)
-    else:
-        hits = store.search_dense(dense_vec, over_fetch)
+    hits = store.search_hybrid(dense_vec, sparse_vec, over_fetch)
     return [hits]
 
 
@@ -330,31 +299,6 @@ def _extract_candidates(results) -> list[dict]:
             "chunk_index": meta.get("chunk_index"),
         })
     return candidates
-
-
-def _search_multi(store, queries: list[str], over_fetch: int) -> list[dict]:
-    """多路检索 + RRF 融合。
-
-    每个 query 变体独立做一次混合检索，候选按 (source, page, chunk_index) 去重；
-    同一片段在越多路结果中出现、排名越靠前，融合分越高。融合后截断到
-    over_fetch 个再交给 reranker 精排，因此 reranker 的调用量与单路时相同。
-    """
-    rrf_k = settings.RRF_K
-    fused: dict[tuple, dict] = {}
-    fused_scores: dict[tuple, float] = {}
-    for q in queries:
-        dense_vec, sparse_vec = encode_query(q)
-        results = _do_search(store, dense_vec, sparse_vec, over_fetch)
-        for rank, cand in enumerate(_extract_candidates(results)):
-            key = (cand["source"], cand.get("page"), cand.get("chunk_index"))
-            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
-            fused.setdefault(key, cand)
-    ordered = sorted(
-        fused.values(),
-        key=lambda c: fused_scores[(c["source"], c.get("page"), c.get("chunk_index"))],
-        reverse=True,
-    )
-    return ordered[:over_fetch]
 
 
 # ── Reranking + Filtering ──────────────────────────────────────────────────
@@ -401,14 +345,10 @@ _SENT_RE = re.compile(r"(?<=[。！？.!?\n])\s*")
 
 def _compress_chunks(query: str, candidates: list[dict]) -> list[dict]:
     """用 reranker 对 chunk 内句子级评分，只保留相关句子。减少传给 LLM 的噪声。"""
-    from backend.infrastructure.config import settings
-    if not settings.CONTEXTUAL_COMPRESSION:
-        return candidates
-
     for c in candidates:
         text = c["text"]
         # 短 chunk 不压缩
-        if len(text) < settings.COMPRESSION_MIN_CHARS:
+        if len(text) < _COMPRESSION_MIN_CHARS:
             continue
 
         sentences = [s.strip() for s in _SENT_RE.split(text) if s.strip()]
@@ -424,7 +364,7 @@ def _compress_chunks(query: str, candidates: list[dict]) -> list[dict]:
         scored_sentences = list(zip(sentences, probs))
 
         # 保留超过阈值的句子，至少保留 top-1
-        threshold = settings.COMPRESSION_SCORE_THRESHOLD
+        threshold = _COMPRESSION_SCORE_THRESHOLD
         kept = [(s, sc) for s, sc in scored_sentences if sc >= threshold]
         if not kept:
             kept = [max(scored_sentences, key=lambda x: x[1])]
@@ -500,7 +440,7 @@ def _annotate_drop_reasons(candidates: list[dict], threshold: float, k: int, kep
     if not candidates:
         return
     top_score = candidates[0]["score"]
-    effective_threshold = max(top_score * settings.DYNAMIC_THRESHOLD_RATIO, threshold)
+    effective_threshold = max(top_score * _DYNAMIC_THRESHOLD_RATIO, threshold)
     scored = [c for c in candidates if c["score"] >= effective_threshold]
     scored_ids = {id(c) for c in scored}
 
@@ -516,13 +456,13 @@ def _annotate_drop_reasons(candidates: list[dict], threshold: float, k: int, kep
     per_source_ids = set()
     for canonical, group in source_groups.items():
         group.sort(key=lambda x: x["score"], reverse=True)
-        high_count = sum(1 for c in group if c["score"] >= top_score * settings.HIGH_SCORE_RATIO)
-        limit = max(high_count, settings.MIN_PER_SOURCE)
+        high_count = sum(1 for c in group if c["score"] >= top_score * _HIGH_SCORE_RATIO)
+        limit = max(high_count, _MIN_PER_SOURCE)
         dominance = source_dominance[canonical]
-        if dominance >= settings.SOURCE_DOMINANCE_THRESHOLD:
-            soft_limit = min(int(limit * settings.SOURCE_DOMINANCE_BOOST), k)
+        if dominance >= _SOURCE_DOMINANCE_THRESHOLD:
+            soft_limit = min(int(limit * _SOURCE_DOMINANCE_BOOST), k)
         else:
-            soft_limit = settings.MAX_PER_SOURCE
+            soft_limit = _MAX_PER_SOURCE
         limit = min(limit, soft_limit)
         deduped.extend(group[:limit])
         for cand in group[limit:]:
@@ -538,7 +478,7 @@ def _annotate_drop_reasons(candidates: list[dict], threshold: float, k: int, kep
             if stopped:
                 break
             gap = deduped[i - 1]["score"] - deduped[i]["score"]
-            if gap > settings.SCORE_GAP_THRESHOLD:
+            if gap > _SCORE_GAP_THRESHOLD:
                 for cand in deduped[i:]:
                     gap_ids.add(id(cand))
                 stopped = True
@@ -575,7 +515,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     top_score = candidates[0]["score"]  # 已是 sigmoid 概率
 
     # 1. 动态阈值：top_score 的一定比例，最低保底 threshold
-    effective_threshold = max(top_score * settings.DYNAMIC_THRESHOLD_RATIO, threshold)
+    effective_threshold = max(top_score * _DYNAMIC_THRESHOLD_RATIO, threshold)
     scored = [c for c in candidates if c["score"] >= effective_threshold]
 
     if not scored:
@@ -599,15 +539,15 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     deduped = []
     for canonical, chunks in source_groups.items():
         chunks.sort(key=lambda x: x["score"], reverse=True)
-        high_count = sum(1 for c in chunks if c["score"] >= top_score * settings.HIGH_SCORE_RATIO)
-        limit = max(high_count, settings.MIN_PER_SOURCE)
+        high_count = sum(1 for c in chunks if c["score"] >= top_score * _HIGH_SCORE_RATIO)
+        limit = max(high_count, _MIN_PER_SOURCE)
 
         # 软限制：当该来源主导度很高时，放宽上限
         dominance = source_dominance[canonical]
-        if dominance >= settings.SOURCE_DOMINANCE_THRESHOLD:
-            soft_limit = min(int(limit * settings.SOURCE_DOMINANCE_BOOST), k)
+        if dominance >= _SOURCE_DOMINANCE_THRESHOLD:
+            soft_limit = min(int(limit * _SOURCE_DOMINANCE_BOOST), k)
         else:
-            soft_limit = settings.MAX_PER_SOURCE
+            soft_limit = _MAX_PER_SOURCE
         limit = min(limit, soft_limit)
 
         deduped.extend(chunks[:limit])
@@ -618,7 +558,7 @@ def _filter_and_dedup(candidates: list[dict], threshold: float, k: int) -> list[
     result = [deduped[0]]
     for i in range(1, len(deduped)):
         gap = deduped[i - 1]["score"] - deduped[i]["score"]
-        if gap > settings.SCORE_GAP_THRESHOLD:
+        if gap > _SCORE_GAP_THRESHOLD:
             break
         if len(result) >= k:
             break
@@ -708,12 +648,8 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
-        queries = expand_queries(query)
-        if len(queries) == 1:
-            dense_vec, sparse_vec = encode_query(query)
-            candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
-        else:
-            candidates = _search_multi(client, queries, over_fetch)
+        dense_vec, sparse_vec = encode_query(query)
+        candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
 
         if not candidates:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")

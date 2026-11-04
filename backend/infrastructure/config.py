@@ -90,11 +90,7 @@ class Settings(BaseSettings):
     CHUNKING_STRATEGY: str = "title_path"
 
     # Hybrid Search + Reranking. Core stays hybrid + RRF + rerank. Do not add fusion arms.
-    HYBRID_SEARCH_ENABLED: bool = True
-    # 融合冻结为 rrf。weighted 只是环境变量（稠密/稀疏原始分加权），不是默认。
-    FUSION_MODE: str = "rrf"
     RRF_K: int = Field(default=60, ge=1, le=200)  # 冻结。RRF 常数；越小越偏向「两边都靠前」的交集
-    FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)  # 仅 weighted；稀疏=1-该值
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     # 默认 api：POST {RERANKER_API_BASE_URL}/rerank，不在本进程加载 CrossEncoder。
     RERANKER_PROVIDER: str = "api"
@@ -106,28 +102,12 @@ class Settings(BaseSettings):
     RERANK_SCORE_THRESHOLD: float = Field(default=0.3, gt=0.0, lt=1.0)
     DROP_RATIO_SEARCH: float = Field(default=0.2, ge=0.0, lt=1.0)
 
-    # Reranker 动态过滤调参
-    DYNAMIC_THRESHOLD_RATIO: float = Field(default=0.5, gt=0.0, le=1.0)  # top_score 乘数
-    HIGH_SCORE_RATIO: float = Field(default=0.6, gt=0.0, le=1.0)         # 高分 chunk 判定比例
-    MAX_PER_SOURCE: int = Field(default=4, gt=0)                          # 单源最大 chunk 数（默认上限）
-    MIN_PER_SOURCE: int = Field(default=2, gt=0)                          # 单源最小 chunk 数
-    SCORE_GAP_THRESHOLD: float = Field(default=0.15, gt=0.0, lt=1.0)     # 分数断崖阈值
-    SOURCE_DOMINANCE_THRESHOLD: float = Field(default=0.9, gt=0.0, le=1.0)  # 来源主导度阈值（top 来源分数 / 全局最高分）
-    SOURCE_DOMINANCE_BOOST: float = Field(default=1.5, gt=1.0, le=3.0)     # 主导来源的 chunk 上限倍数
-
-    # 上下文压缩
-    CONTEXTUAL_COMPRESSION: bool = True                                  # 是否启用 chunk 内句子级压缩
-    COMPRESSION_SCORE_THRESHOLD: float = Field(default=0.4, gt=0.0, lt=1.0)  # 句子保留阈值
-    COMPRESSION_MIN_CHARS: int = Field(default=300, gt=0)                # 短于此长度的 chunk 不压缩
-
     # 忠诚度校验（默认开启，但只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答；false 则全关）
     FAITHFULNESS_CHECK: bool = True
 
     # Query processing
     QUERY_CONTEXTUALIZE: bool = True   # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
     # 冻结为关。多查询扩展不是默认；打开前先重跑 ragmate-eval retrieval 并更新门槛。
-    MULTI_QUERY_ENABLED: bool = False
-    MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 仅开启时：改写变体数量（不含原始 query）
     QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过检索，直接回复寒暄
     # 默认一条链路：检索一次 → 生成一次 → 接地。显式打开才走 Deep Agents 工具循环。
     DEEP_AGENTS_ENABLED: bool = False
@@ -214,9 +194,6 @@ class Settings(BaseSettings):
                     f"{overlap_name} ({overlap}) must be less than {size_name} ({size})"
                 )
         
-        if self.MIN_PER_SOURCE > self.MAX_PER_SOURCE:
-            raise ValueError(f"MIN_PER_SOURCE ({self.MIN_PER_SOURCE}) must be <= MAX_PER_SOURCE ({self.MAX_PER_SOURCE})")
-
         if self.INGEST_HEARTBEAT_STALE <= self.INGEST_HEARTBEAT_INTERVAL:
             raise ValueError(
                 f"INGEST_HEARTBEAT_STALE ({self.INGEST_HEARTBEAT_STALE}) must be greater than "

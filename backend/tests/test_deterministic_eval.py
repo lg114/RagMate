@@ -92,7 +92,7 @@ def test_metric_spread_reports_max_min_gap():
 def test_manifest_records_testset_hash_and_settings(tmp_path, override_settings):
     testset = tmp_path / "testset.json"
     testset.write_text(json.dumps([{"user_input": "q"}]), encoding="utf-8")
-    override_settings(RERANK_CANDIDATES=30, HYBRID_SEARCH_ENABLED=True)
+    override_settings(RERANK_CANDIDATES=30)
     manifest = build_manifest(
         testset_path=testset, stages=["fused"], over_fetch=50,
         ks=[5, 10, 20], repeat=1, n_questions=1, git_commit="abc",

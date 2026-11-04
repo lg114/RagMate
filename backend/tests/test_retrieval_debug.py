@@ -59,14 +59,9 @@ def test_take_retrieval_debug_discards_trace_when_disabled():
     assert retriever._last_debug.entry is None
 
 
-def test_score_gap_drop_reason(monkeypatch):
-    from backend.infrastructure.config import settings
-
-    monkeypatch.setattr(settings, "SCORE_GAP_THRESHOLD", 0.15)
-    monkeypatch.setattr(settings, "DYNAMIC_THRESHOLD_RATIO", 0.1)
-    monkeypatch.setattr(settings, "RERANK_SCORE_THRESHOLD", 0.05)
+def test_score_gap_drop_reason():
     top = _chunk(0.9, source="a.pdf")
-    cliff = _chunk(0.4, source="b.pdf")
+    cliff = _chunk(0.6, source="b.pdf")
     token = set_retrieval_debug(True)
     try:
         kept = _filter_and_dedup([top, cliff], 0.05, 10)

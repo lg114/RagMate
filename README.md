@@ -206,7 +206,7 @@ flowchart LR
 
 **Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense + sparse encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
-**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus exact sparse inner product, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. Multi-query stays off unless `MULTI_QUERY_ENABLED=true`.
+**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus exact sparse inner product, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
 
 Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
 
@@ -301,13 +301,13 @@ One retrieval config is validated. It is hybrid dense + sparse search, fused wit
 
 | Piece | Frozen value |
 |---|---|
-| Hybrid dense + sparse | `HYBRID_SEARCH_ENABLED=true` |
-| Fusion | RRF with `RRF_K=60` (`FUSION_MODE=rrf`). Weighted fusion is not a default |
+| Hybrid dense + sparse | always on |
+| Fusion | RRF with `RRF_K=60` |
 | Chunking | `CHUNKING_STRATEGY=title_path`, `CHUNK_SIZE=1000`, overlap `200`, parent `2500` / `300` |
 | Rerank then filter | `RERANK_CANDIDATES=30`, `RERANK_SCORE_THRESHOLD=0.3`, `FINAL_CONTEXT_K=15` |
-| Query expansion | off (`MULTI_QUERY_ENABLED=false`) |
+| Query expansion | none (single query) |
 
-`FUSION_MODE=weighted`, `FUSION_DENSE_WEIGHT`, `MULTI_QUERY_COUNT`, `CHUNKING_STRATEGY=parent_child`, and the filter ratios in the details are environment variables only. They are frozen with that baseline. Changing one without a new deterministic baseline does not create a supported config. Do not add another fusion arm, turn multi-query on by default, or add a chunking strategy.
+`CHUNKING_STRATEGY=parent_child` is an environment variable only, frozen with that baseline. The filter and compression constants in the details are frozen literals in code. Changing one without a new deterministic baseline does not create a supported config. Do not add another fusion arm or a chunking strategy.
 
 The 98-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
 
@@ -320,7 +320,7 @@ The 98-question report was collected with in-process BGE-M3 and a local cross-en
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 
-**Filter and compression** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`), `MAX_PER_SOURCE` (`4`), `MIN_PER_SOURCE` (`2`), `SCORE_GAP_THRESHOLD` (`0.15`), `CONTEXTUAL_COMPRESSION` (`true`), `QUERY_CONTEXTUALIZE` (`true`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`true`), `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
+**Filter and compression** — frozen literals: dynamic threshold `0.5`×top score, per-source cap `4` (min `2`), dominance `0.9`×`1.5`, score-gap `0.15`, high-score ratio `0.6`; compression threshold `0.4`, min `300` chars. `QUERY_CONTEXTUALIZE` (`true`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`true`), `DROP_RATIO_SEARCH` (`0.2`).
 
 **Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 

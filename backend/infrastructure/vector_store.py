@@ -2,8 +2,7 @@
 
 稠密字段是 vector(1024)，HNSW、内积。稀疏字段是 sparsevec，精确内积
 （pgvector 0.8 没有稀疏 ANN 索引）。查询侧仍按 DROP_RATIO_SEARCH 丢掉
-最小的一批稀疏权重，再和稠密名次做 RRF（默认 k=60）。加权模式用原始内积，
-不是离线扫参里的 min-max。
+最小的一批稀疏权重，再和稠密名次做 RRF（k=60）。
 
 表不存在时检索返回空；结构对不上时拒绝启动，不在原地改向量列。
 """
@@ -153,27 +152,17 @@ def fuse_hits(
     sparse_hits: list[dict],
     *,
     limit: int,
-    mode: str,
     rrf_k: int,
-    dense_weight: float,
 ) -> list[dict]:
-    """按 id 融合两路命中。RRF 用名次；weighted 用原始内积乘权重。"""
+    """按 id 融合两路命中：RRF 用名次累加。"""
     by_id: dict[int, dict] = {}
     for hit in list(dense_hits) + list(sparse_hits):
         by_id.setdefault(int(hit["id"]), hit)
     scores: dict[int, float] = {}
-    if (mode or "rrf").strip().lower() == "weighted":
-        w_d = min(1.0, max(0.0, float(dense_weight)))
-        w_s = 1.0 - w_d
-        for hit in dense_hits:
-            scores[int(hit["id"])] = scores.get(int(hit["id"]), 0.0) + w_d * float(hit["distance"])
-        for hit in sparse_hits:
-            scores[int(hit["id"])] = scores.get(int(hit["id"]), 0.0) + w_s * float(hit["distance"])
-    else:
-        for rank, hit in enumerate(dense_hits):
-            scores[int(hit["id"])] = scores.get(int(hit["id"]), 0.0) + rrf_contribution(rank, int(rrf_k))
-        for rank, hit in enumerate(sparse_hits):
-            scores[int(hit["id"])] = scores.get(int(hit["id"]), 0.0) + rrf_contribution(rank, int(rrf_k))
+    for rank, hit in enumerate(dense_hits):
+        scores[int(hit["id"])] = scores.get(int(hit["id"]), 0.0) + rrf_contribution(rank, int(rrf_k))
+    for rank, hit in enumerate(sparse_hits):
+        scores[int(hit["id"])] = scores.get(int(hit["id"]), 0.0) + rrf_contribution(rank, int(rrf_k))
     ordered = sorted(scores, key=lambda item_id: (-scores[item_id], item_id))
     fused = []
     for item_id in ordered[:limit]:
@@ -337,16 +326,14 @@ class PgVectorStore:
         )
 
     def search_hybrid(self, dense_vec, sparse_vec, limit: int) -> list[dict]:
-        """稠密、稀疏各取 limit 条，再按 FUSION_MODE 融合到 limit 条。"""
+        """稠密、稀疏各取 limit 条，再用 RRF 融合到 limit 条。"""
         dense_hits = self.search_dense(dense_vec, limit)
         sparse_hits = self.search_sparse(sparse_vec, limit)
         return fuse_hits(
             dense_hits,
             sparse_hits,
             limit=int(limit),
-            mode=settings.FUSION_MODE,
             rrf_k=settings.RRF_K,
-            dense_weight=settings.FUSION_DENSE_WEIGHT,
         )
 
     def _ann_query(self, sql: str, params: dict, *, ef_search: int | None) -> list[dict]:
