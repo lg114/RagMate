@@ -6,8 +6,7 @@ gold chunk ID 集合与实际返回的排序直接算出，同一索引、同一
 遍结果都一样。
 
 Chunk 的身份用 (source, page, chunk_index) 三元组：Milvus 的自增 id 不可
-复现，而三元组是入库切分时写进 metadata 的确定性标识，检索链路内部
-（`_search_multi` 去重）也用它认 chunk。
+复现，而三元组是入库切分时写进 metadata 的确定性标识，检索链路内部也用它认 chunk。
 """
 import math
 

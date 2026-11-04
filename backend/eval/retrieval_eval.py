@@ -3,13 +3,12 @@
 四个阶段（P0-3 消融臂）：
   dense    —— 仅稠密向量检索；
   sparse   —— 仅稀疏向量检索；
-  fused    —— 混合检索 + RRF 融合（即 `_do_search` 的混合分支），不重排；
+  fused    —— 混合检索 + RRF 融合（即 `_do_search`），不重排；
   reranked —— fused 的候选经 reranker 打分排序，不做阈值过滤/去重/父展开。
 
 检索指标只看“排序里有没有 gold chunk、在第几位”，因此 reranked 阶段
 故意停在排序这一步：阈值、去重、父展开是生成侧的取舍，不应污染检索
-基线。评测默认单查询（与 MULTI_QUERY_ENABLED 关闭时的生产路径一致）；
-若该开关打开，命令会先告警——基线口径是单查询。
+基线。评测跑单查询，与生产路径一致；基线口径是单查询。
 
 Chunk 身份用 (source, page, chunk_index) 三元组，与 gold 标注一致。
 """
@@ -83,13 +82,7 @@ def _search_sparse(store, sparse_vec, over_fetch):
 
 
 def _search_fused(store, dense_vec, sparse_vec, over_fetch):
-    """混合检索 + RRF：与 retriever._do_search 的混合分支同一行为。
-
-    HYBRID_SEARCH_ENABLED 关闭时退化为 dense 检索（与生产路径一致，
-    manifest 里记了该开关，fused==dense 时一看便知）。
-    """
-    if not settings.HYBRID_SEARCH_ENABLED:
-        return _search_dense(store, dense_vec, over_fetch)
+    """混合检索 + RRF：与 retriever._do_search 同一行为。"""
     return [store.search_hybrid(dense_vec, sparse_vec, over_fetch)]
 
 
@@ -279,11 +272,6 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
         raise RuntimeError(
             f"Vector table {settings.VECTOR_TABLE!r} does not exist; "
             "ingest the corpus before running retrieval evaluation."
-        )
-    if settings.MULTI_QUERY_ENABLED:
-        logger.warning(
-            "MULTI_QUERY_ENABLED is on: the harness still runs single-query "
-            "retrieval, so this baseline is the single-query baseline."
         )
     checkpoint = None
     evaluations = []

@@ -1,8 +1,7 @@
-"""稠密/稀疏结果融合：RRF 与加权。
+"""稠密/稀疏结果融合：RRF。
 
-生产路径在 pgvector 上分别取稠密、稀疏的内积名次，再用 RRF 合并（默认 k=60）。
-`weighted_fuse_score_lists` 是离线扫参用的归一化加权，不是线上默认。
-线上 `FUSION_MODE=weighted` 对原始内积加权，不走这里的 min-max。
+生产路径在 pgvector 上分别取稠密、稀疏的内积名次，再用 RRF 合并（k=60）。
+加权融合已删除，不再是可选项。
 """
 from __future__ import annotations
 
@@ -33,31 +32,3 @@ def rrf_fuse_rank_lists(
     return ordered[:limit]
 
 
-def _minmax(values: list[float]) -> list[float]:
-    if not values:
-        return []
-    lo, hi = min(values), max(values)
-    if hi <= lo:
-        return [1.0] * len(values)
-    return [(v - lo) / (hi - lo) for v in values]
-
-
-def weighted_fuse_score_lists(
-    dense_items: list[tuple[tuple, float]],
-    sparse_items: list[tuple[tuple, float]],
-    *,
-    dense_weight: float = 0.5,
-    limit: int = 50,
-) -> list[tuple]:
-    """按归一化原始分加权融合。items = [(key, score), ...] 已按分排序亦可。"""
-    w_d = min(1.0, max(0.0, float(dense_weight)))
-    w_s = 1.0 - w_d
-    d_keys = [k for k, _ in dense_items]
-    s_keys = [k for k, _ in sparse_items]
-    d_norm = dict(zip(d_keys, _minmax([s for _, s in dense_items])))
-    s_norm = dict(zip(s_keys, _minmax([s for _, s in sparse_items])))
-    scores: dict[tuple, float] = {}
-    for key in set(d_keys) | set(s_keys):
-        scores[key] = w_d * d_norm.get(key, 0.0) + w_s * s_norm.get(key, 0.0)
-    ordered = sorted(scores.keys(), key=lambda key: scores[key], reverse=True)
-    return ordered[:limit]
