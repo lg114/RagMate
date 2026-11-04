@@ -300,6 +300,75 @@ def cmd_check_gold(args):
         print("Live index check OK: every gold chunk exists in pgvector.")
 
 
+def cmd_chunks(args):
+    """列出生产切分复现的 chunk 清单，供标注者读文本定 gold。离线，不碰数据库。"""
+    from .annotate import list_chunk_rows
+
+    corpus_dir = resolve_path(args.corpus)
+    try:
+        inventory = build_chunk_inventory(corpus_dir)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    rows = list_chunk_rows(inventory, source=args.source)
+    if not rows:
+        if args.source:
+            print(f"Error: no chunks for source {args.source!r} in {corpus_dir}")
+        else:
+            print(f"Error: no chunks reproduced from {corpus_dir}")
+        sys.exit(1)
+    print(f"Chunk inventory from {corpus_dir}: {len(rows)} chunks.")
+    for row in rows:
+        print(f"\n{row['source']}:{row['chunk_index']}  ({row['chars']} chars)")
+        if args.full:
+            print(inventory[(row["source"], row["chunk_index"])])
+        else:
+            print(f"  {row['preview']}")
+
+
+def cmd_annotate(args):
+    """把一道人工标注的题追加进 testset：校验通过才写盘。"""
+    from .annotate import append_case, build_case, parse_gold_spec
+
+    try:
+        gold = [parse_gold_spec(spec) for spec in args.gold]
+        case = build_case(
+            question=args.question,
+            reference=args.reference,
+            question_type=args.question_type,
+            gold=gold,
+            claims=args.claims,
+            source_doc=args.source_doc,
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    testset_path = resolve_path(args.testset)
+    if not testset_path.exists():
+        print(f"Error: Test set not found: {testset_path}")
+        sys.exit(1)
+    try:
+        updated = append_case(
+            testset_path, case, resolve_path(args.corpus), dry_run=args.dry_run
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    if args.dry_run:
+        print("Dry run: not written. Case that would be appended:")
+        print(json.dumps(case, ensure_ascii=False, indent=2))
+        return
+    print(f"Appended case #{len(updated) - 1} to {testset_path} "
+          f"({len(updated)} cases total).")
+    print("Next steps before the gate passes again:")
+    print("  1. ragmate-eval check-gold --testset <path> [--live after re-ingest]")
+    print("  2. Re-ingest the corpus into pgvector, then rerun")
+    print("     ragmate-eval retrieval and replace the pinned baseline report.")
+    print("  3. ragmate-eval retrieval-gate")
+
+
 def cmd_retrieval_gate(args):
     """词法重放样本题库，Recall@k / nDCG 低于基线门槛时以非 0 退出。"""
     from .retrieval_gate import run_retrieval_gate
@@ -405,6 +474,59 @@ def main():
         help="Output JSON path (default: <checkpoint-stem>-cutoff.json)",
     )
 
+    chunks_parser = subparsers.add_parser(
+        "chunks",
+        help="List chunks reproduced by production chunking (read them to pick gold IDs)",
+    )
+    chunks_parser.add_argument(
+        "--corpus", type=str, default="eval/testsets/sample/corpus",
+        help="Corpus directory used to reproduce chunking",
+    )
+    chunks_parser.add_argument(
+        "--source", type=str, default=None,
+        help="Only list chunks from this corpus file (basename)",
+    )
+    chunks_parser.add_argument(
+        "--full", action="store_true",
+        help="Print full chunk text instead of a 120-char preview",
+    )
+
+    annotate_parser = subparsers.add_parser(
+        "annotate",
+        help="Append one human-annotated case to a golden test set (validated, atomic)",
+    )
+    annotate_parser.add_argument(
+        "--testset", type=str, required=True,
+        help="Golden test set JSON path to append to",
+    )
+    annotate_parser.add_argument(
+        "--corpus", type=str, default="eval/testsets/sample/corpus",
+        help="Corpus directory used to verify gold chunk IDs exist",
+    )
+    annotate_parser.add_argument("--question", type=str, required=True)
+    annotate_parser.add_argument("--reference", type=str, required=True)
+    annotate_parser.add_argument(
+        "--type", dest="question_type", type=str, required=True,
+        choices=["factoid", "multi-hop", "paraphrase", "ambiguous", "unanswerable"],
+        help="Question type; unanswerable takes no --gold",
+    )
+    annotate_parser.add_argument(
+        "--gold", action="append", type=str, default=[],
+        help="Gold chunk as source:chunk_index, repeatable (e.g. 01-docker-compose.md:2)",
+    )
+    annotate_parser.add_argument(
+        "--claims", action="append", type=str, required=True,
+        help="Expected claim, repeatable (at least one)",
+    )
+    annotate_parser.add_argument(
+        "--source-doc", type=str, default=None,
+        help="Defaults to the single gold source, or '' for unanswerable",
+    )
+    annotate_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Validate only, do not write the test set",
+    )
+
     if len(sys.argv) == 1:
         parser.print_help()
         print(_BARE_NOTE)
@@ -422,3 +544,7 @@ def main():
         cmd_delivery(args)
     elif args.command == "cutoff":
         cmd_cutoff(args)
+    elif args.command == "chunks":
+        cmd_chunks(args)
+    elif args.command == "annotate":
+        cmd_annotate(args)
