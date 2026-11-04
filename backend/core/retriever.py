@@ -9,7 +9,6 @@ import threading
 import urllib.request
 
 from pymilvus import AnnSearchRequest
-from sentence_transformers import CrossEncoder
 
 from backend.core.fusion import make_milvus_ranker
 from backend.domain.errors import AppError, ServiceUnavailableError
@@ -161,17 +160,22 @@ def contextualize_query(query: str, messages: list[dict]) -> str:
 
     return query
 
-_reranker: CrossEncoder | None = None
+_reranker = None
 _reranker_lock = threading.Lock()
 
 
-def get_reranker() -> CrossEncoder:
-    """加载 Reranker 模型（单例，失败后可重试）。"""
+def get_reranker():
+    """加载本地 CrossEncoder（单例，失败后可重试）。
+
+    只在 RERANKER_PROVIDER=local 时调用。默认的 api 路径不会 import sentence-transformers。
+    """
     global _reranker
     if _reranker is not None:
         return _reranker
     with _reranker_lock:
         if _reranker is None:
+            from sentence_transformers import CrossEncoder
+
             _reranker = CrossEncoder(
                 settings.RERANKER_MODEL,
                 device=settings.EMBEDDING_DEVICE,

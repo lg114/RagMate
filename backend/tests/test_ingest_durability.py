@@ -7,6 +7,7 @@ import pytest
 
 from backend.application import ingest_manager
 from backend.application.ingest import pipeline
+from backend.infrastructure.config import settings
 from backend.infrastructure.encoding import EncodingCancelled, encode_documents
 
 
@@ -225,6 +226,8 @@ def test_encode_documents_honours_cancel_without_loading_the_model(monkeypatch):
     def boom():
         raise AssertionError("model should not load")
 
+    # 默认已是远程 HTTP。这里钉住本地路径，确认取消发生在 FlagEmbedding 加载之前。
+    monkeypatch.setattr(settings, "EMBEDDING_PROVIDER", "huggingface")
     monkeypatch.setattr("backend.infrastructure.encoding.get_bge_m3", boom)
     cancel_event = threading.Event()
     cancel_event.set()

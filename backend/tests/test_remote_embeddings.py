@@ -95,10 +95,107 @@ def test_remote_cancel_does_not_call_the_service(remote_settings, monkeypatch):
         encode_documents(["hello"], cancel_event)
 
 
-def test_remote_provider_requires_base_url(monkeypatch):
+def _base_env(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("RERANKER_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("RERANKER_API_KEY", raising=False)
+
+
+def test_remote_provider_requires_base_url(monkeypatch):
+    _base_env(monkeypatch)
     monkeypatch.setenv("EMBEDDING_PROVIDER", "remote")
+    monkeypatch.setenv("RERANKER_PROVIDER", "local")
     monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
+    monkeypatch.setenv("RERANKER_API_BASE_URL", "")
+    with pytest.raises(ValueError, match="EMBEDDING_API_BASE_URL is required when EMBEDDING_PROVIDER is openai or remote"):
+        Settings(_env_file=None)
+
+
+def test_openai_provider_requires_base_url(monkeypatch):
+    _base_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "openai")
+    monkeypatch.setenv("RERANKER_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDING_API_BASE_URL", "   ")
     with pytest.raises(ValueError, match="EMBEDDING_API_BASE_URL"):
         Settings(_env_file=None)
+
+
+def test_default_providers_are_remote_and_require_both_urls(monkeypatch):
+    _base_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
+    monkeypatch.setenv("RERANKER_API_BASE_URL", " ")
+    with pytest.raises(ValueError, match="EMBEDDING_API_BASE_URL") as exc:
+        Settings(_env_file=None)
+    message = str(exc.value)
+    assert "RERANKER_API_BASE_URL" in message
+    assert "Required env vars not set: EMBEDDING_API_BASE_URL, RERANKER_API_BASE_URL" in message
+
+
+def test_default_providers_accept_urls_without_keys(monkeypatch):
+    _base_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_API_BASE_URL", "http://embed.test/v1")
+    monkeypatch.setenv("RERANKER_API_BASE_URL", "http://rerank.test/v1")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "")
+    monkeypatch.setenv("RERANKER_API_KEY", "")
+    loaded = Settings(_env_file=None)
+    assert loaded.EMBEDDING_PROVIDER == "remote"
+    assert loaded.RERANKER_PROVIDER == "api"
+    assert loaded.EMBEDDING_API_KEY == ""
+    assert loaded.RERANKER_API_KEY == ""
+
+
+@pytest.mark.parametrize("provider", ["huggingface", "local", "flagembedding"])
+def test_local_embedding_opt_in_does_not_require_remote_urls(monkeypatch, provider):
+    _base_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_PROVIDER", provider)
+    monkeypatch.setenv("RERANKER_PROVIDER", "local")
+    monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
+    monkeypatch.setenv("RERANKER_API_BASE_URL", "")
+    loaded = Settings(_env_file=None)
+    assert loaded.EMBEDDING_PROVIDER == provider
+    assert loaded.RERANKER_PROVIDER == "local"
+
+
+def test_default_import_does_not_load_torch_or_flagembedding():
+    """API 进程的默认导入链不应加载 torch、FlagEmbedding 或 sentence-transformers。"""
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    env = os.environ.copy()
+    env.update({
+        "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate",
+        "LLM_API_KEY": "test-key",
+        "EMBEDDING_PROVIDER": "remote",
+        "RERANKER_PROVIDER": "api",
+        "EMBEDDING_API_BASE_URL": "http://embed.test/v1",
+        "RERANKER_API_BASE_URL": "http://rerank.test/v1",
+        "EMBEDDING_API_KEY": "",
+        "RERANKER_API_KEY": "",
+    })
+    script = textwrap.dedent(
+        """
+        import backend.app
+        import backend.core.retriever
+        import backend.infrastructure.encoding
+        import backend.infrastructure.model_factory
+        import sys
+
+        banned = ("torch", "FlagEmbedding", "sentence_transformers", "langchain_huggingface")
+        loaded = [name for name in banned if name in sys.modules or any(mod.startswith(name + ".") for mod in sys.modules)]
+        if loaded:
+            raise SystemExit("default import loaded " + ",".join(loaded))
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

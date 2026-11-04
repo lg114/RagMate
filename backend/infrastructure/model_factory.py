@@ -3,11 +3,12 @@ import warnings
 from functools import lru_cache
 
 from langchain_openai import OpenAIEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
 
-import torch
-
-from backend.infrastructure.config import settings
+from backend.infrastructure.config import (
+    LOCAL_EMBEDDING_PROVIDERS,
+    REMOTE_EMBEDDING_PROVIDERS,
+    settings,
+)
 from backend.infrastructure.streaming_llm import create_llm
 
 
@@ -28,15 +29,24 @@ def clear_llm_cache():
 
 @lru_cache(maxsize=1)
 def get_embeddings():
-    """根据 EMBEDDING_PROVIDER 创建 Embeddings 实例（单例，只加载一次）"""
-    if settings.EMBEDDING_PROVIDER in ("openai", "remote"):
+    """根据 EMBEDDING_PROVIDER 创建 Embeddings 实例（单例，只加载一次）。
+
+    remote / openai 使用 OpenAI 兼容 HTTP，本函数不会 import torch。
+    huggingface / local / flagembedding 才在本进程加载 HuggingFace 权重。
+    入库和查询的 dense/sparse 编码走 encoding.py，不经过这里；这里给 RAGAS 等评测用。
+    """
+    if settings.EMBEDDING_PROVIDER in REMOTE_EMBEDDING_PROVIDERS:
         kwargs = {"model": settings.EMBEDDING_MODEL}
         if settings.EMBEDDING_API_KEY:
             kwargs["api_key"] = settings.EMBEDDING_API_KEY
         if settings.EMBEDDING_API_BASE_URL:
             kwargs["base_url"] = settings.EMBEDDING_API_BASE_URL
         return OpenAIEmbeddings(**kwargs)
-    elif settings.EMBEDDING_PROVIDER in ("huggingface", "local", "flagembedding"):
+    if settings.EMBEDDING_PROVIDER in LOCAL_EMBEDDING_PROVIDERS:
+        # 延迟到真正走本地嵌入时再加载，避免默认远程路径把 torch 拉进 API 进程。
+        import torch
+        from langchain_huggingface import HuggingFaceEmbeddings
+
         kwargs = {"model": settings.EMBEDDING_MODEL}
         device = settings.EMBEDDING_DEVICE
         if device == "cuda" and not torch.cuda.is_available():

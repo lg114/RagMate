@@ -16,6 +16,8 @@ class _FakeResponse:
 def enable_multi(monkeypatch):
     monkeypatch.setattr(settings, "MULTI_QUERY_ENABLED", True)
     monkeypatch.setattr(settings, "MULTI_QUERY_COUNT", 3)
+    # 这条用例桩的是本地 CrossEncoder。默认重排已是远程 HTTP，不钉住就会打到占位 URL。
+    monkeypatch.setattr(settings, "RERANKER_PROVIDER", "local")
 
 
 class TestExpandQueries:

@@ -50,6 +50,11 @@ All notable changes to this project are documented here.
   同一次失败中被中断的其他镜像（postgres / redis / milvus / attu）属级联现象，无需改动。
 
 ### Changed
+- `config.py` — 嵌入与重排默认改为远程 HTTP：`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`。
+  API 进程默认不再 import torch、FlagEmbedding 或 sentence-transformers。
+  `EMBEDDING_API_BASE_URL` 与 `RERANKER_API_BASE_URL` 在对应 provider 为远程时必填，缺失则启动失败；
+  两端密钥仍可选。本进程 BGE-M3 / CrossEncoder 改为显式 opt-in：
+  `EMBEDDING_PROVIDER=huggingface`（`local`、`flagembedding` 同义）且 `RERANKER_PROVIDER=local`。
 - `config.py` — 新增 `DEEP_AGENTS_ENABLED`，默认 `false`。
 - `core/retriever.py` — 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩的目标是
   「减少传给 LLM 的噪声」，此前作用在用于打分的小片段上，与展开后的交付内容不一致；改为在展开之后执行。

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.core import retriever
-from backend.infrastructure.config import settings
+from backend.infrastructure.config import Settings, settings
 
 
 class TestLocalProvider:
@@ -86,6 +86,17 @@ class TestApiProvider:
         ):
             retriever.score_pairs("q", ["a"])
         assert captured["auth"] is None
+
+
+def test_api_provider_requires_base_url(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "huggingface")
+    monkeypatch.setenv("RERANKER_PROVIDER", "api")
+    monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
+    monkeypatch.setenv("RERANKER_API_BASE_URL", "")
+    with pytest.raises(ValueError, match="RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api"):
+        Settings(_env_file=None)
 
 
 class TestCallSites:
