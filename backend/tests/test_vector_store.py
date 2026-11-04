@@ -1,6 +1,5 @@
-"""pgvector 混合检索的纯函数：稀疏格式、RRF、表名，以及 Milvus 迁移去重。"""
+"""pgvector 混合检索的纯函数：稀疏格式、RRF、表名。"""
 from backend.infrastructure.config import resolve_vector_table, settings
-from backend.infrastructure.migrate_from_milvus import copy_rows, identity_key, rows_to_copy
 from backend.infrastructure.vector_store import (
     SPARSE_DIM,
     apply_drop_ratio,
@@ -96,34 +95,3 @@ def test_search_sparse_applies_configured_drop_ratio(monkeypatch):
     store.search_sparse({0: 0.1, 1: 0.2, 2: 0.9, 3: 0.05}, 5)
     assert seen["q"] == "{2:0.2,3:0.9}/" + str(SPARSE_DIM)
 
-
-def test_milvus_copy_skips_rows_already_stored():
-    row = {
-        "dense": [0.0] * 1024,
-        "sparse": {0: 1.0},
-        "text": "hello",
-        "parent_text": "hello parent",
-        "metadata": {"source": "notes.txt", "chunk_index": 1, "content_hash": "abc"},
-    }
-    assert identity_key(row) == ("notes.txt", 1, "abc")
-    assert rows_to_copy({("notes.txt", 1, "abc")}, [row]) == []
-
-    class Store:
-        def __init__(self):
-            self.inserted = []
-
-        def existing_identity_keys(self, hashes):
-            return {("notes.txt", 1, "abc")}
-
-        def insert_rows(self, rows):
-            self.inserted.extend(rows)
-            return list(range(1, len(rows) + 1))
-
-    fresh = dict(row)
-    fresh["metadata"] = {"source": "other.txt", "chunk_index": 0, "content_hash": "def"}
-    store = Store()
-    stats = copy_rows(store, [row, fresh])
-    assert stats["inserted"] == 1
-    assert stats["skipped"] == 1
-    assert store.inserted[0]["source"] == "other.txt"
-    assert store.inserted[0]["parent_text"] == "hello parent"
