@@ -1,4 +1,6 @@
 """测试 agent.py 的 Deep Agent 相关逻辑。"""
+import sys
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -227,3 +229,16 @@ class TestRunAgentStreaming:
         text = "".join(run_agent_streaming([{"role": "user", "content": "问题"}], "sid"))
         assert text == "没有找到足够相关的资料。"
         assert "检索" not in text
+
+
+class TestGetAgentWithoutDeepagents:
+    """deepagents 未装时，get_agent 应报出指向 agents extra 的明确错误，而不是 ModuleNotFoundError。"""
+
+    def test_missing_deepagents_raises_helpful_error(self, monkeypatch):
+        import backend.core.agent as agent_mod
+
+        monkeypatch.setattr(agent_mod, "_agent", None)
+        monkeypatch.setitem(sys.modules, "deepagents", None)
+
+        with pytest.raises(ImportError, match=r"\[agents\]"):
+            agent_mod.get_agent()
