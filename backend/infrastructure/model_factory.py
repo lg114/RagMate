@@ -44,8 +44,14 @@ def get_embeddings():
         return OpenAIEmbeddings(**kwargs)
     if settings.EMBEDDING_PROVIDER in LOCAL_EMBEDDING_PROVIDERS:
         # 延迟到真正走本地嵌入时再加载，避免默认远程路径把 torch 拉进 API 进程。
-        import torch
-        from langchain_huggingface import HuggingFaceEmbeddings
+        try:
+            import torch
+            from langchain_huggingface import HuggingFaceEmbeddings
+        except ImportError as exc:
+            raise ImportError(
+                "Local embedding models need the 'local' extra: "
+                'pip install -e ".[local]"'
+            ) from exc
 
         kwargs = {"model": settings.EMBEDDING_MODEL}
         device = settings.EMBEDDING_DEVICE

@@ -26,8 +26,15 @@ def get_bge_m3():
 
     仅 EMBEDDING_PROVIDER 为 huggingface / local / flagembedding 时调用。
     FlagEmbedding 在函数内导入，默认远程路径不会加载它。
+    未安装本地模型 extra 时，报错会指明安装方式。
     """
-    from FlagEmbedding import BGEM3FlagModel
+    try:
+        from FlagEmbedding import BGEM3FlagModel
+    except ImportError as exc:
+        raise ImportError(
+            "Local embedding models need the 'local' extra: "
+            'pip install -e ".[local]"'
+        ) from exc
 
     device = settings.EMBEDDING_DEVICE
     use_fp16 = device == "cuda"
