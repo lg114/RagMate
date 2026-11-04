@@ -45,7 +45,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
-- **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 98-question sample with deterministic BM25. RAGAS scoring code is still in the tree and is not the CI gate.
+- **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 98-question sample with deterministic BM25. Deterministic retrieval metrics are the CI gate; there is no LLM-judge scoring.
 - **Self-hosted by design** — one Postgres with pgvector holds documents, chat, and vectors. Redis is optional and only used for shared rate limits.
 
 ---
@@ -98,7 +98,7 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
-`ragmate-eval retrieval-gate` is part of that install. The optional `.[eval]` extra only pulls in shelved RAGAS scoring. Tests and the retrieval gate do not need it.
+`ragmate-eval retrieval-gate` is part of that install. Tests and the retrieval gate need only the default install.
 
 ### 3. Configure the application
 
@@ -173,7 +173,7 @@ RagMate/
 │   ├── core/               # RAG core: retriever, agent, prompts/researcher.md
 │   ├── domain/             # ORM models, Pydantic schemas, error types
 │   ├── infrastructure/     # config, database, pgvector, optional redis, encoding, model_factory
-│   ├── eval/               # retrieval-gate plus shelved RAGAS scoring
+│   ├── eval/               # retrieval-gate and deterministic retrieval evaluation
 │   └── tests/
 └── frontend/               # Zero-build UI (对话 / 文档 / 设置), served by FastAPI at /
 ```
@@ -350,7 +350,7 @@ ragmate-eval retrieval-gate
 
 It replays the committed 98-question sample with deterministic BM25 (no pgvector query, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in [`eval/README.md`](eval/README.md). GitHub Actions runs this command after pytest. The floors were not lowered for this store change.
 
-RAGAS (`generate`, `evaluate`, `rescore`, `patch-raw`, and `ragmate-eval interactive`) is still in the tree. Install `pip install -e ".[eval]"` only if you still want that judge. It is shelved: not a CI gate, and not the number to tune retrieval against. Judge scores move when the model moves. Python 3.14 RAGAS failures are out of scope. A bare `ragmate-eval` prints this gate instead of opening the RAGAS menu.
+RAGAS judge scoring was removed: it never produced a usable baseline and had been shelved from CI and the CLI main path. The deterministic retrieval gate in `eval/` is the regression guard.
 
 ---
 
