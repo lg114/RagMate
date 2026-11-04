@@ -76,7 +76,7 @@
           <label class="visually-hidden" for="chat-textarea">问题</label>
           <textarea id="chat-textarea" rows="1" maxlength="10000" placeholder="基于已入库的文档提问" autocomplete="off"></textarea>
           <div class="composer-bar">
-            <label class="debug-toggle">
+            <label class="debug-toggle" title="开发模式：随请求返回检索轨迹">
               <input type="checkbox" id="chat-debug" data-debug-toggle>
               检索调试
             </label>
@@ -134,7 +134,7 @@
         <header class="page-head">
           <div>
             <h2>设置</h2>
-            <p>外观、检索调试和这台浏览器保存的访问令牌。</p>
+            <p>演示壳。外观、开发用检索轨迹，以及这台浏览器保存的访问令牌。检索配置在服务端冻结。</p>
           </div>
         </header>
         <div class="settings-grid">
@@ -149,7 +149,7 @@
           </section>
           <section class="card">
             <h3>检索调试</h3>
-            <p class="card-lead">打开后，下一次提问会带上 debug，并在回答下列出候选片段、分数和丢弃原因。预览是文档原文，平时保持关闭。</p>
+            <p class="card-lead">开发模式轨迹。打开后，下一次提问会带上 debug，并在回答下列出候选片段、分数和丢弃原因。预览是文档原文，演示时保持关闭。</p>
             <label class="check-line">
               <input type="checkbox" id="settings-debug" data-debug-toggle>
               <span>随请求返回检索调试</span>

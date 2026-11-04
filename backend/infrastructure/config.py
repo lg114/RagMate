@@ -70,17 +70,18 @@ class Settings(BaseSettings):
     CHUNK_SIZE_PARENT: int = Field(default=2500, gt=0)
     CHUNK_OVERLAP_PARENT: int = Field(default=300, ge=0)
 
-    # Chunking strategy for markdown:
-    #   title_path   — 按 CHUNK_SIZE 切子块，并把「H1 > H2 > H3」写入子块正文（默认；98q 上多跳更稳）
+    # Chunking strategy for markdown. Frozen at title_path (98q fused baseline).
+    #   title_path   — 按 CHUNK_SIZE 切子块，并把「H1 > H2 > H3」写入子块正文
     #   parent_child — 同切块边界，但不把标题路径写入检索正文，只放进 parent_text
+    # parent_child 只是环境变量，不是第二套策略。改它之前重跑确定性基线。
     CHUNKING_STRATEGY: str = "title_path"
 
-    # Hybrid Search + Reranking
+    # Hybrid Search + Reranking. Core stays hybrid + RRF + rerank. Do not add fusion arms.
     HYBRID_SEARCH_ENABLED: bool = True
-    # 融合：rrf=倒数排名融合（默认）；weighted=稠密/稀疏原始分加权（需归一化）
+    # 融合冻结为 rrf。weighted 只是环境变量（稠密/稀疏原始分加权），不是默认。
     FUSION_MODE: str = "rrf"
-    RRF_K: int = Field(default=60, ge=1, le=200)  # RRF 常数；越小越偏向「两边都靠前」的交集
-    FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)  # weighted 模式稠密权重，稀疏=1-该值
+    RRF_K: int = Field(default=60, ge=1, le=200)  # 冻结。RRF 常数；越小越偏向「两边都靠前」的交集
+    FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)  # 仅 weighted；稀疏=1-该值
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     # 默认 api：POST {RERANKER_API_BASE_URL}/rerank，不在本进程加载 CrossEncoder。
     RERANKER_PROVIDER: str = "api"
@@ -111,13 +112,14 @@ class Settings(BaseSettings):
 
     # Query processing
     QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
-    MULTI_QUERY_ENABLED: bool = False  # 多查询扩展：LLM 生成改写变体，多路检索后 RRF 融合（默认关，开启前应先过评测对比）
-    MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 改写变体数量（不含原始 query）
+    # 冻结为关。多查询扩展不是默认；打开前先重跑 ragmate-eval retrieval 并更新门槛。
+    MULTI_QUERY_ENABLED: bool = False
+    MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 仅开启时：改写变体数量（不含原始 query）
     QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过检索，直接回复寒暄
     # 默认一条链路：检索一次 → 生成一次 → 接地。显式打开才走 Deep Agents 工具循环。
     DEEP_AGENTS_ENABLED: bool = False
 
-    # 评测生成（evaluate / patch-raw）：短超时 + 有限重试，避免 503 干等半小时
+    # 已搁置的 RAGAS generate/evaluate：短超时 + 有限重试。retrieval-gate 不读这些值。
     EVAL_LLM_TIMEOUT: float = Field(default=60.0, gt=0)  # 单次生成 HTTP 超时（秒）
     EVAL_LLM_RETRIES: int = Field(default=2, ge=0, le=5)  # 瞬时错误额外重试次数（不含首次）
     EVAL_LLM_RETRY_BACKOFF: float = Field(default=2.0, gt=0)  # 重试间隔基数（秒），第 n 次等 n*backoff

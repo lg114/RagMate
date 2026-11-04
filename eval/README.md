@@ -1,5 +1,16 @@
 # Evaluation assets
 
+回归门禁是 `ragmate-eval retrieval-gate`。RAGAS 打分代码还在，已搁置，不是这条门禁。
+
+检索只冻结一套配置，对上
+[`retrieval-baseline-98q-titlepath-rerun.json`](reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)
+的 fused 阶段：混合检索（稠密 + 稀疏）、RRF（`FUSION_MODE=rrf`，`RRF_K=60`）、
+`CHUNKING_STRATEGY=title_path`（`CHUNK_SIZE=1000` / overlap `200`，父块 `2500` / `300`）、
+重排候选 `30`、阈值 `0.3`、`FINAL_CONTEXT_K=15`、`MULTI_QUERY_ENABLED=false`。
+加权融合、多查询、`parent_child` 只留在环境变量里，不是第二套默认。
+不要新增融合臂、不要把多查询改成默认开、不要再加切块策略。
+要改其中任何一项，先重跑 `ragmate-eval retrieval`，再按下面「有意更新基线」替换钉住的门槛。
+
 评测相关的文件分两类：本地生成的大文件不入仓，小而关键的基线入仓，
 保证仓库里的每组数字都能被追溯和复现。
 
@@ -21,13 +32,15 @@
 ## 注意
 
 - 样本量小（10 题）的结论只适用于回归对比，不外推为普遍效果。
-- 生成侧指标（faithfulness / answer relevancy / factual correctness）依赖 LLM judge，
-  解读 delta 前先量噪声带宽：用 `--score-repeats 3`，报告 `meta.score_spread` 即极差。
-- Python 3.14 注意：ragas 0.4.3 的打分超时（`asyncio.wait_for`）在 3.14 下会让全部
-  打分任务秒灭（`Timeout should be used inside a task`），`compute_metrics` 因此传
-  `RunConfig(timeout=None)` 绕开；单次调用的超时由 HTTP 客户端默认兜底。3.12 不受影响。
+- 诚实的回归数字是确定性检索指标（Recall@k / nDCG），由 `retrieval-gate` 守住。
+  faithfulness / answer relevancy / factual correctness 依赖 LLM judge，已随 RAGAS 搁置。
 
-## 生成与打分分离（P1）
+## 已搁置：RAGAS
+
+`generate` / `evaluate` / `rescore` / `patch-raw` / `interactive` 仍可调用，
+需要 `pip install -e ".[eval]"`。它们不在 CI 上，也不用来决定检索默认值。
+Python 3.14 上的 RAGAS 问题不处理。`metrics.py` 里已有的
+`RunConfig(timeout=None)` 保持原样，不再扩展。
 
 生成结果是不可变 artifact；打分只读它，不再跑检索/生成：
 
@@ -79,7 +92,7 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
 
 ## CI 检索质量门禁
 
-GitHub Actions（`.github/workflows/ci.yml`）在 pytest 之后跑：
+这是仓库认的回归门禁。GitHub Actions（`.github/workflows/ci.yml`）在 pytest 之后只跑它，不跑 RAGAS：
 
 ```bash
 ragmate-eval retrieval-gate
@@ -143,15 +156,17 @@ python -m backend.eval.fusion_sweep \
   --checkpoint eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.retrieval.json
 ```
 
-生产开关：`FUSION_MODE`（`rrf`|`weighted`）、`RRF_K`（默认 60）、`FUSION_DENSE_WEIGHT`。
-扫完若相对 k=60 没有稳定题型收益，保持默认，避免 98 题过拟合。
+生产开关已冻结：`FUSION_MODE=rrf`、`RRF_K=60`。`weighted` 和 `FUSION_DENSE_WEIGHT`
+只是环境变量，扫参结果不能直接改默认。不要新增融合臂。若某次扫参真要替换默认，
+按上面「有意更新基线」重跑确定性检索并改门槛，避免 98 题过拟合。
 
-## 切块策略（title_path 默认）
+## 切块策略（冻结为 title_path）
 
-Markdown 默认 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路径: H1 > H2 > H3`，
-`CHUNK_SIZE` 与 `parent_child` 对齐，98 题 gold 三元组可复用。对比数据见
+Markdown 冻结为 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路径: H1 > H2 > H3`，
+`CHUNK_SIZE` 与历史上的 `parent_child` 边界对齐，98 题 gold 三元组可复用。
+`parent_child` 只是环境变量，不是第二套策略。对比数据见
 `reports/baseline/retrieval-baseline-98q-titlepath-compare.md`。改策略后必须重建
-Milvus 集合，否则检索正文与标注切块不一致。
+Milvus 集合并重跑确定性基线，否则检索正文与标注切块不一致。
 
 ## 两层打分：排序层 vs 生产交付（不重跑检索）
 

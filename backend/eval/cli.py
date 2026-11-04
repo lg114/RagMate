@@ -1,4 +1,4 @@
-"""评估 CLI 入口：RAGAS 打分与确定性检索评测。"""
+"""评估 CLI：回归门禁是 retrieval-gate。RAGAS 打分命令仍在，已搁置。"""
 import argparse
 import json
 import logging
@@ -698,18 +698,23 @@ def cmd_retrieval_gate(args):
         sys.exit(1)
 
 
-def main():
-    # No arguments → interactive menu
-    if len(sys.argv) == 1:
-        from .interactive import interactive_menu
-        interactive_menu()
-        return
+_BARE_NOTE = (
+    "\nRegression guard: ragmate-eval retrieval-gate\n"
+    "RAGAS commands (generate, evaluate, rescore, patch-raw, interactive) are shelved. "
+    "They are not the CI gate. Python 3.14 RAGAS issues are out of scope.\n"
+)
 
-    # With arguments → CLI mode
-    parser = argparse.ArgumentParser(description="RAGAS evaluation for RagMate")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "RagMate retrieval regression CLI. The gate is retrieval-gate. "
+            "RAGAS scoring commands are shelved."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    gen_parser = subparsers.add_parser("generate", help="Generate test set from documents")
+    gen_parser = subparsers.add_parser("generate", help="[shelved] RAGAS test-set generation")
     gen_parser.add_argument("--size", type=int, default=50, help="Number of test cases to generate")
     gen_parser.add_argument("--max-docs", type=int, default=None, help="Max documents to load")
     gen_parser.add_argument("--output", type=str, default=str(DEFAULT_TESTSETS_DIR / "testset.json"), help="Output JSON path")
@@ -718,7 +723,7 @@ def main():
 
     eval_parser = subparsers.add_parser(
         "evaluate",
-        help="Run RAG pipeline; use --generate-only to stop after immutable raw checkpoint",
+        help="[shelved] RAGAS judge scoring; not the CI gate",
     )
     eval_parser.add_argument("--testset", type=str, required=True, help="Test set JSON path")
     eval_parser.add_argument("--report", type=str, default=None, help="Report output path")
@@ -749,7 +754,7 @@ def main():
 
     patch_parser = subparsers.add_parser(
         "patch-raw",
-        help="Re-generate only questions missing from an existing .raw.json (after 503 gaps)",
+        help="[shelved] Fill RAGAS raw-checkpoint gaps",
     )
     patch_parser.add_argument(
         "--raw", type=str, required=True,
@@ -766,7 +771,7 @@ def main():
 
     rescore_parser = subparsers.add_parser(
         "rescore",
-        help="Score-only from a raw checkpoint or report (never re-runs retrieve/generate)",
+        help="[shelved] RAGAS score-only from a raw checkpoint",
     )
     rescore_parser.add_argument(
         "--report", type=str, required=True,
@@ -809,7 +814,7 @@ def main():
 
     gate_parser = subparsers.add_parser(
         "retrieval-gate",
-        help="CI gate: lexical replay of the sample set vs pinned Recall@k / nDCG floors",
+        help="Regression guard: lexical replay vs pinned Recall@k / nDCG floors",
     )
     gate_parser.add_argument(
         "--testset", type=str, default=None,
@@ -875,6 +880,16 @@ def main():
         help="Output JSON path (default: <checkpoint-stem>-cutoff.json)",
     )
 
+    subparsers.add_parser(
+        "interactive",
+        help="[shelved] RAGAS interactive menu",
+    )
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        print(_BARE_NOTE)
+        return
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -895,3 +910,6 @@ def main():
         cmd_delivery(args)
     elif args.command == "cutoff":
         cmd_cutoff(args)
+    elif args.command == "interactive":
+        from .interactive import interactive_menu
+        interactive_menu()

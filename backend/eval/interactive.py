@@ -142,7 +142,8 @@ def _menu_reports():
 def interactive_menu():
     """Main interactive menu loop."""
     while True:
-        print("\n=== RagMate RAGAS 评估工具 ===\n")
+        print("\n=== RagMate RAGAS 评估工具（已搁置，不是回归门禁）===\n")
+        print("回归门禁是 ragmate-eval retrieval-gate。下面的菜单仍调用 RAGAS，不在 CI 上。\n")
         print("  1. 生成测试集")
         print("  2. 运行评估")
         print("  3. 查看历史报告")
