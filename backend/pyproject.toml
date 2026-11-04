@@ -35,6 +35,10 @@ dependencies = [
     "xlrd>=2.0.0",
     # ── Configuration ──
     "pydantic-settings>=2.0.0",
+    # ── CLI / progress ──
+    # eval/cli.py 与 eval/retrieval_eval.py 在顶层 import tqdm，测试也经 backend.eval 导入它，
+    # 因此必须是主依赖：只装 .[test] 的 CI 环境也需要它，不能只放在 eval extra 里。
+    "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +57,6 @@ local = [
 # 钉在 0.3.x（见上方注释）。不要单独放宽它，否则残留的 ragas 导入会 ImportError。
 eval = [
     "ragas>=0.2.0",
-    "tqdm>=4.65.0",
     "pillow>=10.0",
 ]
 test = [
