@@ -107,10 +107,9 @@ class TestCallSites:
         assert [c["text"] for c in scored] == ["乙", "丙", "甲"]
         assert top == 0.9
 
-    def test_compression_failure_keeps_chunk_unchanged(self, monkeypatch):
-        monkeypatch.setattr(settings, "CONTEXTUAL_COMPRESSION", True)
-        monkeypatch.setattr(settings, "COMPRESSION_MIN_CHARS", 10)
-        long_text = "第一句话讲背景。第二句话是核心内容，非常相关。第三句话是无关的闲聊内容需要被压缩处理掉才行啊。"
+    def test_compression_failure_keeps_chunk_unchanged(self):
+        block = "第一句话讲背景。第二句话是核心内容，非常相关。第三句话是无关的闲聊内容需要被压缩处理掉才行啊。"
+        long_text = block * 7  # 超过 300 字压缩门槛，压缩必须真的跑打分
         candidates = [{"text": long_text, "source": "a.md"}]
         with patch.object(retriever, "score_pairs", side_effect=RuntimeError("api down")):
             result = retriever._compress_chunks("核心", candidates)

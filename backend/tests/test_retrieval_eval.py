@@ -73,15 +73,14 @@ def test_run_stages_dense_sparse_fused_use_same_vectors(monkeypatch):
     assert [kind for kind, _ in client.calls] == ["dense", "sparse", "hybrid"]
 
 
-def test_do_search_dense_branch_skips_sparse(override_settings):
-    """HYBRID_SEARCH_ENABLED 关闭时生产路径只做稠密检索。"""
+def test_do_search_always_uses_hybrid():
+    """生产路径始终走混合检索，不再有稠密-only 分支。"""
     from backend.core.retriever import _do_search
 
-    override_settings(HYBRID_SEARCH_ENABLED=False)
     client = _FakeClient(HITS)
     results = _do_search(client, [0.1], {1: 0.2}, over_fetch=10)
     assert results == [HITS]
-    assert [kind for kind, _ in client.calls] == ["dense"]
+    assert [kind for kind, _ in client.calls] == ["hybrid"]
 
 
 def test_run_stages_reranked_reorders_by_score_pairs(monkeypatch):

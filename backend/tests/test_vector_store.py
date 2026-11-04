@@ -60,19 +60,10 @@ def test_drop_ratio_removes_smallest_weights_and_keeps_one():
 def test_fuse_hits_rrf_k60_prefers_the_shared_chunk():
     dense = [_hit(1, 0.2), _hit(2, 0.9)]
     sparse = [_hit(3, 0.2), _hit(2, 0.9)]
-    fused = fuse_hits(dense, sparse, limit=3, mode="rrf", rrf_k=60, dense_weight=0.5)
+    fused = fuse_hits(dense, sparse, limit=3, rrf_k=60)
     assert [hit["id"] for hit in fused][0] == 2
     # id 2 is rank 1 on both lists (0-based) → 1/62 + 1/62
     assert fused[0]["distance"] == 1.0 / 62 + 1.0 / 62
-
-
-def test_fuse_hits_weighted_uses_raw_inner_product():
-    dense = [_hit(1, 1.0), _hit(2, 0.0)]
-    sparse = [_hit(2, 1.0), _hit(1, 0.0)]
-    dense_heavy = fuse_hits(dense, sparse, limit=2, mode="weighted", rrf_k=60, dense_weight=0.9)
-    sparse_heavy = fuse_hits(dense, sparse, limit=2, mode="weighted", rrf_k=60, dense_weight=0.1)
-    assert dense_heavy[0]["id"] == 1
-    assert sparse_heavy[0]["id"] == 2
 
 
 def test_search_sql_uses_inner_product():

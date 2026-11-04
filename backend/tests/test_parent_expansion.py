@@ -43,18 +43,14 @@ class TestDoSearchRequestsParentText:
             assert "parent_text" in sql
             assert "text" in sql
 
-    def test_hybrid_and_dense_only_use_those_searches(self, override_settings):
+    def test_do_search_always_uses_hybrid(self):
         store = MagicMock()
         store.search_hybrid.return_value = []
         store.search_dense.return_value = []
 
-        override_settings(HYBRID_SEARCH_ENABLED=True)
         assert _do_search(store, [0.1], {1: 0.2}, over_fetch=5) == [[]]
         store.search_hybrid.assert_called_once()
-
-        override_settings(HYBRID_SEARCH_ENABLED=False)
-        assert _do_search(store, [0.1], {1: 0.2}, over_fetch=5) == [[]]
-        store.search_dense.assert_called_once()
+        store.search_dense.assert_not_called()
 
 
 # ── 候选必须同时保留小片段与父片段 ────────────────────────────────────────────
