@@ -1,6 +1,6 @@
 # Evaluation assets
 
-回归门禁是 `ragmate-eval retrieval-gate`。RAGAS 打分代码还在，已搁置，不是这条门禁。
+回归门禁是 `ragmate-eval retrieval-gate`。RAGAS 打分已删除；确定性检索指标是唯一的门禁口径。
 
 检索只冻结一套配置，对上
 [`retrieval-baseline-98q-titlepath-rerun.json`](reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)
@@ -33,41 +33,7 @@
 
 - 样本量小（10 题）的结论只适用于回归对比，不外推为普遍效果。
 - 诚实的回归数字是确定性检索指标（Recall@k / nDCG），由 `retrieval-gate` 守住。
-  faithfulness / answer relevancy / factual correctness 依赖 LLM judge，已随 RAGAS 搁置。
-
-## 已搁置：RAGAS
-
-`generate` / `evaluate` / `rescore` / `patch-raw` / `interactive` 仍可调用，
-需要 `pip install -e ".[eval]"`。它们不在 CI 上，也不用来决定检索默认值。
-Python 3.14 上的 RAGAS 问题不处理。`metrics.py` 里已有的
-`RunConfig(timeout=None)` 保持原样，不再扩展。
-
-生成结果是不可变 artifact；打分只读它，不再跑检索/生成：
-
-```bash
-# 1) 只生成 → <report>.raw.json（已存在则拒绝覆盖，除非 --force-raw）
-ragmate-eval evaluate --testset eval/testsets/sample/testset.json \
-  --report eval/reports/run.json --generate-only
-
-# 2) 只打分（默认 temperature=0；解析失败整表重试；可选 3 遍看噪声）
-ragmate-eval rescore --report eval/reports/run.raw.json \
-  --output eval/reports/run.json \
-  --judge-temperature 0 --parse-retries 2 --score-repeats 3
-```
-
-- raw meta 钉死：`generator_model`、answer prompt sha、`judge_model` /
-  `judge_temperature` / metric pack sha。
-- 解析失败经 `--parse-retries` 仍空的格子 → `status: unscored`，不进均值；
-  `meta.n_scored` / `n_partial` / `n_unscored` 可查。
-- `rescore` 读 `.raw.json` 时默认写到同名 `.json`，**不会改写 raw**。
-- 旧的一键 `evaluate`（不带 `--generate-only`）仍可用：先落 raw 再打分。
-- 生成侧 `EVAL_LLM_TIMEOUT`（默认 60s）+ `EVAL_LLM_RETRIES`：503/429/超时有限重试，
-  避免干等半小时。若仍有缺口：
-
-```bash
-ragmate-eval patch-raw --raw eval/reports/run.raw.json \
-  --testset eval/testsets/sample/testset.json
-```
+  faithfulness / answer relevancy / factual correctness 依赖 LLM judge，已随 RAGAS 删除，不再是评测口径。
 
 ## 确定性检索评测（tier-1，不经过 LLM）
 
@@ -92,7 +58,7 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
 
 ## CI 检索质量门禁
 
-这是仓库认的回归门禁。GitHub Actions（`.github/workflows/ci.yml`）在 pytest 之后只跑它，不跑 RAGAS：
+这是仓库认的回归门禁。GitHub Actions（`.github/workflows/ci.yml`）在 pytest 之后只跑它，不跑任何 LLM judge：
 
 ```bash
 ragmate-eval retrieval-gate
@@ -149,12 +115,7 @@ reranked 那一臂要 cross-encoder，词法重放对不齐）。余量 `0.015`�
 
 ## 融合调参（P2，离线扫参）
 
-用已有 `.retrieval.json` 的 dense/sparse 排序重算 RRF / 加权融合，不重跑检索：
-
-```bash
-python -m backend.eval.fusion_sweep \
-  --checkpoint eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.retrieval.json
-```
+扫参脚本已删除；扫参结论见 [`retrieval-baseline-98q-failures.md`](reports/baseline/retrieval-baseline-98q-failures.md)（融合调参一点）与仓库根目录 `RETRIEVAL_EXPERIMENTS.md`。
 
 生产开关已冻结：`FUSION_MODE=rrf`、`RRF_K=60`。`weighted` 和 `FUSION_DENSE_WEIGHT`
 只是环境变量，扫参结果不能直接改默认。不要新增融合臂。若某次扫参真要替换默认，
@@ -181,10 +142,7 @@ ragmate-eval delivery \
 若报告里 `parent_text == child` 接近 100%，说明当前 `CHUNK_SIZE` 下父展开是空操作；
 要验「用 parent 正文重排是否稀释」需另建更小切块集合（如 c300）：
 
-```bash
-python -m backend.eval.run_parent_rerank_experiment
-# → eval/reports/baseline/retrieval-baseline-98q-parent-rerank.md
-```
+对比数据见已入库报告 [`retrieval-baseline-98q-parent-rerank.md`](reports/baseline/retrieval-baseline-98q-parent-rerank.md)；该实验脚本已删除。
 
 ## 最终 k 截断模拟（不重跑检索）
 

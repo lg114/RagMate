@@ -45,7 +45,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。只有 `DEEP_AGENTS_ENABLED=true` 才走 Deep Agents。
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
-- **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 98 题样本。RAGAS 打分代码仍在仓库里，但不是 CI 门禁。
+- **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 98 题样本。确定性检索指标是 CI 门禁，没有 LLM judge 打分。
 - **自托管设计** — 一套带 pgvector 的 Postgres 存放文档、会话和向量。Redis 可选，只用于多进程共享限流。
 
 ---
@@ -98,7 +98,7 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
-`ragmate-eval retrieval-gate` 随上面的安装一起提供。可选的 `.[eval]` 只拉入已搁置的 RAGAS 打分。测试和检索门禁不需要它。
+`ragmate-eval retrieval-gate` 随上面的安装一起提供。测试和检索门禁只需要默认安装。
 
 ### 3. 配置环境变量
 
@@ -173,7 +173,7 @@ RagMate/
 │   ├── core/               # RAG 内核：retriever、agent、prompts/researcher.md
 │   ├── domain/             # ORM 模型、Pydantic schema、错误类型
 │   ├── infrastructure/     # config、database、pgvector、可选 redis、encoding、model_factory
-│   ├── eval/               # retrieval-gate，以及已搁置的 RAGAS 打分
+│   ├── eval/               # retrieval-gate 与确定性检索评测
 │   └── tests/
 └── frontend/               # 零构建界面（对话 / 文档 / 设置），由 FastAPI 挂在 /
 ```
@@ -350,7 +350,7 @@ ragmate-eval retrieval-gate
 
 它对已入库的 98 题样本做确定性 BM25 重放（不查 pgvector、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 [`eval/README.md`](eval/README.md)。GitHub Actions 在 pytest 之后运行这条命令。这次换向量库没有降低门槛。
 
-RAGAS（`generate`、`evaluate`、`rescore`、`patch-raw`，以及 `ragmate-eval interactive`）仍留在仓库里。只有还想用这个 judge 时才安装 `pip install -e ".[eval]"`。它已搁置：不是 CI 门禁，也不用来调检索。judge 分数会跟着模型漂移。Python 3.14 上的 RAGAS 问题不在范围内。不带参数的 `ragmate-eval` 会打印这条门禁，不再进入 RAGAS 菜单。
+RAGAS judge 打分已删除：它始终没跑出可用的基线，此前已从 CI 和 CLI 主路径搁置。确定性检索门禁（`eval/`）是回归守门员。
 
 ---
 

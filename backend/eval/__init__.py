@@ -1,4 +1,4 @@
-"""eval 包：检索回归门禁，以及已搁置的 RAGAS 打分。"""
+"""eval 包：确定性检索评测与回归门禁。"""
 from .cli import main
 
 __all__ = ["main"]
