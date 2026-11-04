@@ -19,7 +19,7 @@ class ChatOpenAICompatible(ChatOpenAI):
     """
 
     def __init__(self, **kwargs):
-        # 所有 LLM 实例（含 RAGAS 的 EvalLLM）都经过这里，
+        # 所有 LLM 实例都经过这里，
         # 因此在这一处注入即可覆盖全部调用方，无需逐个改造。
         from backend.infrastructure.config import settings
 

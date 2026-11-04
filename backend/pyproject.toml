@@ -48,15 +48,6 @@ local = [
 agents = [
     "deepagents>=0.5.0",
 ]
-# RAGAS 已搁置（不在 CI 上，也不追 Python 3.14）。ragas 在 import 阶段硬依赖
-#     from langchain_community.chat_models.vertexai import ChatVertexAI
-# 该模块在 langchain-community 0.4.0 中被移除，因此 eval extra 里把
-# langchain-community 钉在 0.3.x。不要单独放宽它，否则 ragas 导入会 ImportError。
-# 主依赖不再需要 langchain-community：文档加载已改为直接调 pypdf/docx2txt。
-eval = [
-    "ragas>=0.2.0",
-    "langchain-community>=0.3.31,<0.4.0",
-]
 test = [
     "pytest>=8.0",
 ]

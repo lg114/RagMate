@@ -1,5 +1,4 @@
 """评估工具函数。"""
-import math
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -13,10 +12,3 @@ def resolve_path(p: str) -> Path:
     if path.is_absolute():
         return path
     return PROJECT_ROOT / path
-
-
-def clean_score(value) -> float | None:
-    """Convert NaN/Inf to None for JSON serialization."""
-    if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
-        return None
-    return float(value)

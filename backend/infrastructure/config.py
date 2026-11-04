@@ -132,10 +132,6 @@ class Settings(BaseSettings):
     # 默认一条链路：检索一次 → 生成一次 → 接地。显式打开才走 Deep Agents 工具循环。
     DEEP_AGENTS_ENABLED: bool = False
 
-    # 已搁置的 RAGAS generate/evaluate：短超时 + 有限重试。retrieval-gate 不读这些值。
-    EVAL_LLM_TIMEOUT: float = Field(default=60.0, gt=0)  # 单次生成 HTTP 超时（秒）
-    EVAL_LLM_RETRIES: int = Field(default=2, ge=0, le=5)  # 瞬时错误额外重试次数（不含首次）
-    EVAL_LLM_RETRY_BACKOFF: float = Field(default=2.0, gt=0)  # 重试间隔基数（秒），第 n 次等 n*backoff
 
     # Agent
     AGENT_RECURSION_LIMIT: int = Field(default=30, gt=0)

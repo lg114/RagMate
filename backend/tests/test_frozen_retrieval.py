@@ -30,10 +30,11 @@ def test_bare_eval_cli_points_at_retrieval_gate(capsys, monkeypatch):
     cli.main()
     out = capsys.readouterr().out
     assert "retrieval-gate" in out
-    assert "shelved" in out.lower()
+    assert "ragas" not in out.lower()
+    assert "shelved" not in out.lower()
 
 
-def test_help_marks_ragas_commands_shelved(capsys, monkeypatch):
+def test_help_lists_only_deterministic_commands(capsys, monkeypatch):
     from backend.eval import cli
 
     monkeypatch.setattr(sys, "argv", ["ragmate-eval", "--help"])
@@ -41,5 +42,6 @@ def test_help_marks_ragas_commands_shelved(capsys, monkeypatch):
         cli.main()
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "retrieval-gate" in out
-    assert "[shelved]" in out
+    assert "{retrieval,check-gold,retrieval-gate,delivery,cutoff}" in out
+    assert "[shelved]" not in out
+    assert "ragas" not in out.lower()
