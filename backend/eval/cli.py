@@ -632,7 +632,7 @@ def cmd_check_gold(args):
     Schema errors fail fast (annotation incomplete). The inventory check
     reproduces chunking from the corpus directory with the real pipeline
     code and requires every gold triple to exist there. --live additionally
-    requires every gold triple to exist in the Milvus collection.
+    requires every gold triple to exist in the pgvector table.
     """
     testset_path = resolve_path(args.testset)
     if not testset_path.exists():
@@ -677,11 +677,11 @@ def cmd_check_gold(args):
             print(f"Error: live index check failed: {e}")
             sys.exit(1)
         if missing:
-            print(f"Live index check: {len(missing)} gold chunk(s) missing from Milvus:")
+            print(f"Live index check: {len(missing)} gold chunk(s) missing from pgvector:")
             for item in missing:
                 print(f"  - {item}")
             sys.exit(1)
-        print("Live index check OK: every gold chunk exists in Milvus.")
+        print("Live index check OK: every gold chunk exists in pgvector.")
 
 
 def cmd_retrieval_gate(args):
@@ -810,7 +810,7 @@ def main():
     check_gold_parser = subparsers.add_parser("check-gold", help="Validate golden set gold chunk annotations")
     check_gold_parser.add_argument("--testset", type=str, required=True, help="Golden test set JSON path")
     check_gold_parser.add_argument("--corpus", type=str, default="eval/testsets/sample/corpus", help="Corpus directory used to reproduce chunking")
-    check_gold_parser.add_argument("--live", action="store_true", help="Also verify gold chunks exist in the live Milvus index")
+    check_gold_parser.add_argument("--live", action="store_true", help="Also verify gold chunks exist in the live pgvector table")
 
     gate_parser = subparsers.add_parser(
         "retrieval-gate",
@@ -852,7 +852,7 @@ def main():
     )
     delivery_parser.add_argument(
         "--no-parents", action="store_true",
-        help="Do not load parent_text from Milvus (skip parent==child stats)",
+        help="Do not load parent_text from pgvector (skip parent==child stats)",
     )
 
     cutoff_parser = subparsers.add_parser(

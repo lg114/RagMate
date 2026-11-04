@@ -56,12 +56,11 @@ def _topk_overlap(a: list[tuple], b: list[tuple], k: int) -> float:
 
 def main() -> None:
     from backend.infrastructure.config import settings
-    from backend.infrastructure.milvus import reset_collection_loaded_flag
+    from backend.infrastructure.vector_store import PgVectorStore, init_vector_store, reset_vector_store_cache
     from backend.eval.corpus_ingest import ingest_corpus_to_collection
     from backend.eval.retrieval_eval import _hit_entity, _search_fused, load_golden_testset
     from backend.core.retriever import score_pairs
     from backend.infrastructure.encoding import encode_query
-    from backend.infrastructure.milvus import get_milvus_client, init_milvus
 
     cases = load_golden_testset(TESTSET)
     answerable = [c for c in cases if c.get("gold_chunks")]
@@ -69,26 +68,21 @@ def main() -> None:
     original = {
         "CHUNK_SIZE": settings.CHUNK_SIZE,
         "CHUNKING_STRATEGY": settings.CHUNKING_STRATEGY,
-        "MILVUS_COLLECTION": settings.MILVUS_COLLECTION,
+        "VECTOR_TABLE": settings.VECTOR_TABLE,
     }
     settings.CHUNK_SIZE = CHILD_CHUNK
     settings.CHUNKING_STRATEGY = "title_path"
-    settings.MILVUS_COLLECTION = COLLECTION
+    settings.VECTOR_TABLE = COLLECTION
 
     print(f"=== 1) Ingest corpus CHUNK_SIZE={CHILD_CHUNK} → {COLLECTION}")
     info = ingest_corpus_to_collection(str(CORPUS), COLLECTION)
     print(json.dumps(info, ensure_ascii=False, indent=2))
-    reset_collection_loaded_flag()
-    settings.MILVUS_COLLECTION = COLLECTION
+    reset_vector_store_cache()
+    settings.VECTOR_TABLE = COLLECTION
 
-    init_milvus()
-    client = get_milvus_client()
-    rows = client.query(
-        collection_name=COLLECTION,
-        filter="",
-        output_fields=["text", "parent_text", "metadata"],
-        limit=16384,
-    )
+    init_vector_store()
+    store = PgVectorStore(COLLECTION)
+    rows = store.fetch_chunks(limit=16384)
     ratios = []
     identical = 0
     for row in rows:
@@ -120,7 +114,7 @@ def main() -> None:
     for tc in tqdm(answerable, desc="parent-rerank", unit="q"):
         q = tc["user_input"]
         dense, sparse = encode_query(q)
-        hits = _search_fused(client, dense, sparse, over_fetch)[0]
+        hits = _search_fused(store, dense, sparse, over_fetch)[0]
 
         cands = []
         for hit in hits:
@@ -218,7 +212,7 @@ def main() -> None:
 
     for k, v in original.items():
         setattr(settings, k, v)
-    reset_collection_loaded_flag()
+    reset_vector_store_cache()
 
 
 if __name__ == "__main__":

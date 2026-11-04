@@ -22,7 +22,7 @@ BASELINE_CP = ROOT / "eval" / "reports" / "baseline" / "retrieval-baseline-98q.r
 
 def main() -> None:
     from backend.infrastructure.config import settings
-    from backend.infrastructure.milvus import reset_collection_loaded_flag
+    from backend.infrastructure.vector_store import reset_vector_store_cache
     from backend.eval.corpus_ingest import ingest_corpus_to_collection
     from backend.eval.retrieval_eval import (
         build_retrieval_report,
@@ -39,8 +39,8 @@ def main() -> None:
 
     skip_ingest = "--skip-ingest" in sys.argv
     settings.CHUNKING_STRATEGY = "title_path"
-    settings.MILVUS_COLLECTION = COLLECTION
-    reset_collection_loaded_flag()
+    settings.VECTOR_TABLE = COLLECTION
+    reset_vector_store_cache()
     if skip_ingest:
         print("=== 1) Skip ingest (--skip-ingest); using existing", COLLECTION)
     else:
@@ -52,8 +52,8 @@ def main() -> None:
             sys.exit(1)
 
     print("\n=== 2) check-gold --live (same testset; chunk ids align) ===")
-    settings.MILVUS_COLLECTION = COLLECTION
-    reset_collection_loaded_flag()
+    settings.VECTOR_TABLE = COLLECTION
+    reset_vector_store_cache()
     cases = load_golden_testset(TESTSET)
     missing = verify_gold_in_index(cases)
     if missing:
@@ -76,8 +76,8 @@ def main() -> None:
     )
     manifest["report_path"] = str(REPORT)
     manifest["retrieval_config"]["CHUNKING_STRATEGY"] = settings.CHUNKING_STRATEGY
-    manifest["retrieval_config"]["MILVUS_COLLECTION"] = settings.MILVUS_COLLECTION
-    reset_collection_loaded_flag()
+    manifest["retrieval_config"]["VECTOR_TABLE"] = settings.VECTOR_TABLE
+    reset_vector_store_cache()
     result = run_retrieval_eval(cases, stages, 50, 1, ks, manifest)
     cp_path = write_retrieval_checkpoint(result["checkpoint"], REPORT)
     report = build_retrieval_report(manifest, result["evaluations"], cp_path, stages)
@@ -120,8 +120,8 @@ def main() -> None:
 
     # Restore defaults so interactive shells aren't left on the experiment collection
     settings.CHUNKING_STRATEGY = "parent_child"
-    settings.MILVUS_COLLECTION = "ragmate_docs"
-    reset_collection_loaded_flag()
+    settings.VECTOR_TABLE = "ragmate_docs"
+    reset_vector_store_cache()
     print("\nDone. Reports:", REPORT, cutoff_path)
 
 

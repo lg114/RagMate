@@ -17,14 +17,12 @@ import json
 import logging
 from pathlib import Path
 
-from pymilvus import AnnSearchRequest
 from tqdm import tqdm
 
-from backend.core.fusion import make_milvus_ranker
 from backend.core.retriever import score_pairs
 from backend.infrastructure.config import settings
 from backend.infrastructure.encoding import encode_query
-from backend.infrastructure.milvus import init_milvus
+from backend.infrastructure.vector_store import init_vector_store
 
 from .deterministic_metrics import evaluate_questions, metric_spread, normalize_key
 from .manifest import build_manifest, diff_manifests
@@ -34,9 +32,9 @@ logger = logging.getLogger("ragmate")
 STAGES = ("dense", "sparse", "fused", "reranked")
 
 SCORE_KINDS = {
-    "dense": "milvus IP distance on dense field",
-    "sparse": "milvus IP distance on sparse field",
-    "fused": "RRF fusion score from hybrid_search",
+    "dense": "pgvector inner product on dense vector",
+    "sparse": "pgvector inner product on sparsevec",
+    "fused": "RRF fusion score (default k=60) of dense and sparse ranks",
     "reranked": "reranker sigmoid probability on child chunk text",
 }
 
@@ -58,7 +56,7 @@ def _hit_distance(hit):
 
 
 def _extract_stage_records(results) -> list[dict]:
-    """把 Milvus 返回的一页结果转成阶段记录（含小片段原文，供重排用）。"""
+    """把一页检索结果转成阶段记录（含小片段原文，供重排用）。"""
     records = []
     for rank, hit in enumerate(results[0]):
         entity = _hit_entity(hit)
@@ -76,59 +74,23 @@ def _extract_stage_records(results) -> list[dict]:
     return records
 
 
-def _search_dense(client, dense_vec, over_fetch):
-    # NOTE: MilvusClient.search takes the params as `search_params`, not
-    # `param` — it forwards `param=search_params` to the gRPC handler
-    # itself, so a `param=` kwarg here arrives twice and raises
-    # "got multiple values for keyword argument 'param'".
-    return client.search(
-        collection_name=settings.MILVUS_COLLECTION,
-        data=[dense_vec],
-        anns_field="dense",
-        search_params={"metric_type": "IP", "params": {}},
-        limit=over_fetch,
-        output_fields=["text", "parent_text", "metadata"],
-    )
+def _search_dense(store, dense_vec, over_fetch):
+    return [store.search_dense(dense_vec, over_fetch)]
 
 
-def _search_sparse(client, sparse_vec, over_fetch):
-    return client.search(
-        collection_name=settings.MILVUS_COLLECTION,
-        data=[sparse_vec],
-        anns_field="sparse",
-        search_params={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
-        limit=over_fetch,
-        output_fields=["text", "parent_text", "metadata"],
-    )
+def _search_sparse(store, sparse_vec, over_fetch):
+    return [store.search_sparse(sparse_vec, over_fetch)]
 
 
-def _search_fused(client, dense_vec, sparse_vec, over_fetch):
+def _search_fused(store, dense_vec, sparse_vec, over_fetch):
     """混合检索 + RRF：与 retriever._do_search 的混合分支同一行为。
 
     HYBRID_SEARCH_ENABLED 关闭时退化为 dense 检索（与生产路径一致，
     manifest 里记了该开关，fused==dense 时一看便知）。
     """
     if not settings.HYBRID_SEARCH_ENABLED:
-        return _search_dense(client, dense_vec, over_fetch)
-    dense_req = AnnSearchRequest(
-        data=[dense_vec],
-        anns_field="dense",
-        param={"metric_type": "IP", "params": {}},
-        limit=over_fetch,
-    )
-    sparse_req = AnnSearchRequest(
-        data=[sparse_vec],
-        anns_field="sparse",
-        param={"metric_type": "IP", "params": {"drop_ratio_search": settings.DROP_RATIO_SEARCH}},
-        limit=over_fetch,
-    )
-    return client.hybrid_search(
-        collection_name=settings.MILVUS_COLLECTION,
-        reqs=[dense_req, sparse_req],
-        ranker=make_milvus_ranker(),
-        limit=over_fetch,
-        output_fields=["text", "parent_text", "metadata"],
-    )
+        return _search_dense(store, dense_vec, over_fetch)
+    return [store.search_hybrid(dense_vec, sparse_vec, over_fetch)]
 
 
 def run_stages(client, question: str, stages, over_fetch: int) -> dict:
@@ -225,7 +187,7 @@ def build_chunk_inventory(corpus_dir) -> dict:
     """用真实入库切分逻辑，从语料目录复现 chunk 清单。
 
     返回 {(source basename, chunk_index): chunk text}。只复现切分，不写
-    Milvus、不碰数据库；入库的状态上报（Redis）在离线复现时是噪音，
+    向量库、不碰数据库；入库的状态上报在离线复现时是噪音，
     这里把它换成空操作——复现的是切分结果，不是入库流程。
     """
     from backend.application.ingest import pipeline as ingest_pipeline
@@ -266,14 +228,14 @@ def verify_gold_in_inventory(cases: list[dict], inventory: dict) -> list[str]:
 
 
 def verify_gold_in_index(cases: list[dict]) -> list[str]:
-    """gold 标注的每个三元组都必须在 live Milvus 索引里（--live 校验）。
+    """gold 标注的每个三元组都必须在 pgvector 表里（--live 校验）。
 
-    只查 metadata 是否存在，不取向量；索引不可达时抛错——live 校验的
-    意义正在于确认标注与线上索引一致，不可达不能算通过。
+    只查 (source, chunk_index) 是否存在，不取向量；库不可达时抛错——
+    live 校验的意义正在于确认标注与线上索引一致，不可达不能算通过。
     """
-    from backend.infrastructure.milvus import build_source_filter, get_milvus_client
+    from backend.infrastructure.vector_store import get_vector_store
 
-    client = get_milvus_client()
+    store = get_vector_store()
     missing = []
     checked = set()
     for i, tc in enumerate(cases):
@@ -282,21 +244,11 @@ def verify_gold_in_index(cases: list[dict]) -> list[str]:
             if key in checked:
                 continue
             checked.add(key)
-            expr = (
-                f"{build_source_filter(g['source'])}"
-                f" and metadata[\"chunk_index\"] == {g['chunk_index']}"
-            )
-            hits = client.query(
-                collection_name=settings.MILVUS_COLLECTION,
-                filter=expr,
-                output_fields=["metadata"],
-                limit=1,
-            )
-            if not hits:
+            if not store.chunk_exists(g["source"], g["chunk_index"]):
                 missing.append(
                     f"case {i} ({tc.get('user_input', '')[:40]}): "
-                    f"gold chunk {key} not found in Milvus collection "
-                    f"{settings.MILVUS_COLLECTION}"
+                    f"gold chunk {key} not found in vector table "
+                    f"{settings.VECTOR_TABLE}"
                 )
     return missing
 
@@ -322,10 +274,10 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
     repeat 遍的排序应当完全相同（固定索引下的确定性检索）；spread 在
     报告里单独列出，非 0 即说明检索链路里有不确定性。
     """
-    client = init_milvus()
+    client = init_vector_store()
     if client is None:
         raise RuntimeError(
-            f"Milvus collection {settings.MILVUS_COLLECTION!r} does not exist; "
+            f"Vector table {settings.VECTOR_TABLE!r} does not exist; "
             "ingest the corpus before running retrieval evaluation."
         )
     if settings.MULTI_QUERY_ENABLED:

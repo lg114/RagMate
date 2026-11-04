@@ -1,6 +1,6 @@
 """检索质量 CI 门禁：词法重放 98 题，对照已入库的 fused 基线。
 
-线上 `ragmate-eval retrieval` 要 BGE-M3、Milvus 和 reranker，不适合
+线上 `ragmate-eval retrieval` 要嵌入模型、pgvector 和 reranker，不适合
 ubuntu-latest 每次 PR 都跑。这里改走三条已有、可复现的链路：
 
 1. `build_chunk_inventory` — 用当前切块配置从样本语料复现 chunk；
@@ -204,7 +204,7 @@ class GateResult:
     def render(self) -> str:
         """人读的通过/失败报告。"""
         lines = [
-            "Retrieval quality gate (lexical replay; no Milvus, no BGE, no GPU)",
+            "Retrieval quality gate (lexical replay; no pgvector, no BGE, no GPU)",
             f"Baseline: {self.baseline_path} stage={self.stage}",
             f"Allowance below baseline: {ALLOWANCE:.4f}",
             f"Questions: {self.n_questions} ({self.n_answerable} answerable), chunks: {self.n_chunks}",

@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+- 向量库从 Milvus 换成同一个 Postgres 上的 pgvector。稠密 `vector(1024)` 走 HNSW 内积，稀疏 `sparsevec` 走精确内积，仍按 RRF k=60 融合后再重排。`DROP_RATIO_SEARCH` 只作用在查询稀疏向量上。多查询仍默认关闭。
+- `docker compose up` 只起 Postgres（`pgvector/pgvector:0.8.7-pg15`）和可选的 Redis。etcd、MinIO、Milvus、Attu 从默认栈去掉。
+- 已有 Milvus 数据用 `python -m backend.infrastructure.migrate_from_milvus` 按 `(source, chunk_index, content_hash)` 幂等拷贝；Milvus 已经不在时，把 `documents.status` 改成 `uploaded` 再重新入库。
+- 删除文档仍要先确认向量删干净，才提交 `documents` 行。`/ready` 检查 PostgreSQL 和 pgvector。
+
 ### Fixed
 - `document_service.py` + `milvus.py` — 删除文档时先确认 Milvus 向量已经删掉，再提交 PostgreSQL。
   向量库不可用、删除报错或删完仍能查到残留时返回 503，数据库行和磁盘文件都保留。

@@ -19,8 +19,6 @@ dependencies = [
     "langchain-text-splitters>=1.0.0,<2.0.0",
     # ── Agent framework ──
     "deepagents>=0.5.0",
-    # ── Vector DB ──
-    "pymilvus>=2.5.0",
     # ── Embedding & reranking ──
     "torch>=2.0.0,<3.0.0",
     "sentence-transformers>=2.2.0",

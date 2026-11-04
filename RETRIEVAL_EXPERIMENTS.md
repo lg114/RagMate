@@ -5,6 +5,7 @@
 > 不要新增融合臂、不要把多查询改成默认、不要再加切块策略。
 > 回归门禁是 `ragmate-eval retrieval-gate`。RAGAS judge 已搁置，不作为门禁，
 > 也不追 Python 3.14 的 RAGAS 问题。要改冻结值，先重跑确定性基线（见 `eval/README.md`）。
+> 向量已从 Milvus 迁到同一个 Postgres 的 pgvector（稠密 `vector` + 稀疏 `sparsevec`，RRF k=60）。下文里的 Milvus 集合是迁移前的实验记录。
 
 把「改切分策略 / 加 API 参数 / 对比检索配置」从**配置项存在但没法做实验**，变成**能跑、能对比、结论站得住**的实验能力。
 

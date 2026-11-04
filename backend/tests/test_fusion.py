@@ -1,6 +1,6 @@
-"""融合：RRF / 加权离线融合与 Milvus ranker 接线。"""
+"""融合：RRF / 加权离线融合。线上 RRF 用同一套 1/(k+rank+1)。"""
 from backend.core.fusion import (
-    make_milvus_ranker,
+    rrf_contribution,
     rrf_fuse_rank_lists,
     weighted_fuse_score_lists,
 )
@@ -33,15 +33,6 @@ def test_weighted_respects_dense_weight():
     assert sparse_heavy[0] == ("s",)
 
 
-def test_make_milvus_ranker_rrf_and_weighted(monkeypatch):
-    from backend.infrastructure import config as config_mod
-
-    monkeypatch.setattr(config_mod.settings, "FUSION_MODE", "rrf")
-    monkeypatch.setattr(config_mod.settings, "RRF_K", 40)
-    ranker = make_milvus_ranker()
-    assert ranker.__class__.__name__ == "RRFRanker"
-
-    monkeypatch.setattr(config_mod.settings, "FUSION_MODE", "weighted")
-    monkeypatch.setattr(config_mod.settings, "FUSION_DENSE_WEIGHT", 0.7)
-    ranker = make_milvus_ranker()
-    assert ranker.__class__.__name__ == "WeightedRanker"
+def test_rrf_contribution_matches_rank_from_one():
+    assert rrf_contribution(0, 60) == 1.0 / 61
+    assert rrf_contribution(1, 60) == 1.0 / 62

@@ -5,7 +5,7 @@ from backend.api.deps import get_client_ip
 from backend.infrastructure.config import settings
 import backend.application.document_service as document_service
 from backend.infrastructure.database import async_session
-from backend.infrastructure.milvus import get_milvus_client
+from backend.infrastructure.vector_store import get_vector_store
 from backend.infrastructure.rate_limiter import check_rate_limit
 
 router = APIRouter()
@@ -41,6 +41,6 @@ async def delete_document(request: Request, filename: str):
             filename=filename,
             docs_dir=settings.DOCUMENTS_DIR,
             session=session,
-            milvus_client=get_milvus_client(),
+            vector_store=get_vector_store(),
         )
     return {"success": True}

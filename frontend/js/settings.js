@@ -12,7 +12,7 @@ import {
 const CHECK_LABELS = {
   postgresql: 'PostgreSQL',
   redis: 'Redis',
-  milvus: 'Milvus',
+  pgvector: 'pgvector',
 };
 
 const THEME_LABELS = { light: '浅色', dark: '深色', system: '跟随系统' };
@@ -83,7 +83,7 @@ export const SettingsPanel = {
     const summary = document.getElementById('ready-summary');
     const pill = document.getElementById('btn-ready');
     if (!quiet) {
-      summary.textContent = '正在检查 PostgreSQL、Redis 和 Milvus…';
+      summary.textContent = '正在检查 PostgreSQL 和 pgvector…';
       if (pill) {
         pill.textContent = '检查中';
         pill.dataset.state = 'pending';

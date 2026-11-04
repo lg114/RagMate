@@ -76,7 +76,7 @@ RAGAS 的 `context_precision` / `context_recall` 是 LLM judge 打分的指标�
 直接算，不经过 judge：
 
 ```bash
-# 先校验标注：schema + chunk 清单；--live 再校验 live Milvus 索引
+# 先校验标注：schema + chunk 清单；--live 再校验 live pgvector 表
 ragmate-eval check-gold --testset eval/testsets/sample/testset.json [--live]
 
 # 分阶段跑检索并算 hit/recall/MRR/nDCG（默认四臂：dense / sparse / fused / reranked）
@@ -98,7 +98,7 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
 ragmate-eval retrieval-gate
 ```
 
-每次 PR 都拉起 BGE-M3、Milvus 和 reranker 太重，也依赖本机模型和 GPU。
+每次 PR 都拉起 BGE-M3、pgvector 和 reranker 太重，也依赖本机模型和 GPU。
 默认嵌入和重排已经是远程 HTTP，门禁仍然不调用它们；CI 只为通过启动校验而导出占位 URL。
 门禁用生产切块把 `eval/testsets/sample/corpus` 复现成 chunk，再用确定性
 BM25（汉字二字组 + 拉丁串，无网络、无随机）给 98 道题排序，指标仍是
@@ -126,7 +126,7 @@ reranked 那一臂要 cross-encoder，词法重放对不齐）。余量 `0.015`�
 
 有意更新基线时：
 
-1. 在有 Milvus 和模型的环境重跑 `ragmate-eval retrieval`，用新的报告替换
+1. 在有 pgvector 和模型的环境重跑 `ragmate-eval retrieval`，用新的报告替换
    `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`
    （保留 `stages.fused.summary` 和按题顺序的 `per_question`）。
 2. 把上表和 `backend/tests/test_retrieval_gate.py` 里的 `PINNED_FUSED`
@@ -166,7 +166,7 @@ Markdown 冻结为 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路�
 `CHUNK_SIZE` 与历史上的 `parent_child` 边界对齐，98 题 gold 三元组可复用。
 `parent_child` 只是环境变量，不是第二套策略。对比数据见
 `reports/baseline/retrieval-baseline-98q-titlepath-compare.md`。改策略后必须重建
-Milvus 集合并重跑确定性基线，否则检索正文与标注切块不一致。
+向量表并重跑确定性基线，否则检索正文与标注切块不一致。
 
 ## 两层打分：排序层 vs 生产交付（不重跑检索）
 

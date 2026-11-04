@@ -6,7 +6,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Milvus](https://img.shields.io/badge/Milvus-2.5-2A6FB0)](https://milvus.io/)
+[![pgvector](https://img.shields.io/badge/pgvector-Postgres-336791)](https://github.com/pgvector/pgvector)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4C566A)](LICENSE)
 
 [English](README.md) · [中文](README_zh.md)
@@ -29,6 +29,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - [Evaluation](#evaluation)
 - [Development](#development)
 - [Data, backup, and security](#data-backup-and-security)
+- [Migrating from Milvus](#migrating-from-milvus)
 - [Known constraints](#known-constraints)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -38,14 +39,14 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 
 ## Highlights
 
-- **Hybrid retrieval** — dense + sparse search fused with RRF in Milvus. Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
+- **Hybrid retrieval** — dense + sparse search fused with RRF (k=60) in pgvector. Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
 - **Reranked, filtered context** — remote reranking by default, plus dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression. A local cross-encoder is opt-in.
 - **Title-path chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees. That strategy is frozen.
 - **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
 - **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 98-question sample with deterministic BM25. RAGAS scoring code is still in the tree and is not the CI gate.
-- **Self-hosted by design** — PostgreSQL, Milvus, and MinIO run through Docker Compose. Redis is optional and only used for shared rate limits.
+- **Self-hosted by design** — one Postgres with pgvector holds documents, chat, and vectors. Redis is optional and only used for shared rate limits.
 
 ---
 
@@ -56,7 +57,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - Python 3.12+
 - Docker Desktop, or Docker Engine with Compose v2
 - An OpenAI-compatible LLM endpoint and API key
-- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose runs Milvus, PostgreSQL, and MinIO; it does not serve these models. Redis is not started unless you opt in.
+- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose runs Postgres with pgvector; it does not serve these models. Redis is not started unless you opt in.
 - Local FlagEmbedding is optional. That path needs about 8 GB of RAM for CPU inference, and a GPU helps on larger collections.
 
 ### 1. Start the infrastructure
@@ -68,7 +69,7 @@ docker compose up -d
 docker compose ps
 ```
 
-The stack exposes PostgreSQL (`5432`), Milvus (`19530`), MinIO (`9000` / `9001`), and Attu (`8080`). Redis is not part of this default path. The application itself runs on your host during development.
+The stack exposes PostgreSQL (`5432`) with the pgvector extension. Redis is not part of this default path. The application itself runs on your host during development. On first start the API runs `CREATE EXTENSION vector` and creates the chunk table.
 
 Ingest status, the lock, cancel, and failure reasons live in PostgreSQL. Chat history does too. Leave `REDIS_URL` empty. Rate limits then use an in-process counter, which is enough for one uvicorn process. To share that counter across workers, set `REDIS_URL=redis://localhost:6379/0` and start the optional service:
 
@@ -129,7 +130,7 @@ RERANKER_PROVIDER=api
 RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-The default database and Milvus values match the Docker Compose stack. `REDIS_URL` is empty unless you opted into the Redis profile. See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
+The default database URL matches the Docker Compose stack. Vectors live in that same database (`VECTOR_TABLE`, default `ragmate_docs`). `REDIS_URL` is empty unless you opted into the Redis profile. See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
 
 ### 4. Run RagMate
 
@@ -151,7 +152,7 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 2. Ingest the pending files and wait until the in-page status banner finishes.
 3. Open **对话** and ask questions about the indexed documents.
 4. Click a citation to open the source: file name, page, library status, and the retrieved passage when retrieval debug is on.
-5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL and Milvus. Redis appears in that list only when `REDIS_URL` is set.
+5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL and pgvector. Redis appears in that list only when `REDIS_URL` is set.
 
 The UI is a thin demo shell: the zero-build page at `frontend/index.html`, served at `/`. No frontend build step. Retrieval debug is a dev-mode trace (`"debug": true`); leave it off for a normal demo. Retrieval knobs are not in the page — they are the frozen server defaults below.
 
@@ -163,7 +164,7 @@ Supported formats: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.txt`, `.md`. Uploads are 
 
 ```
 RagMate/
-├── docker-compose.yml      # PostgreSQL, Milvus, MinIO, etcd, Attu; Redis is profile "redis"
+├── docker-compose.yml      # Postgres + pgvector; Redis is profile "redis"
 ├── backend/
 │   ├── app.py              # App factory: middleware, exception handlers, static mount
 │   ├── api/                # HTTP routes: chat, documents, ingest, health
@@ -171,7 +172,7 @@ RagMate/
 │   │   └── ingest/         # pipeline (load → chunk → dedupe → encode), loaders, db_sync
 │   ├── core/               # RAG core: retriever, agent, prompts/researcher.md
 │   ├── domain/             # ORM models, Pydantic schemas, error types
-│   ├── infrastructure/     # config, database, optional redis, milvus, encoding, model_factory
+│   ├── infrastructure/     # config, database, pgvector, optional redis, encoding, model_factory
 │   ├── eval/               # retrieval-gate plus shelved RAGAS scoring
 │   └── tests/
 └── frontend/               # Zero-build UI (对话 / 文档 / 设置), served by FastAPI at /
@@ -189,13 +190,13 @@ The backend is strictly layered — each layer only calls downward:
 | Application | `application/` | Use-case orchestration: chat flow, document CRUD, ingestion lifecycle |
 | Core | `core/` | RAG domain logic: retrieval pipeline, agent, system prompts |
 | Domain | `domain/` | ORM models, Pydantic schemas, `AppError` hierarchy |
-| Infrastructure | `infrastructure/` | External systems: Milvus, PostgreSQL, optional Redis, models, config |
+| Infrastructure | `infrastructure/` | External systems: PostgreSQL + pgvector, optional Redis, models, config |
 
 ```mermaid
 flowchart LR
     D[Documents] --> P[Load and chunk]
     P --> E[Embed API]
-    E --> V[(Milvus vectors)]
+    E --> V[(pgvector)]
     P --> M[(PostgreSQL metadata)]
     Q[User query] --> R[Hybrid search + RRF]
     R --> RR[Rerank, compress, filter]
@@ -203,9 +204,9 @@ flowchart LR
     A --> O[Answer with citations]
 ```
 
-**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against Milvus → dense + sparse encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
+**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense + sparse encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
-**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense + sparse ANN search with RRF fusion → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge.
+**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus exact sparse inner product, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. Multi-query stays off unless `MULTI_QUERY_ENABLED=true`.
 
 Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
 
@@ -227,7 +228,7 @@ Simple greetings and other non-RAG messages are routed straight to the LLM, skip
 | POST | `/ingest/cancel` | Ask the worker that holds the ingest lock to stop |
 | GET | `/ingest/status` | Current ingestion status and progress (survives restarts) |
 | GET | `/health` | Liveness probe |
-| GET | `/ready` | Readiness probe for PostgreSQL and Milvus. Redis is checked only when `REDIS_URL` is set |
+| GET | `/ready` | Readiness probe for PostgreSQL and pgvector. Redis is checked only when `REDIS_URL` is set |
 
 ### Chat request body
 
@@ -290,8 +291,7 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 | `LLM_API_BASE_URL` | empty | Custom OpenAI-compatible endpoint |
 | `LLM_TEMPERATURE` | `0.01` | Kept low for factual answers |
 | `REDIS_URL` | empty | Optional. Set only to share rate limits across workers. Ingest and chat do not use it |
-| `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | Vector database |
-| `MILVUS_COLLECTION` | `ragmate_docs` | Collection name |
+| `VECTOR_TABLE` | `ragmate_docs` | pgvector table in the same database as `DATABASE_URL` |
 | `DOCUMENTS_DIR` | `backend/documents` | Upload target directory |
 | `CORS_ORIGINS` | `http://localhost:8000,...` | Comma-separated; restrict in production |
 
@@ -348,7 +348,7 @@ The regression guard is `ragmate-eval retrieval-gate`. It ships with the base in
 ragmate-eval retrieval-gate
 ```
 
-It replays the committed 98-question sample with deterministic BM25 (no Milvus, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in [`eval/README.md`](eval/README.md). GitHub Actions runs this command after pytest.
+It replays the committed 98-question sample with deterministic BM25 (no pgvector query, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in [`eval/README.md`](eval/README.md). GitHub Actions runs this command after pytest. The floors were not lowered for this store change.
 
 RAGAS (`generate`, `evaluate`, `rescore`, `patch-raw`, and `ragmate-eval interactive`) is still in the tree. Install `pip install -e ".[eval]"` only if you still want that judge. It is shelved: not a CI gate, and not the number to tune retrieval against. Judge scores move when the model moves. Python 3.14 RAGAS failures are out of scope. A bare `ragmate-eval` prints this gate instead of opening the RAGAS menu.
 
@@ -367,13 +367,13 @@ Tests live in `backend/tests/` and cover the retrieval filtering and deduplicati
 > [!NOTE]
 > `ruff` and `mypy` are not configured in `pyproject.toml` yet. The codebase follows PEP 8, 4-space indentation, and Chinese docstrings on public functions.
 
-Every blocking call — model inference, Milvus I/O, ingestion — is pushed to a thread with `asyncio.to_thread`, so avoid adding blocking work directly to coroutines.
+Every blocking call — model inference, vector I/O, ingestion — is pushed to a thread with `asyncio.to_thread`, so avoid adding blocking work directly to coroutines.
 
 ---
 
 ## Data, backup, and security
 
-Docker volumes are written to `volumes/` and hold PostgreSQL, Milvus, and MinIO data (plus Redis if that profile is running). For a consistent backup, stop the stack, copy the directory, then restart it.
+Docker volumes are written to `volumes/` and hold PostgreSQL data, including the pgvector table (plus Redis if that profile is running). For a consistent backup, stop the stack, copy the directory, then restart it. `volumes/etcd`, `volumes/minio`, and `volumes/milvus` are leftovers from the old stack and are not used.
 
 Before exposing the service beyond localhost:
 
@@ -382,7 +382,36 @@ Before exposing the service beyond localhost:
 - Put an authentication layer in front of the API.
 - Review upload and rate-limit settings — currently 30 requests per IP per minute on chat, upload, delete, and ingest. Without `REDIS_URL` that counter is per process.
 
-RagMate validates requests — filename allowlist, magic-byte checks, path-traversal rejection, Milvus filter-injection guards, and a 50 MB upload cap — but it is not a complete internet-facing security boundary on its own.
+RagMate validates requests — filename allowlist, magic-byte checks, path-traversal rejection, parameterized vector filters, and a 50 MB upload cap — but it is not a complete internet-facing security boundary on its own.
+
+---
+
+## Migrating from Milvus
+
+`docker compose up` no longer starts Milvus, etcd, MinIO, or Attu. Chunks live in the Postgres table named by `VECTOR_TABLE` (default `ragmate_docs`). An existing `MILVUS_COLLECTION` value is still read as that table name when `VECTOR_TABLE` is empty.
+
+**If Milvus is still up**, copy the collection once. The copy does not delete Milvus data. Rows that already have the same `(source, chunk_index, content_hash)` are skipped, so the command can be run again:
+
+```bash
+pip install 'pymilvus>=2.5'
+python -m backend.infrastructure.migrate_from_milvus --host localhost --port 19530 --collection ragmate_docs
+```
+
+**If Milvus is already gone**, re-ingest from the files on disk. Incremental ingest skips a file whose `documents` row is already `ingested`, even when the vector table is empty. Clear that marker, then ingest again:
+
+```sql
+UPDATE documents SET status = 'uploaded';
+```
+
+Use the UI or `POST /ingest`. New vectors are written to pgvector. Deleting a document still deletes its vectors before the database row is committed.
+
+An existing `volumes/postgres` directory from `postgres:15` can stay. Recreate the container on the pgvector image so the extension files are present:
+
+```bash
+docker compose up -d --force-recreate postgres
+```
+
+The API user must be allowed to run `CREATE EXTENSION vector`. The Compose `postgres` user can. After you have copied or re-ingested, `volumes/etcd`, `volumes/minio`, and `volumes/milvus` can be deleted.
 
 ---
 
@@ -390,7 +419,8 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 
 - **Ingest runs on one worker at a time.** Status, the lock, progress, the cancel flag, and the failure reason live in one Postgres row (`ingest_control`), so any uvicorn worker can read progress and request cancellation. Only the worker that holds the lock writes progress and the terminal state. It refreshes a heartbeat (`INGEST_HEARTBEAT_INTERVAL`, default 5s). If that process dies, the next status read marks the job `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30s) and releases the lock. The row is not expired, so a failed or interrupted job is still there after a restart.
 - **No authentication or multi-tenancy.** Every session and document is visible to anyone who can reach the API.
-- **Schema changes need a manual rebuild.** If the Milvus collection schema does not match, startup raises a validation error instead of migrating; the collection must be dropped and recreated.
+- **Vector schema changes need a manual rebuild.** If the pgvector table is missing columns or the `vector` / `sparsevec` types, startup raises a validation error instead of altering those columns. Drop the table and re-ingest.
+- **Sparse search is exact.** Dense search uses an HNSW index (inner product). Sparse search is an exact inner product over `sparsevec`, because this pgvector version has no sparse ANN index. Query-side `DROP_RATIO_SEARCH` (default 0.2) still drops the smallest sparse weights before that scan. RRF stays at k=60.
 - **No migration tool.** Schema changes are applied with `create_all` plus a small hand-written column-migration list in `infrastructure/database.py`.
 - **In-process embedding and rerank are opt-in, and CPU inference is slow.** The default calls the remote embeddings and `/rerank` APIs and does not load torch. Set `EMBEDDING_PROVIDER=huggingface` and `RERANKER_PROVIDER=local` only when this process should load BGE-M3 and the cross-encoder.
 
@@ -403,7 +433,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 | `/ready` reports `degraded` | `docker compose ps`, then `docker compose logs <service>` |
 | Startup fails with "Required env vars not set" | `DATABASE_URL`, `LLM_API_KEY`, and — unless you opted into local models — `EMBEDDING_API_BASE_URL` and `RERANKER_API_BASE_URL` in `backend/.env` |
 | Local model download or CPU inference is slow | Stay on the default remote providers, or set `EMBEDDING_DEVICE=cuda` for the local opt-in |
-| Chat returns no useful context | Confirm ingestion finished and `MILVUS_HOST` and `DATABASE_URL` point at the running stack |
+| Chat returns no useful context | Confirm ingestion finished and `DATABASE_URL` points at the Postgres that holds the pgvector table |
 | Port conflicts | Change the host-side ports in `docker-compose.yml` and update the matching `.env` values |
 | Ingestion stuck in `running` | Status is reconciled from the Postgres heartbeat. A dead worker becomes `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30); `POST /ingest/cancel` asks the live worker to stop |
 
@@ -417,4 +447,4 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [Milvus](https://milvus.io/) · [BGE](https://github.com/FlagOpen/FlagEmbedding)
+[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [pgvector](https://github.com/pgvector/pgvector) · [BGE](https://github.com/FlagOpen/FlagEmbedding)

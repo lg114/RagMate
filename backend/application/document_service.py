@@ -5,14 +5,13 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pymilvus import MilvusClient
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.config import settings
 from backend.domain.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from backend.domain.models import Document
-from backend.infrastructure.milvus import delete_source_vectors
+from backend.infrastructure.vector_store import delete_source_vectors
 
 logger = logging.getLogger("ragmate")
 
@@ -172,9 +171,9 @@ async def delete_document(
     filename: str,
     docs_dir: str,
     session: AsyncSession,
-    milvus_client: MilvusClient | None = None,
+    vector_store=None,
 ) -> None:
-    """删除文档。先确认 Milvus 向量已删除，再提交 PostgreSQL 删除。
+    """删除文档。先确认 pgvector 里的向量已删除，再提交 PostgreSQL 删除。
 
     向量删除失败时抛 503 并保留数据库记录，避免文档行没了、旧向量还在。
     """
@@ -188,7 +187,7 @@ async def delete_document(
     filepath = os.path.join(docs_dir, name)
 
     try:
-        await asyncio.to_thread(delete_source_vectors, milvus_client, name)
+        await asyncio.to_thread(delete_source_vectors, vector_store, name)
     except ServiceUnavailableError:
         await session.rollback()
         raise

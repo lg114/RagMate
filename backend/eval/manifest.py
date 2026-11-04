@@ -3,7 +3,7 @@
 A/B 对比只在“除一个变量外全部相同”时成立。manifest 把题库版本（文件
 SHA-256）、全部检索相关配置、harness 参数写进每次运行的报告旁，两个运
 行的差异用 `diff_manifests` 一眼看清。索引侧信息（集合行数）由调用方在
-Milvus 可达时另行采集——manifest 本身不依赖任何外部服务。
+向量表行数由调用方在 Postgres 可达时另行采集——manifest 本身不依赖任何外部服务。
 """
 import hashlib
 import subprocess
@@ -41,7 +41,7 @@ RETRIEVAL_SETTINGS_KEYS = [
     "SCORE_GAP_THRESHOLD",
     "SOURCE_DOMINANCE_THRESHOLD",
     "SOURCE_DOMINANCE_BOOST",
-    "MILVUS_COLLECTION",
+    "VECTOR_TABLE",
 ]
 
 
