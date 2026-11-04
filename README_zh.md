@@ -40,11 +40,11 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 
 - **混合检索** — 稠密 + 稀疏检索，在 Milvus 中用 RRF 融合。嵌入默认走 OpenAI 兼容 API；进程内 BGE-M3 需显式打开。
 - **重排序与过滤后的上下文** — 默认远程重排，加上动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。本地交叉编码器需显式打开。
-- **标题路径 + 父子分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。
+- **标题路径分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。该策略已冻结。
 - **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。只有 `DEEP_AGENTS_ENABLED=true` 才走 Deep Agents。
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
-- **内置评测** — 可选 RAGAS CLI，支持测试集生成、打分和 CI 质量门禁。
+- **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 98 题样本。RAGAS 打分代码仍在仓库里，但不是 CI 门禁。
 - **自托管设计** — PostgreSQL、Milvus、MinIO 通过 Docker Compose 运行。Redis 可选，只用于多进程共享限流。
 
 ---
@@ -97,11 +97,7 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
-如需使用评测 CLI：
-
-```bash
-pip install -e ".[eval]"
-```
+`ragmate-eval retrieval-gate` 随上面的安装一起提供。可选的 `.[eval]` 只拉入已搁置的 RAGAS 打分。测试和检索门禁不需要它。
 
 ### 3. 配置环境变量
 
@@ -157,7 +153,7 @@ uvicorn backend.app:app --reload --port 8000
 4. 点击引用，查看来源文件、页码、入库状态；打开检索调试时还可以看到命中的片段。
 5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL 和 Milvus 是否就绪。只有设置了 `REDIS_URL` 时，列表里才会出现 Redis。
 
-界面仍是零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。
+界面是一层薄演示壳：零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。检索调试是开发模式轨迹（`"debug": true`），正常演示保持关闭。检索参数不在页面上，它们是下面冻结的服务端默认值。
 
 支持格式：`.pdf`、`.docx`、`.xlsx`、`.xls`、`.txt`、`.md`。默认单文件上传上限为 50 MB。
 
@@ -176,7 +172,7 @@ RagMate/
 │   ├── core/               # RAG 内核：retriever、agent、prompts/researcher.md
 │   ├── domain/             # ORM 模型、Pydantic schema、错误类型
 │   ├── infrastructure/     # config、database、可选 redis、milvus、encoding、model_factory
-│   ├── eval/               # RAGAS 评测 CLI（可选依赖）
+│   ├── eval/               # retrieval-gate，以及已搁置的 RAGAS 打分
 │   └── tests/
 └── frontend/               # 零构建界面（对话 / 文档 / 设置），由 FastAPI 挂在 /
 ```
@@ -274,7 +270,7 @@ data: {"error": "..."}                               // 终止性错误
 
 非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
 
-只有请求带 `"debug": true` 时才会返回 `retrieval_debug`。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。输入框和 **设置** 页共用「检索调试」开关，选择会记在浏览器里。平时关掉；preview 是文档原文片段。
+`retrieval_debug` 是开发模式轨迹，只有请求带 `"debug": true` 时才返回。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。输入框和 **设置** 页共用「检索调试」开关，选择会记在浏览器里。正常演示关掉；preview 是文档原文片段。
 
 ---
 
@@ -299,31 +295,32 @@ data: {"error": "..."}                               // 终止性错误
 | `DOCUMENTS_DIR` | `backend/documents` | 上传目录 |
 | `CORS_ORIGINS` | `http://localhost:8000,...` | 逗号分隔；生产环境务必收紧 |
 
-### 检索与重排序
+### 检索（已冻结）
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `HYBRID_SEARCH_ENABLED` | `true` | 稠密 + 稀疏；关闭则只用稠密检索 |
-| `RERANK_CANDIDATES` | `30` | 进入交叉编码器的候选数 |
-| `RERANK_SCORE_THRESHOLD` | `0.3` | 片段保留的 sigmoid 概率下限 |
-| `FINAL_CONTEXT_K` | `15` | 发送给 LLM 的片段硬上限 |
-| `DYNAMIC_THRESHOLD_RATIO` | `0.5` | 阈值取 `最高分 × 该比例` 与固定阈值的较大者 |
-| `MAX_PER_SOURCE` / `MIN_PER_SOURCE` | `4` / `2` | 单来源片段数量上下限 |
-| `SCORE_GAP_THRESHOLD` | `0.15` | 遇到分数断崖即停止截断 |
-| `CONTEXTUAL_COMPRESSION` | `true` | 只保留片段内的相关句子 |
-| `QUERY_CONTEXTUALIZE` | `true` | 将追问改写为独立 query |
-| `QUERY_ROUTING_ENABLED` | `true` | 寒暄类问题跳过检索，直接回复 |
-| `DEEP_AGENTS_ENABLED` | `false` | 显式打开才走 Deep Agents 工具循环。默认是一次检索、一次生成、再接地 |
-| `FAITHFULNESS_CHECK` | `true` | 每次 RAG 回答额外一次 LLM 调用；校验失败时忽略，仍返回答案 |
+只认一套经过验证的检索配置：稠密 + 稀疏混合检索，RRF 融合，再重排。fused 阶段的数字钉在 [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)。除非对那 98 题重跑 `ragmate-eval retrieval`，并改掉 [`eval/README.md`](eval/README.md) 和 `backend/tests/test_retrieval_gate.py` 里的门槛，否则保持下面的默认值。
+
+| 部分 | 冻结值 |
+|---|---|
+| 稠密 + 稀疏混合 | `HYBRID_SEARCH_ENABLED=true` |
+| 融合 | RRF，`RRF_K=60`（`FUSION_MODE=rrf`）。加权融合不是默认 |
+| 分块 | `CHUNKING_STRATEGY=title_path`，`CHUNK_SIZE=1000`，重叠 `200`，父块 `2500` / `300` |
+| 重排后过滤 | `RERANK_CANDIDATES=30`，`RERANK_SCORE_THRESHOLD=0.3`，`FINAL_CONTEXT_K=15` |
+| 查询扩展 | 关闭（`MULTI_QUERY_ENABLED=false`） |
+
+`FUSION_MODE=weighted`、`FUSION_DENSE_WEIGHT`、`MULTI_QUERY_COUNT`、`CHUNKING_STRATEGY=parent_child`，以及折叠区里的过滤比例，都只是环境变量。它们和基线一起冻结。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要把多查询改成默认开启、不要再加切块策略。
+
+那份 98 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
+
+`DEEP_AGENTS_ENABLED` 保持 `false`（一次检索、一次生成、再接地）。`FAITHFULNESS_CHECK` 保持 `true`。
 
 <details>
-<summary><strong>完整配置项</strong> — 分块、嵌入、Agent 与链路追踪</summary>
+<summary><strong>已冻结的环境变量</strong> — 列出来是为了部署时能看见，不是为了就地调参</summary>
 
-**分块** — `CHUNK_SIZE` (`1000`)、`CHUNK_OVERLAP` (`200`)、`CHUNK_SIZE_PDF` (`600`)、`CHUNK_OVERLAP_PDF` (`100`)、`CHUNK_SIZE_DOCX` (`800`)、`CHUNK_OVERLAP_DOCX` (`150`)、`CHUNK_SIZE_TXT` (`1000`)、`CHUNK_OVERLAP_TXT` (`200`)、`CHUNK_SIZE_TABLE` (`1500`)、`CHUNK_SIZE_PARENT` (`2500`)、`CHUNK_OVERLAP_PARENT` (`300`)、`CHUNKING_STRATEGY`（默认 `title_path`；改回 `parent_child` 则标题路径不进检索正文）。
+**分块** — `CHUNK_SIZE` (`1000`)、`CHUNK_OVERLAP` (`200`)、`CHUNK_SIZE_PDF` (`600`)、`CHUNK_OVERLAP_PDF` (`100`)、`CHUNK_SIZE_DOCX` (`800`)、`CHUNK_OVERLAP_DOCX` (`150`)、`CHUNK_SIZE_TXT` (`1000`)、`CHUNK_OVERLAP_TXT` (`200`)、`CHUNK_SIZE_TABLE` (`1500`)、`CHUNK_SIZE_PARENT` (`2500`)、`CHUNK_OVERLAP_PARENT` (`300`)、`CHUNKING_STRATEGY`（`title_path`）。`parent_child` 切块边界相同，只是标题路径不进检索正文。它不是第二套受支持的策略。
 
 重叠长度必须小于对应分块大小，否则启动时会抛出校验错误。
 
-**重排序调参** — `HIGH_SCORE_RATIO` (`0.6`)、`SOURCE_DOMINANCE_THRESHOLD` (`0.9`)、`SOURCE_DOMINANCE_BOOST` (`1.5`)、`DROP_RATIO_SEARCH` (`0.2`)、`COMPRESSION_SCORE_THRESHOLD` (`0.4`)、`COMPRESSION_MIN_CHARS` (`300`)。
+**过滤与压缩** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`)、`MAX_PER_SOURCE` (`4`)、`MIN_PER_SOURCE` (`2`)、`SCORE_GAP_THRESHOLD` (`0.15`)、`CONTEXTUAL_COMPRESSION` (`true`)、`QUERY_CONTEXTUALIZE` (`true`，把追问改写成一条查询，不是多查询)、`QUERY_ROUTING_ENABLED` (`true`)、`HIGH_SCORE_RATIO` (`0.6`)、`SOURCE_DOMINANCE_THRESHOLD` (`0.9`)、`SOURCE_DOMINANCE_BOOST` (`1.5`)、`DROP_RATIO_SEARCH` (`0.2`)、`COMPRESSION_SCORE_THRESHOLD` (`0.4`)、`COMPRESSION_MIN_CHARS` (`300`)。
 
 **嵌入** — `EMBEDDING_PROVIDER`（`remote`）、`EMBEDDING_MODEL`（`BAAI/bge-m3`）、`EMBEDDING_NORMALIZE`（`true`）、`HF_TOKEN`、`EMBEDDING_API_KEY`（可选）、`EMBEDDING_API_BASE_URL`（`remote` / `openai` 时必填）、`EMBEDDING_API_TIMEOUT`（`60`）。
 
@@ -345,25 +342,15 @@ CI 不需要 GPU，也不需要真的嵌入服务。测试 mock 了 HTTP 客户�
 
 ## 评测
 
-安装 `pip install -e ".[eval]"` 后，运行交互式菜单：
+回归门禁是 `ragmate-eval retrieval-gate`，随基础安装提供。在 `backend/` 下执行：
 
 ```bash
-cd backend
-ragmate-eval
+ragmate-eval retrieval-gate
 ```
 
-或在脚本中使用：
+它对已入库的 98 题样本做确定性 BM25 重放（不连 Milvus、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 [`eval/README.md`](eval/README.md)。GitHub Actions 在 pytest 之后运行这条命令。
 
-```bash
-ragmate-eval generate --size 50 --output ../eval/testsets/testset.json
-
-ragmate-eval evaluate --testset ../eval/testsets/testset.json \
-  --report ../eval/reports/report.json --threshold 0.75
-```
-
-评测指标包括忠实度、答案相关性、上下文精确率、上下文召回率和事实正确性。配合 `--threshold`，总分低于阈值时命令以非零状态退出，适合作为 CI 门禁。测试集与报告输出在仓库根目录的 `eval/` 下，已被 git 忽略。
-
-拉取请求上的检索质量是另一条命令：`ragmate-eval retrieval-gate`。它对已入库的 98 题样本做确定性 BM25 重放（不连 Milvus、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 `eval/README.md`。GitHub Actions 在 pytest 之后运行这条命令。
+RAGAS（`generate`、`evaluate`、`rescore`、`patch-raw`，以及 `ragmate-eval interactive`）仍留在仓库里。只有还想用这个 judge 时才安装 `pip install -e ".[eval]"`。它已搁置：不是 CI 门禁，也不用来调检索。judge 分数会跟着模型漂移。Python 3.14 上的 RAGAS 问题不在范围内。不带参数的 `ragmate-eval` 会打印这条门禁，不再进入 RAGAS 菜单。
 
 ---
 
@@ -430,4 +417,4 @@ MIT License，详见 [LICENSE](LICENSE)。
 
 ## 致谢
 
-[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [Milvus](https://milvus.io/) · [BGE](https://github.com/FlagOpen/FlagEmbedding) · [RAGAS](https://docs.ragas.io/)
+[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [Milvus](https://milvus.io/) · [BGE](https://github.com/FlagOpen/FlagEmbedding)

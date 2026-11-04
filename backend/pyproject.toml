@@ -45,10 +45,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# ragas 在 import 阶段执行
+# RAGAS 已搁置（不在 CI 上，也不追 Python 3.14）。可选 extra 仍会在 import 时执行
 #     from langchain_community.chat_models.vertexai import ChatVertexAI
 # 该模块在 langchain-community 0.4.0 中被移除，因此主依赖里把 langchain-community
-# 钉在 0.3.x（见上方注释）。不要单独放宽它，否则 ragas 会 ImportError。
+# 钉在 0.3.x（见上方注释）。不要单独放宽它，否则残留的 ragas 导入会 ImportError。
 eval = [
     "ragas>=0.2.0",
     "tqdm>=4.65.0",

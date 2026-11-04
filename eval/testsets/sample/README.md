@@ -22,7 +22,7 @@
 | `multi-hop` | 10 | 同文档多 chunk 或跨文档（如 Compose Redis + 缓存 AOF） |
 | `unanswerable` | 7 | 语料未覆盖（K8s、Terraform、Milvus、Kafka、Ceph、eBPF、Istio） |
 
-加难目标：把原先 50 题上四臂 hit@5≈1.0 的天花板拉开，让融合/重排/切分实验有判决力。旧的 50 题基线数字不可与本集直接比。
+加难目标：把原先 50 题上四臂 hit@5≈1.0 的天花板拉开。旧的 50 题基线数字不可与本集直接比。检索默认配置已冻结（hybrid + RRF k=60 + `title_path`，多查询关闭）。本集给 `ragmate-eval retrieval-gate` 做回归，不作为新增融合臂、多查询默认或新切块策略的依据。
 
 ## v1.1 标注：gold chunk ID（P0-1）
 

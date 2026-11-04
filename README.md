@@ -40,11 +40,11 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 
 - **Hybrid retrieval** — dense + sparse search fused with RRF in Milvus. Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
 - **Reranked, filtered context** — remote reranking by default, plus dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression. A local cross-encoder is opt-in.
-- **Title-path + parent-child chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees.
+- **Title-path chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees. That strategy is frozen.
 - **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
-- **Built-in evaluation** — optional RAGAS CLI for test-set generation, scoring, and CI quality gates.
+- **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 98-question sample with deterministic BM25. RAGAS scoring code is still in the tree and is not the CI gate.
 - **Self-hosted by design** — PostgreSQL, Milvus, and MinIO run through Docker Compose. Redis is optional and only used for shared rate limits.
 
 ---
@@ -97,11 +97,7 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
-For the evaluation CLI, install the optional extras:
-
-```bash
-pip install -e ".[eval]"
-```
+`ragmate-eval retrieval-gate` is part of that install. The optional `.[eval]` extra only pulls in shelved RAGAS scoring. Tests and the retrieval gate do not need it.
 
 ### 3. Configure the application
 
@@ -157,7 +153,7 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 4. Click a citation to open the source: file name, page, library status, and the retrieved passage when retrieval debug is on.
 5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL and Milvus. Redis appears in that list only when `REDIS_URL` is set.
 
-The UI is still the zero-build page at `frontend/index.html`, served at `/`. No frontend build step.
+The UI is a thin demo shell: the zero-build page at `frontend/index.html`, served at `/`. No frontend build step. Retrieval debug is a dev-mode trace (`"debug": true`); leave it off for a normal demo. Retrieval knobs are not in the page — they are the frozen server defaults below.
 
 Supported formats: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
 
@@ -176,7 +172,7 @@ RagMate/
 │   ├── core/               # RAG core: retriever, agent, prompts/researcher.md
 │   ├── domain/             # ORM models, Pydantic schemas, error types
 │   ├── infrastructure/     # config, database, optional redis, milvus, encoding, model_factory
-│   ├── eval/               # RAGAS evaluation CLI (optional dependency)
+│   ├── eval/               # retrieval-gate plus shelved RAGAS scoring
 │   └── tests/
 └── frontend/               # Zero-build UI (对话 / 文档 / 设置), served by FastAPI at /
 ```
@@ -274,7 +270,7 @@ Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, 
 
 The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
-`retrieval_debug` is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The composer and the **设置** page share a “检索调试” checkbox that sends this flag and remembers it in the browser. Leave it off in normal use; previews are excerpts of your documents.
+`retrieval_debug` is a dev-mode trace. It is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The composer and the **设置** page share a “检索调试” checkbox that sends this flag and remembers it in the browser. Leave it off for a normal demo; previews are excerpts of your documents.
 
 ---
 
@@ -299,31 +295,32 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 | `DOCUMENTS_DIR` | `backend/documents` | Upload target directory |
 | `CORS_ORIGINS` | `http://localhost:8000,...` | Comma-separated; restrict in production |
 
-### Retrieval and reranking
+### Retrieval (frozen)
 
-| Variable | Default | Notes |
-|---|---|---|
-| `HYBRID_SEARCH_ENABLED` | `true` | Dense + sparse; `false` falls back to dense only |
-| `RERANK_CANDIDATES` | `30` | Candidates passed to the cross-encoder |
-| `RERANK_SCORE_THRESHOLD` | `0.3` | Sigmoid probability floor for a chunk |
-| `FINAL_CONTEXT_K` | `15` | Hard cap on chunks sent to the LLM |
-| `DYNAMIC_THRESHOLD_RATIO` | `0.5` | Floor becomes `top_score × ratio` when higher |
-| `MAX_PER_SOURCE` / `MIN_PER_SOURCE` | `4` / `2` | Per-source chunk limits |
-| `SCORE_GAP_THRESHOLD` | `0.15` | Stop at the first large score cliff |
-| `CONTEXTUAL_COMPRESSION` | `true` | Keep only relevant sentences inside a chunk |
-| `QUERY_CONTEXTUALIZE` | `true` | Rewrite follow-ups into standalone queries |
-| `QUERY_ROUTING_ENABLED` | `true` | Greetings skip retrieval and go straight to the LLM |
-| `DEEP_AGENTS_ENABLED` | `false` | Opt in to the Deep Agents tool loop. Default is one retrieve, one answer, then grounding |
-| `FAITHFULNESS_CHECK` | `true` | One extra LLM call per RAG answer; failures are ignored and the answer is still returned |
+One retrieval config is validated. It is hybrid dense + sparse search, fused with RRF, then reranked. The fused-stage numbers are pinned in [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json). Leave the defaults below unless you re-run `ragmate-eval retrieval` on that 98-question set and replace the floors in [`eval/README.md`](eval/README.md) and `backend/tests/test_retrieval_gate.py`.
+
+| Piece | Frozen value |
+|---|---|
+| Hybrid dense + sparse | `HYBRID_SEARCH_ENABLED=true` |
+| Fusion | RRF with `RRF_K=60` (`FUSION_MODE=rrf`). Weighted fusion is not a default |
+| Chunking | `CHUNKING_STRATEGY=title_path`, `CHUNK_SIZE=1000`, overlap `200`, parent `2500` / `300` |
+| Rerank then filter | `RERANK_CANDIDATES=30`, `RERANK_SCORE_THRESHOLD=0.3`, `FINAL_CONTEXT_K=15` |
+| Query expansion | off (`MULTI_QUERY_ENABLED=false`) |
+
+`FUSION_MODE=weighted`, `FUSION_DENSE_WEIGHT`, `MULTI_QUERY_COUNT`, `CHUNKING_STRATEGY=parent_child`, and the filter ratios in the details are environment variables only. They are frozen with that baseline. Changing one without a new deterministic baseline does not create a supported config. Do not add another fusion arm, turn multi-query on by default, or add a chunking strategy.
+
+The 98-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
+
+`DEEP_AGENTS_ENABLED` stays `false` (one retrieve, one answer, then grounding). `FAITHFULNESS_CHECK` stays `true`.
 
 <details>
-<summary><strong>Full variable list</strong> — chunking, embedding, agent, and tracing</summary>
+<summary><strong>Frozen env overrides</strong> — listed so a deployment can see them, not so they get tuned in place</summary>
 
-**Chunking** — `CHUNK_SIZE` (`1000`), `CHUNK_OVERLAP` (`200`), `CHUNK_SIZE_PDF` (`600`), `CHUNK_OVERLAP_PDF` (`100`), `CHUNK_SIZE_DOCX` (`800`), `CHUNK_OVERLAP_DOCX` (`150`), `CHUNK_SIZE_TXT` (`1000`), `CHUNK_OVERLAP_TXT` (`200`), `CHUNK_SIZE_TABLE` (`1500`), `CHUNK_SIZE_PARENT` (`2500`), `CHUNK_OVERLAP_PARENT` (`300`), `CHUNKING_STRATEGY` (`title_path`; set `parent_child` to keep header paths out of retrieval text).
+**Chunking** — `CHUNK_SIZE` (`1000`), `CHUNK_OVERLAP` (`200`), `CHUNK_SIZE_PDF` (`600`), `CHUNK_OVERLAP_PDF` (`100`), `CHUNK_SIZE_DOCX` (`800`), `CHUNK_OVERLAP_DOCX` (`150`), `CHUNK_SIZE_TXT` (`1000`), `CHUNK_OVERLAP_TXT` (`200`), `CHUNK_SIZE_TABLE` (`1500`), `CHUNK_SIZE_PARENT` (`2500`), `CHUNK_OVERLAP_PARENT` (`300`), `CHUNKING_STRATEGY` (`title_path`). `parent_child` keeps the same boundaries and leaves the title path out of retrieval text. It is not a second supported strategy.
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 
-**Reranker tuning** — `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
+**Filter and compression** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`), `MAX_PER_SOURCE` (`4`), `MIN_PER_SOURCE` (`2`), `SCORE_GAP_THRESHOLD` (`0.15`), `CONTEXTUAL_COMPRESSION` (`true`), `QUERY_CONTEXTUALIZE` (`true`, one follow-up rewrite, not multi-query), `QUERY_ROUTING_ENABLED` (`true`), `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
 
 **Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 
@@ -345,25 +342,15 @@ For local models, point `LLM_API_BASE_URL` at the OpenAI-compatible endpoint exp
 
 ## Evaluation
 
-Install the extras with `pip install -e ".[eval]"`, then run the interactive menu:
+The regression guard is `ragmate-eval retrieval-gate`. It ships with the base install. From `backend/`:
 
 ```bash
-cd backend
-ragmate-eval
+ragmate-eval retrieval-gate
 ```
 
-Or drive it from a script:
+It replays the committed 98-question sample with deterministic BM25 (no Milvus, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in [`eval/README.md`](eval/README.md). GitHub Actions runs this command after pytest.
 
-```bash
-ragmate-eval generate --size 50 --output ../eval/testsets/testset.json
-
-ragmate-eval evaluate --testset ../eval/testsets/testset.json \
-  --report ../eval/reports/report.json --threshold 0.75
-```
-
-Metrics cover faithfulness, answer relevancy, context precision, context recall, and factual correctness. `--threshold` makes the command exit non-zero below the score, which works well as a CI gate. Test sets and reports are written under `eval/` at the repository root and are git-ignored.
-
-Retrieval quality on pull requests is a separate command, `ragmate-eval retrieval-gate`. It replays the committed 98-question sample with deterministic BM25 (no Milvus, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in `eval/README.md`. GitHub Actions runs this command after pytest.
+RAGAS (`generate`, `evaluate`, `rescore`, `patch-raw`, and `ragmate-eval interactive`) is still in the tree. Install `pip install -e ".[eval]"` only if you still want that judge. It is shelved: not a CI gate, and not the number to tune retrieval against. Judge scores move when the model moves. Python 3.14 RAGAS failures are out of scope. A bare `ragmate-eval` prints this gate instead of opening the RAGAS menu.
 
 ---
 
@@ -430,4 +417,4 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [Milvus](https://milvus.io/) · [BGE](https://github.com/FlagOpen/FlagEmbedding) · [RAGAS](https://docs.ragas.io/)
+[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [Milvus](https://milvus.io/) · [BGE](https://github.com/FlagOpen/FlagEmbedding)
