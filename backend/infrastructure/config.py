@@ -144,7 +144,6 @@ class Settings(BaseSettings):
     # Chat & Session
     MAX_HISTORY_TURNS: int = Field(default=10, gt=0)  # 上下文窗口保留最近 N 轮对话
     MAX_SESSION_MESSAGES: int = Field(default=200, gt=0)  # 单 session 最大消息数
-    SESSION_TTL: int = Field(default=86400, gt=0)  # 已不使用。会话在 PostgreSQL，不再按 TTL 丢弃
     HEARTBEAT_INTERVAL: int = Field(default=15, gt=0)  # SSE 心跳间隔（秒）
 
     # Auth（可选）：为空时不鉴权（默认，单机/内网部署无感）；设置后见 app.py 的 _require_api_token
@@ -159,7 +158,6 @@ class Settings(BaseSettings):
 
     # Ingest
     INGEST_LOCK_TTL: int = Field(default=600, gt=0)  # 入库锁租约（秒），由心跳续期；过期后其他 worker 可以抢走
-    INGEST_STATUS_TTL: int = Field(default=7200, gt=0)  # 已不使用。终态写在 Postgres，不再按 TTL 删除
     INGEST_HEARTBEAT_INTERVAL: int = Field(default=5, gt=0)  # 续期锁、刷新任务心跳、轮询取消（秒）
     INGEST_HEARTBEAT_STALE: int = Field(default=30, gt=0)  # 心跳超过该秒数视为持锁 worker 已退出
 
