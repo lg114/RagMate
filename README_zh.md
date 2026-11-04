@@ -41,7 +41,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - **混合检索** — BGE-M3 稠密 + 稀疏检索，在 Milvus 中用 RRF 融合。
 - **重排序与过滤后的上下文** — 交叉编码器重排序、动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。
 - **标题路径 + 父子分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。
-- **Agent 对话** — Deep Agents 工作流，支持多轮会话、SSE 流式输出，检索以工具形式暴露给 Agent。
+- **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。只有 `DEEP_AGENTS_ENABLED=true` 才走 Deep Agents。
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
 - **内置评测** — 可选 RAGAS CLI，支持测试集生成、打分和 CI 质量门禁。
@@ -255,7 +255,7 @@ data: {"done": true, "session_id": "...",
 data: {"error": "..."}                               // 终止性错误
 ```
 
-空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence`、`citations`、`grounding` 和 `unsupported_claims` 只出现在 `done` 事件中。该事件里的 `response` 是落地后的文本（拒答、低置信保留、以及真实来源行），客户端应用它替换已经流出的 token。`unsupported_claims` 在忠实度校验发现无依据声明时出现。`grounding` 取值为 `refused`、`hedged`、`grounded`；没有发生检索时省略。
+空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence`、`citations`、`grounding` 和 `unsupported_claims` 只出现在 `done` 事件中。该事件里的 `response` 是落地后的文本（拒答、低置信保留、以及真实来源行），客户端应用它替换已经流出的 token。检索没有留下片段时，流里不会先吐 token，拒答只出现在 `done`。`unsupported_claims` 在忠实度校验发现无依据声明时出现。`grounding` 取值为 `refused`、`hedged`、`grounded`；没有发生检索时省略。
 
 非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
 
@@ -295,7 +295,8 @@ data: {"error": "..."}                               // 终止性错误
 | `SCORE_GAP_THRESHOLD` | `0.15` | 遇到分数断崖即停止截断 |
 | `CONTEXTUAL_COMPRESSION` | `true` | 只保留片段内的相关句子 |
 | `QUERY_CONTEXTUALIZE` | `true` | 将追问改写为独立 query |
-| `QUERY_ROUTING_ENABLED` | `true` | 寒暄类问题跳过 Agent |
+| `QUERY_ROUTING_ENABLED` | `true` | 寒暄类问题跳过检索，直接回复 |
+| `DEEP_AGENTS_ENABLED` | `false` | 显式打开才走 Deep Agents 工具循环。默认是一次检索、一次生成、再接地 |
 | `FAITHFULNESS_CHECK` | `true` | 每次 RAG 回答额外一次 LLM 调用；校验失败时忽略，仍返回答案 |
 
 <details>

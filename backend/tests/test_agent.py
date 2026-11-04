@@ -184,3 +184,46 @@ class TestRetrievalToolLimits:
         """MAX_TOOL_RETRIEVALS 应定义为 8。"""
         from backend.core.agent import MAX_TOOL_RETRIEVALS
         assert MAX_TOOL_RETRIEVALS == 8
+
+
+class TestRunAgentStreaming:
+    """工具规划文本不能拼进最终回复。"""
+
+    def setup_method(self):
+        with _contexts_lock:
+            _contexts.clear()
+
+    def teardown_method(self):
+        with _contexts_lock:
+            _contexts.clear()
+
+    def test_direct_answer_is_kept(self, monkeypatch):
+        from langchain_core.messages import AIMessageChunk
+
+        from backend.core.agent import run_agent_streaming
+
+        agent = MagicMock()
+        agent.stream.return_value = [(AIMessageChunk(content="直接回答"), {})]
+        monkeypatch.setattr("backend.core.agent.get_agent", lambda: agent)
+
+        assert "".join(run_agent_streaming([{"role": "user", "content": "hi"}], "sid")) == "直接回答"
+
+    def test_tool_planning_text_is_dropped(self, monkeypatch):
+        from langchain_core.messages import AIMessageChunk, ToolMessage
+
+        from backend.core.agent import run_agent_streaming
+
+        planning = AIMessageChunk(content="我先检索一下。")
+        call = AIMessageChunk(
+            content="检索参数",
+            tool_call_chunks=[{"name": "retrieval_tool", "args": "", "id": "c1", "index": 0, "type": "tool_call_chunk"}],
+        )
+        tool = ToolMessage(content="未找到相关文档", tool_call_id="c1")
+        final = AIMessageChunk(content="没有找到足够相关的资料。")
+        agent = MagicMock()
+        agent.stream.return_value = [(planning, {}), (call, {}), (tool, {}), (final, {})]
+        monkeypatch.setattr("backend.core.agent.get_agent", lambda: agent)
+
+        text = "".join(run_agent_streaming([{"role": "user", "content": "问题"}], "sid"))
+        assert text == "没有找到足够相关的资料。"
+        assert "检索" not in text

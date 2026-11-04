@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -9,9 +10,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.config import settings
-from backend.domain.errors import NotFoundError, ValidationError
+from backend.domain.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from backend.domain.models import Document
-from backend.infrastructure.milvus import build_source_filter
+from backend.infrastructure.milvus import delete_source_vectors
 
 logger = logging.getLogger("ragmate")
 
@@ -173,10 +174,12 @@ async def delete_document(
     session: AsyncSession,
     milvus_client: MilvusClient | None = None,
 ) -> None:
-    """删除文档：PostgreSQL 记录为主，磁盘文件和 Milvus 作为辅助清理。"""
+    """删除文档。先确认 Milvus 向量已删除，再提交 PostgreSQL 删除。
+
+    向量删除失败时抛 503 并保留数据库记录，避免文档行没了、旧向量还在。
+    """
     name = validate_filename(filename)
 
-    # 1. 先查 DB
     result = await session.execute(select(Document).where(Document.filename == name))
     doc = result.scalar_one_or_none()
     if not doc:
@@ -184,23 +187,18 @@ async def delete_document(
 
     filepath = os.path.join(docs_dir, name)
 
-    # 2. 删 DB 记录（先删 DB，失败了就不动磁盘）
+    try:
+        await asyncio.to_thread(delete_source_vectors, milvus_client, name)
+    except ServiceUnavailableError:
+        await session.rollback()
+        raise
+
     await session.execute(delete(Document).where(Document.filename == name))
     await session.commit()
 
-    # 3. 清理磁盘文件和 Milvus 向量（DB 已删，这些失败不影响业务）
     if os.path.exists(filepath):
         try:
             os.remove(filepath)
         except Exception:
             logger.warning(f"Failed to delete file {filepath}", exc_info=True)
-
-    if milvus_client and milvus_client.has_collection(settings.MILVUS_COLLECTION):
-        try:
-            milvus_client.delete(
-                collection_name=settings.MILVUS_COLLECTION,
-                filter=build_source_filter(name),
-            )
-        except Exception:
-            logger.warning(f"Failed to delete Milvus vectors for {name}", exc_info=True)
 

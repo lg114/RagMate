@@ -344,8 +344,26 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
     })
     keep_ids_by_source = insert_chunks(client, chunks, dense_vecs, sparse_vecs)
 
-    # 9. 新向量写入成功后，再删除旧向量（仅限确实有新数据的文件）
-    delete_old_chunks(client, {source: keep_ids_by_source[source] for source in files_with_new_chunks})
+    # 9. 新向量写入成功后，再删除旧向量（仅限确实有新数据的文件）。
+    # 删除失败必须让本次入库失败：不能在旧向量还在时把状态写成 success。
+    try:
+        delete_old_chunks(
+            client,
+            {source: keep_ids_by_source.get(source, []) for source in files_with_new_chunks},
+            ingest_batch_id=ingest_batch_id,
+        )
+    except Exception as e:
+        logger.error("Failed to delete old vectors; ingest will not be marked success", exc_info=True)
+        result = {
+            "status": "failed",
+            "error": f"删除旧向量失败，本次入库未标记为成功: {e}",
+            "ingest_batch_id": ingest_batch_id,
+            "chunk_count": len(chunks),
+            "failed": failed_files,
+            "collection": settings.MILVUS_COLLECTION,
+        }
+        set_ingest_status_sync(result)
+        return result
 
     # 10. 同步 PostgreSQL
     failed_names = {f["filename"] for f in failed_files}
