@@ -8,16 +8,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/pyproject.toml
-      # 先装 CPU 版 torch，避免 pip 拉下带 CUDA 的大轮子（CI 机器没有 GPU）
-      - name: Install CPU-only torch
-        run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - name: Install project and test dependencies
         working-directory: backend
         run: pip install -e ".[test]"
