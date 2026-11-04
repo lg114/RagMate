@@ -66,9 +66,8 @@ async def load_session(session_id: str) -> list[dict]:
         return await _fetch(session, session_id)
 
 
-async def save_session(session_id: str, messages: list[dict], ttl: int | None = None) -> None:
-    """把历史末尾还没落库的消息写入 PostgreSQL。ttl 已不再使用。"""
-    del ttl
+async def save_session(session_id: str, messages: list[dict]) -> None:
+    """把历史末尾还没落库的消息写入 PostgreSQL。"""
     desired = _normalize(messages)
     if not desired:
         return
