@@ -280,7 +280,10 @@ async def _pop_retrieval_signals(
     unsupported = None
     # 没有任何留下的片段时回答会被拒答替换，不必再花一次 LLM 做忠实度校验
     no_evidence = bool(confidence) and confidence.get("level") == "low" and int(confidence.get("chunks") or 0) <= 0
-    if not is_error and not no_evidence and rdata.get("texts"):
+    # 忠实度校验只在低置信度时跑：证据扎实（medium/high）时跳过这次 LLM 调用。
+    # 置信度未知（None）时按低置信处理，保留原有行为。
+    low_confidence = confidence is None or confidence.get("level") == "low"
+    if not is_error and not no_evidence and low_confidence and rdata.get("texts"):
         # check_faithfulness 内部是同步 LLM 调用，必须挪到线程里，
         # 否则会阻塞整个事件循环
         claims = await asyncio.to_thread(check_faithfulness, response_text, rdata["texts"])
@@ -413,6 +416,7 @@ def _bundle_from_results(results, metrics, debug_entry, debug: bool) -> dict:
 def _retrieve_for_answer(message: str, history: list[dict], debug: bool) -> dict:
     """在同一线程里检索并读走指标。指标是线程本地的，不能换线程再读。"""
     from backend.core.retriever import (
+        calculate_confidence,
         contextualize_query,
         get_retrieval_metrics,
         reset_retrieval_debug,
@@ -421,10 +425,19 @@ def _retrieve_for_answer(message: str, history: list[dict], debug: bool) -> dict
         take_retrieval_debug,
     )
 
-    query = contextualize_query(message, history) if len(history) > 1 else message
     token = set_retrieval_debug(debug)
     try:
-        results = retrieve(query, k=settings.FINAL_CONTEXT_K)
+        # 先用原问题检索；置信度低时才改写追问再检一次，证据扎实时省一次 LLM 调用。
+        # QUERY_CONTEXTUALIZE=false 时从不改写（contextualize_query 内部同样守门）。
+        results = retrieve(message, k=settings.FINAL_CONTEXT_K)
+        if settings.QUERY_CONTEXTUALIZE and len(history) > 1:
+            metrics = get_retrieval_metrics()
+            confidence = calculate_confidence([metrics]) if metrics else None
+            low_confidence = confidence is None or confidence.get("level") == "low"
+            if low_confidence:
+                rewritten = contextualize_query(message, history)
+                if rewritten and rewritten != message:
+                    results = retrieve(rewritten, k=settings.FINAL_CONTEXT_K)
         return _bundle_from_results(results, get_retrieval_metrics(), take_retrieval_debug(), debug)
     finally:
         reset_retrieval_debug(token)

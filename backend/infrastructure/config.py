@@ -120,11 +120,11 @@ class Settings(BaseSettings):
     COMPRESSION_SCORE_THRESHOLD: float = Field(default=0.4, gt=0.0, lt=1.0)  # 句子保留阈值
     COMPRESSION_MIN_CHARS: int = Field(default=300, gt=0)                # 短于此长度的 chunk 不压缩
 
-    # 忠诚度校验（默认开启：RAG 回答多一次 LLM 调用；失败时放行，不阻断回答）
+    # 忠诚度校验（默认开启，但只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答；false 则全关）
     FAITHFULNESS_CHECK: bool = True
 
     # Query processing
-    QUERY_CONTEXTUALIZE: bool = True   # 检索前用 LLM 改写追问为自包含 query
+    QUERY_CONTEXTUALIZE: bool = True   # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
     # 冻结为关。多查询扩展不是默认；打开前先重跑 ragmate-eval retrieval 并更新门槛。
     MULTI_QUERY_ENABLED: bool = False
     MULTI_QUERY_COUNT: int = Field(default=3, gt=0, le=5)  # 仅开启时：改写变体数量（不含原始 query）

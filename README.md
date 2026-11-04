@@ -311,7 +311,7 @@ One retrieval config is validated. It is hybrid dense + sparse search, fused wit
 
 The 98-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
 
-`DEEP_AGENTS_ENABLED` stays `false` (one retrieve, one answer, then grounding). `FAITHFULNESS_CHECK` stays `true`.
+`DEEP_AGENTS_ENABLED` stays `false` (one retrieve, one answer, then grounding). `FAITHFULNESS_CHECK` stays `true` (checked only when retrieval confidence is low).
 
 <details>
 <summary><strong>Frozen env overrides</strong> — listed so a deployment can see them, not so they get tuned in place</summary>
@@ -320,7 +320,7 @@ The 98-question report was collected with in-process BGE-M3 and a local cross-en
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 
-**Filter and compression** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`), `MAX_PER_SOURCE` (`4`), `MIN_PER_SOURCE` (`2`), `SCORE_GAP_THRESHOLD` (`0.15`), `CONTEXTUAL_COMPRESSION` (`true`), `QUERY_CONTEXTUALIZE` (`true`, one follow-up rewrite, not multi-query), `QUERY_ROUTING_ENABLED` (`true`), `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
+**Filter and compression** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`), `MAX_PER_SOURCE` (`4`), `MIN_PER_SOURCE` (`2`), `SCORE_GAP_THRESHOLD` (`0.15`), `CONTEXTUAL_COMPRESSION` (`true`), `QUERY_CONTEXTUALIZE` (`true`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`true`), `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
 
 **Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 

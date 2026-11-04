@@ -36,7 +36,7 @@ class ChatResponse(BaseModel):
     # 无检索发生（如简单查询直连 LLM）时为 None
     confidence: dict | None = None
     # 忠实度校验未通过的声明：[{"claim": str, "supported": false}, ...]
-    # 默认开启 FAITHFULNESS_CHECK；未校验、全部通过、或已拒答时为 None
+    # 默认开启 FAITHFULNESS_CHECK，但仅低置信度时校验；未校验、全部通过、或已拒答时为 None
     unsupported_claims: list[dict] | None = None
     # 实际检索到的来源：[{"source": "文件名", "page": 1}, ...]，页码从 1 开始
     citations: list[dict] | None = None

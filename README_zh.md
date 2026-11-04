@@ -311,7 +311,7 @@ data: {"error": "..."}                               // 终止性错误
 
 那份 98 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
 
-`DEEP_AGENTS_ENABLED` 保持 `false`（一次检索、一次生成、再接地）。`FAITHFULNESS_CHECK` 保持 `true`。
+`DEEP_AGENTS_ENABLED` 保持 `false`（一次检索、一次生成、再接地）。`FAITHFULNESS_CHECK` 保持 `true`（只在检索置信度低时校验）。
 
 <details>
 <summary><strong>已冻结的环境变量</strong> — 列出来是为了部署时能看见，不是为了就地调参</summary>
@@ -320,7 +320,7 @@ data: {"error": "..."}                               // 终止性错误
 
 重叠长度必须小于对应分块大小，否则启动时会抛出校验错误。
 
-**过滤与压缩** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`)、`MAX_PER_SOURCE` (`4`)、`MIN_PER_SOURCE` (`2`)、`SCORE_GAP_THRESHOLD` (`0.15`)、`CONTEXTUAL_COMPRESSION` (`true`)、`QUERY_CONTEXTUALIZE` (`true`，把追问改写成一条查询，不是多查询)、`QUERY_ROUTING_ENABLED` (`true`)、`HIGH_SCORE_RATIO` (`0.6`)、`SOURCE_DOMINANCE_THRESHOLD` (`0.9`)、`SOURCE_DOMINANCE_BOOST` (`1.5`)、`DROP_RATIO_SEARCH` (`0.2`)、`COMPRESSION_SCORE_THRESHOLD` (`0.4`)、`COMPRESSION_MIN_CHARS` (`300`)。
+**过滤与压缩** — `DYNAMIC_THRESHOLD_RATIO` (`0.5`)、`MAX_PER_SOURCE` (`4`)、`MIN_PER_SOURCE` (`2`)、`SCORE_GAP_THRESHOLD` (`0.15`)、`CONTEXTUAL_COMPRESSION` (`true`)、`QUERY_CONTEXTUALIZE` (`true`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询)、`QUERY_ROUTING_ENABLED` (`true`)、`HIGH_SCORE_RATIO` (`0.6`)、`SOURCE_DOMINANCE_THRESHOLD` (`0.9`)、`SOURCE_DOMINANCE_BOOST` (`1.5`)、`DROP_RATIO_SEARCH` (`0.2`)、`COMPRESSION_SCORE_THRESHOLD` (`0.4`)、`COMPRESSION_MIN_CHARS` (`300`)。
 
 **嵌入** — `EMBEDDING_PROVIDER`（`remote`）、`EMBEDDING_MODEL`（`BAAI/bge-m3`）、`EMBEDDING_NORMALIZE`（`true`）、`HF_TOKEN`、`EMBEDDING_API_KEY`（可选）、`EMBEDDING_API_BASE_URL`（`remote` / `openai` 时必填）、`EMBEDDING_API_TIMEOUT`（`60`）。
 
