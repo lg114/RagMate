@@ -5,19 +5,11 @@ description = "RAG application with agentic workflow"
 requires-python = ">=3.12"
 dependencies = [
     # ── LangChain ecosystem ──
-    # 上限必须放到 1.x：deepagents>=0.5.0 硬性要求 langchain-core>=1.2.27，
-    # 而旧约束（core<1.0.0 / openai<0.4.0 / community<0.4.0 / ...）与之不可调和，
-    # 会让 `pip install -e .` 直接以 ResolutionImpossible 失败。
+    # langchain-core 只给 LLM 客户端与文本切分用；Agent（deepagents）已移到
+    # agents extra，不再是默认安装。core 的下限 >=1.2.27 仍保留。
     "langchain-core>=1.2.27,<2.0.0",
     "langchain-openai>=1.0.0,<2.0.0",
-    # 必须钉在 0.3.x：0.4.0 起移除了 langchain_community.chat_models.vertexai，
-    # 而 ragas 在 import 阶段硬依赖该模块（无 try/except 兜底）。
-    # 0.3.31 的约束是 langchain-core>=0.3.78,<2.0.0，与 deepagents 要求的 >=1.2.27 兼容，
-    # 因此两边可以共存——这是同时满足主应用与评测依赖的唯一版本区间。
-    "langchain-community>=0.3.31,<0.4.0",
     "langchain-text-splitters>=1.0.0,<2.0.0",
-    # ── Agent framework ──
-    "deepagents>=0.5.0",
     # ── Web framework ──
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -51,13 +43,19 @@ local = [
     "FlagEmbedding>=0.1.0",
     "langchain-huggingface>=1.0.0,<2.0.0",
 ]
-# RAGAS 已搁置（不在 CI 上，也不追 Python 3.14）。可选 extra 仍会在 import 时执行
+# Agent（opt-in）：只有 DEEP_AGENTS_ENABLED=true 时才需要。默认聊天路径
+# 不 import deepagents，因此它不在主依赖里。
+agents = [
+    "deepagents>=0.5.0",
+]
+# RAGAS 已搁置（不在 CI 上，也不追 Python 3.14）。ragas 在 import 阶段硬依赖
 #     from langchain_community.chat_models.vertexai import ChatVertexAI
-# 该模块在 langchain-community 0.4.0 中被移除，因此主依赖里把 langchain-community
-# 钉在 0.3.x（见上方注释）。不要单独放宽它，否则残留的 ragas 导入会 ImportError。
+# 该模块在 langchain-community 0.4.0 中被移除，因此 eval extra 里把
+# langchain-community 钉在 0.3.x。不要单独放宽它，否则 ragas 导入会 ImportError。
+# 主依赖不再需要 langchain-community：文档加载已改为直接调 pypdf/docx2txt。
 eval = [
     "ragas>=0.2.0",
-    "pillow>=10.0",
+    "langchain-community>=0.3.31,<0.4.0",
 ]
 test = [
     "pytest>=8.0",

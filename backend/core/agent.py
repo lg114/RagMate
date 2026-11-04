@@ -4,8 +4,6 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
-from deepagents import create_deep_agent
-
 from backend.infrastructure.model_factory import get_llm
 from backend.core.retriever import retrieve
 
@@ -127,12 +125,24 @@ _agent_lock = threading.Lock()
 
 
 def get_agent():
-    """获取 Deep Agent 单例。首次调用时创建。"""
+    """获取 Deep Agent 单例。首次调用时创建。
+
+    deepagents 只在这里延迟 import：默认路径（DEEP_AGENTS_ENABLED=false）
+    从不走到这里，因此默认安装不需要装 agents extra。
+    """
     global _agent
     if _agent is not None:
         return _agent
     with _agent_lock:
         if _agent is None:
+            try:
+                from deepagents import create_deep_agent
+            except ImportError as e:
+                raise ImportError(
+                    "deepagents is not installed. Install the optional agent "
+                    "extra with `pip install -e \".[agents]\"` (run from backend/) "
+                    "and retry, or set DEEP_AGENTS_ENABLED=false."
+                ) from e
             _agent = create_deep_agent(
                 model=get_llm(),
                 tools=[retrieval_tool],
