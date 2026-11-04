@@ -86,6 +86,7 @@ ragmate-eval retrieval-gate
 ```
 
 每次 PR 都拉起 BGE-M3、Milvus 和 reranker 太重，也依赖本机模型和 GPU。
+默认嵌入和重排已经是远程 HTTP，门禁仍然不调用它们；CI 只为通过启动校验而导出占位 URL。
 门禁用生产切块把 `eval/testsets/sample/corpus` 复现成 chunk，再用确定性
 BM25（汉字二字组 + 拉丁串，无网络、无随机）给 98 道题排序，指标仍是
 `deterministic_metrics` 里的 Recall@k / nDCG。命令退出码非 0 即 CI 失败。

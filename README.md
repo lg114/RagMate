@@ -38,8 +38,8 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 
 ## Highlights
 
-- **Hybrid retrieval** — BGE-M3 dense + sparse search fused with RRF in Milvus.
-- **Reranked, filtered context** — cross-encoder reranking, dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression.
+- **Hybrid retrieval** — dense + sparse search fused with RRF in Milvus. Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
+- **Reranked, filtered context** — remote reranking by default, plus dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression. A local cross-encoder is opt-in.
 - **Title-path + parent-child chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees.
 - **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
@@ -56,7 +56,8 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - Python 3.12+
 - Docker Desktop, or Docker Engine with Compose v2
 - An OpenAI-compatible LLM endpoint and API key
-- At least 8 GB RAM for CPU embedding; a GPU is recommended for larger collections
+- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose still runs Milvus, PostgreSQL, Redis, and MinIO; it does not serve these models.
+- Local FlagEmbedding is optional. That path needs about 8 GB of RAM for CPU inference, and a GPU helps on larger collections.
 
 ### 1. Start the infrastructure
 
@@ -107,18 +108,26 @@ cp .env.example .env
 On Windows PowerShell, use `Copy-Item .env.example .env` instead.
 
 > [!IMPORTANT]
-> Two variables are required — the app refuses to start without them: `DATABASE_URL` and `LLM_API_KEY`.
+> The process refuses to start unless these are set: `DATABASE_URL`, `LLM_API_KEY`, `EMBEDDING_API_BASE_URL`, and `RERANKER_API_BASE_URL`.
+> Embedding and rerank API keys are optional when the service does not check them.
+> To load BGE-M3 and the cross-encoder inside the API process instead, set `EMBEDDING_PROVIDER=huggingface` and `RERANKER_PROVIDER=local` (see the comments in `.env.example`). `local` and `flagembedding` are aliases of `huggingface`.
 
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
 LLM_API_KEY=your-api-key
 LLM_MODEL=gpt-4o
 
-# Optional: any OpenAI-compatible provider
+# Optional: any OpenAI-compatible chat provider
 LLM_API_BASE_URL=https://api.openai.com/v1
+
+# Required with the default remote providers. Point both at your sidecar or hosted API.
+EMBEDDING_PROVIDER=remote
+EMBEDDING_API_BASE_URL=http://127.0.0.1:8081/v1
+RERANKER_PROVIDER=api
+RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-The default database, Redis, and Milvus values match the Docker Compose stack. See [`backend/.env.example`](backend/.env.example) for the annotated full list.
+The default database, Redis, and Milvus values match the Docker Compose stack. See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
 
 ### 4. Run RagMate
 
@@ -128,7 +137,7 @@ Return to the repository root, with the virtual environment still active:
 uvicorn backend.app:app --reload --port 8000
 ```
 
-The first start downloads BGE-M3 and the reranker model (a few GB) and warms both up in the background, so allow extra time before the first request.
+A normal start does not download BGE-M3 or the reranker, and it does not import torch. The first ingest and the first query call your embedding and rerank URLs. If you opted into local models, that first start downloads the weights (a few GB) and warms them in the background.
 
 Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive API docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
 
@@ -183,7 +192,7 @@ The backend is strictly layered — each layer only calls downward:
 ```mermaid
 flowchart LR
     D[Documents] --> P[Load and chunk]
-    P --> E[BGE-M3 encode]
+    P --> E[Embed API]
     E --> V[(Milvus vectors)]
     P --> M[(PostgreSQL metadata)]
     Q[User query] --> R[Hybrid search + RRF]
@@ -192,9 +201,9 @@ flowchart LR
     A --> O[Answer with citations]
 ```
 
-**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against Milvus → BGE-M3 dense + sparse encoding → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
+**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against Milvus → dense + sparse encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
-**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense + sparse ANN search with RRF fusion → cross-encoder reranking (logits converted with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → agent and LLM → citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge.
+**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense + sparse ANN search with RRF fusion → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge.
 
 Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
 
@@ -273,6 +282,8 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 |---|---|---|
 | `DATABASE_URL` | **required** | Metadata and chat history |
 | `LLM_API_KEY` | **required** | LLM provider credential |
+| `EMBEDDING_API_BASE_URL` | **required** by default | OpenAI-compatible `/embeddings`. Not required when `EMBEDDING_PROVIDER` is `huggingface`, `local`, or `flagembedding` |
+| `RERANKER_API_BASE_URL` | **required** by default | `/rerank` endpoint. Not required when `RERANKER_PROVIDER=local` |
 | `LLM_MODEL` | `gpt-4o` | Model exposed by the provider |
 | `LLM_API_BASE_URL` | empty | Custom OpenAI-compatible endpoint |
 | `LLM_TEMPERATURE` | `0.01` | Kept low for factual answers |
@@ -308,9 +319,13 @@ Overlap must be smaller than its chunk size, otherwise startup fails with a vali
 
 **Reranker tuning** — `HIGH_SCORE_RATIO` (`0.6`), `SOURCE_DOMINANCE_THRESHOLD` (`0.9`), `SOURCE_DOMINANCE_BOOST` (`1.5`), `DROP_RATIO_SEARCH` (`0.2`), `COMPRESSION_SCORE_THRESHOLD` (`0.4`), `COMPRESSION_MIN_CHARS` (`300`).
 
-**Embedding** — `EMBEDDING_PROVIDER` (`huggingface`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY`, `EMBEDDING_API_BASE_URL`, `EMBEDDING_API_TIMEOUT` (`60`).
+**Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 
-`huggingface` (also `local` / `flagembedding`) loads BGE-M3 inside the API process with FlagEmbedding. `EMBEDDING_DEVICE` (`cpu` or `cuda`) is passed to that loader. `remote` or `openai` calls `POST {EMBEDDING_API_BASE_URL}/embeddings` instead, and startup does not warm a local BGE model. Pair it with `RERANKER_PROVIDER=api` so rerank stays off-process too. If the service includes `sparse` (or `lexical_weights`) on each result, those weights are stored; otherwise RagMate fills a stable hashed sparse vector. That hash is not BGE-M3 lexical weight, so re-ingest after switching providers. A sidecar can be any OpenAI-compatible embeddings server plus a `/rerank` endpoint (see the commented block in `backend/.env.example`). CI does not need a GPU or those services: the default remains local FlagEmbedding, and tests mock the HTTP client.
+`remote` (also `openai`) calls `POST {EMBEDDING_API_BASE_URL}/embeddings`. Startup does not import torch or warm a local BGE model. `RERANKER_PROVIDER` defaults to `api` and calls `POST {RERANKER_API_BASE_URL}/rerank` (`RERANKER_API_KEY` optional, `RERANKER_API_TIMEOUT` `30`). If the embeddings service includes `sparse` (or `lexical_weights`) on each result, those weights are stored; otherwise RagMate fills a stable hashed sparse vector. That hash is not BGE-M3 lexical weight, so re-ingest after switching providers.
+
+**Local opt-in** — set `EMBEDDING_PROVIDER=huggingface` (`local` and `flagembedding` are the same path) to load BGE-M3 with FlagEmbedding inside the API process. `EMBEDDING_DEVICE` (`cpu` or `cuda`) applies only then. Set `RERANKER_PROVIDER=local` to load the cross-encoder in-process. Turning either of those on imports torch on first use and warms the weights at startup. The commented block in [`backend/.env.example`](backend/.env.example) shows both lines.
+
+CI does not need a GPU or a live embeddings service. Tests mock the HTTP client, and the retrieval gate replays BM25. The workflow still exports placeholder URLs because settings are validated at import.
 
 **Agent** — `AGENT_RECURSION_LIMIT` (`30`).
 
@@ -354,7 +369,7 @@ pip install -e ".[test]"
 pytest -v
 ```
 
-Tests live in `backend/tests/` and cover the retrieval filtering and deduplication logic. `conftest.py` provides an `override_settings` fixture for temporarily patching configuration.
+Tests live in `backend/tests/` and cover the retrieval filtering and deduplication logic. `conftest.py` provides an `override_settings` fixture for temporarily patching configuration. With no `backend/.env`, that file also fills placeholder `DATABASE_URL`, `LLM_API_KEY`, and the remote embed/rerank URLs so `pytest` does not need a GPU or a running model server. A checked-in `.env` is used as-is. `ragmate-eval retrieval-gate` does not go through `conftest`; export the same placeholder URLs (as CI does) or keep a valid `.env`.
 
 > [!NOTE]
 > `ruff` and `mypy` are not configured in `pyproject.toml` yet. The codebase follows PEP 8, 4-space indentation, and Chinese docstrings on public functions.
@@ -384,7 +399,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 - **No authentication or multi-tenancy.** Every session and document is visible to anyone who can reach the API.
 - **Schema changes need a manual rebuild.** If the Milvus collection schema does not match, startup raises a validation error instead of migrating; the collection must be dropped and recreated.
 - **No migration tool.** Schema changes are applied with `create_all` plus a small hand-written column-migration list in `infrastructure/database.py`.
-- **CPU inference is slow when models stay in-process.** The default loads BGE-M3 and the reranker locally. Point `EMBEDDING_PROVIDER=remote` and `RERANKER_PROVIDER=api` at a sidecar if the API process should not load those weights.
+- **In-process embedding and rerank are opt-in, and CPU inference is slow.** The default calls the remote embeddings and `/rerank` APIs and does not load torch. Set `EMBEDDING_PROVIDER=huggingface` and `RERANKER_PROVIDER=local` only when this process should load BGE-M3 and the cross-encoder.
 
 ---
 
@@ -393,8 +408,8 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 | Symptom | What to check |
 |---|---|
 | `/ready` reports `degraded` | `docker compose ps`, then `docker compose logs <service>` |
-| Startup fails with "Required env vars not set" | `DATABASE_URL` and `LLM_API_KEY` in `backend/.env` |
-| Model download or CPU inference is slow | Use CUDA, or a hosted embedding service |
+| Startup fails with "Required env vars not set" | `DATABASE_URL`, `LLM_API_KEY`, and — unless you opted into local models — `EMBEDDING_API_BASE_URL` and `RERANKER_API_BASE_URL` in `backend/.env` |
+| Local model download or CPU inference is slow | Stay on the default remote providers, or set `EMBEDDING_DEVICE=cuda` for the local opt-in |
 | Chat returns no useful context | Confirm ingestion finished and `MILVUS_HOST`, `DATABASE_URL`, `REDIS_URL` point at the running stack |
 | Port conflicts | Change the host-side ports in `docker-compose.yml` and update the matching `.env` values |
 | Ingestion stuck in `running` | Status is reconciled from the Redis heartbeat. A dead worker becomes `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30); `POST /ingest/cancel` asks the live worker to stop |

@@ -23,16 +23,22 @@ jobs:
         run: pip install -e ".[test]"
       - name: Run tests
         working-directory: backend
-        # 配置模块在 import 时就校验必填项，CI 里给假值即可（单测 mock 了基础设施）
+        # 配置在 import 时校验。默认嵌入/重排是远程 HTTP，这里只给占位 URL。
+        # 单测 mock 了 HTTP，不访问这些地址，也不需要 GPU。
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
           LLM_API_KEY: test-key-for-ci
+          EMBEDDING_API_BASE_URL: http://embed.test/v1
+          RERANKER_API_BASE_URL: http://rerank.test/v1
         run: pytest -q
       - name: Retrieval quality gate
         working-directory: backend
         # 不启动 Milvus，也不下载 BGE / reranker。用样本语料做确定性 BM25 重放，
         # 对照 eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json 的 fused 指标。
+        # 门禁本身不调用嵌入或重排，但进程仍会校验默认远程 URL，所以同样给占位值。
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
           LLM_API_KEY: test-key-for-ci
+          EMBEDDING_API_BASE_URL: http://embed.test/v1
+          RERANKER_API_BASE_URL: http://rerank.test/v1
         run: ragmate-eval retrieval-gate

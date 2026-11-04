@@ -7,6 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _ENV_FILE = _BACKEND_DIR / ".env"
 
+# huggingface / local / flagembedding：本进程 FlagEmbedding。openai / remote：HTTP，不加载 BGE。
+LOCAL_EMBEDDING_PROVIDERS = ("huggingface", "local", "flagembedding")
+REMOTE_EMBEDDING_PROVIDERS = ("openai", "remote")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore")
@@ -22,12 +26,13 @@ class Settings(BaseSettings):
     LLM_REASONING_EFFORT: str = ""
 
     # Embedding
-    EMBEDDING_PROVIDER: str = "huggingface"
+    # 默认 remote：API 进程不加载 torch / FlagEmbedding。本进程 BGE 需显式设为 huggingface、local 或 flagembedding。
+    EMBEDDING_PROVIDER: str = "remote"
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
-    EMBEDDING_DEVICE: str = "cpu"
+    EMBEDDING_DEVICE: str = "cpu"  # 仅本地 FlagEmbedding：cpu 或 cuda
     EMBEDDING_NORMALIZE: bool = True
-    EMBEDDING_API_KEY: str = ""
-    EMBEDDING_API_BASE_URL: str = ""
+    EMBEDDING_API_KEY: str = ""  # 远程嵌入密钥，可选；自建服务不校验时留空
+    EMBEDDING_API_BASE_URL: str = ""  # remote/openai 时必填
     EMBEDDING_API_TIMEOUT: float = Field(default=60.0, gt=0)  # 远程 embedding 请求超时（秒）
     HF_TOKEN: str = ""
 
@@ -76,7 +81,8 @@ class Settings(BaseSettings):
     RRF_K: int = Field(default=60, ge=1, le=200)  # RRF 常数；越小越偏向「两边都靠前」的交集
     FUSION_DENSE_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)  # weighted 模式稠密权重，稀疏=1-该值
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    RERANKER_PROVIDER: str = "local"  # local=本地 CrossEncoder；api=远程 /rerank 接口（Jina、硅基流动等兼容格式），免本地加载模型
+    # 默认 api：POST {RERANKER_API_BASE_URL}/rerank，不在本进程加载 CrossEncoder。
+    RERANKER_PROVIDER: str = "api"
     RERANKER_API_BASE_URL: str = ""   # RERANKER_PROVIDER=api 时必填，如 https://api.jina.ai/v1
     RERANKER_API_KEY: str = ""        # 远程 rerank 接口的密钥（可选，部分自建服务不需要）
     RERANKER_API_TIMEOUT: float = Field(default=30.0, gt=0)  # 远程 rerank 请求超时（秒）
@@ -149,14 +155,35 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_required(self):
+        if self.RERANKER_PROVIDER not in ("local", "api"):
+            raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")
+        if self.EMBEDDING_PROVIDER not in LOCAL_EMBEDDING_PROVIDERS + REMOTE_EMBEDDING_PROVIDERS:
+            raise ValueError(
+                "EMBEDDING_PROVIDER must be huggingface, local, flagembedding, openai, or remote, "
+                f"got '{self.EMBEDDING_PROVIDER}'"
+            )
+
         missing = []
         if not self.DATABASE_URL:
             missing.append("DATABASE_URL")
         if not self.LLM_API_KEY:
             missing.append("LLM_API_KEY")
+        # 默认就是远程。URL 缺失时启动失败，避免进程悄悄去加载本地 torch / BGE。
+        # 密钥保持可选：很多 OpenAI 兼容侧车不校验 Authorization。
+        if self.EMBEDDING_PROVIDER in REMOTE_EMBEDDING_PROVIDERS and not self.EMBEDDING_API_BASE_URL.strip():
+            missing.append("EMBEDDING_API_BASE_URL")
+        if self.RERANKER_PROVIDER == "api" and not self.RERANKER_API_BASE_URL.strip():
+            missing.append("RERANKER_API_BASE_URL")
         if missing:
-            raise ValueError(f"Required env vars not set: {', '.join(missing)}. Check your .env file.")
-        
+            raise ValueError(
+                f"Required env vars not set: {', '.join(missing)}. Check your .env file. "
+                "EMBEDDING_API_BASE_URL is required when EMBEDDING_PROVIDER is openai or remote (the default). "
+                "RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api (the default). "
+                "Keys for those endpoints are optional. "
+                "To load FlagEmbedding and the cross-encoder in this process instead, set "
+                "EMBEDDING_PROVIDER=huggingface (local and flagembedding are aliases) and RERANKER_PROVIDER=local."
+            )
+
         # 验证所有 chunk size 配置
         chunk_configs = [
             ("CHUNK_SIZE", "CHUNK_OVERLAP"),
@@ -176,21 +203,6 @@ class Settings(BaseSettings):
         
         if self.MIN_PER_SOURCE > self.MAX_PER_SOURCE:
             raise ValueError(f"MIN_PER_SOURCE ({self.MIN_PER_SOURCE}) must be <= MAX_PER_SOURCE ({self.MAX_PER_SOURCE})")
-
-        if self.RERANKER_PROVIDER not in ("local", "api"):
-            raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")
-        if self.RERANKER_PROVIDER == "api" and not self.RERANKER_API_BASE_URL:
-            raise ValueError("RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api")
-
-        # huggingface / local / flagembedding：API 进程内加载 FlagEmbedding。
-        # openai / remote：OpenAI 兼容 HTTP，不在 API 进程里加载 BGE。
-        if self.EMBEDDING_PROVIDER not in ("huggingface", "local", "flagembedding", "openai", "remote"):
-            raise ValueError(
-                "EMBEDDING_PROVIDER must be huggingface, local, flagembedding, openai, or remote, "
-                f"got '{self.EMBEDDING_PROVIDER}'"
-            )
-        if self.EMBEDDING_PROVIDER in ("openai", "remote") and not self.EMBEDDING_API_BASE_URL:
-            raise ValueError("EMBEDDING_API_BASE_URL is required when EMBEDDING_PROVIDER is openai or remote")
 
         if self.INGEST_HEARTBEAT_STALE <= self.INGEST_HEARTBEAT_INTERVAL:
             raise ValueError(

@@ -1,15 +1,13 @@
-"""向量编码：默认在进程内用 FlagEmbedding 跑 BGE-M3；也可改走远程 HTTP。"""
+"""向量编码：默认走远程 OpenAI 兼容 HTTP；显式 opt-in 后才在进程内用 FlagEmbedding。"""
 import json
 import math
-import re
 import urllib.request
 import zlib
 from functools import lru_cache
 
-from backend.infrastructure.config import settings
+from backend.infrastructure.config import REMOTE_EMBEDDING_PROVIDERS, settings
 
 ENCODE_BATCH_SIZE = 64
-_REMOTE_PROVIDERS = {"openai", "remote"}
 _SPARSE_BUCKETS = 262144
 
 
@@ -18,13 +16,17 @@ class EncodingCancelled(Exception):
 
 
 def uses_remote_embeddings() -> bool:
-    """嵌入是否走 HTTP 侧车，而不是在本进程加载 BGE-M3。"""
-    return settings.EMBEDDING_PROVIDER in _REMOTE_PROVIDERS
+    """嵌入是否走 HTTP，而不是在本进程加载 BGE-M3。默认是。"""
+    return settings.EMBEDDING_PROVIDER in REMOTE_EMBEDDING_PROVIDERS
 
 
 @lru_cache(maxsize=1)
 def get_bge_m3():
-    """加载 bge-m3 模型（单例），用于提取 dense + sparse 向量。"""
+    """加载 bge-m3 模型（单例），用于提取 dense + sparse 向量。
+
+    仅 EMBEDDING_PROVIDER 为 huggingface / local / flagembedding 时调用。
+    FlagEmbedding 在函数内导入，默认远程路径不会加载它。
+    """
     from FlagEmbedding import BGEM3FlagModel
 
     device = settings.EMBEDDING_DEVICE
@@ -145,8 +147,8 @@ def _encode_local(texts: list[str], cancel_event=None) -> tuple[list, list]:
 def encode_documents(texts: list[str], cancel_event=None) -> tuple[list, list]:
     """提取 dense 和 sparse 向量（分批处理避免内存溢出）。
 
-    默认用本进程里的 FlagEmbedding BGE-M3。EMBEDDING_PROVIDER 为 remote 或 openai
-    时改为请求 OpenAI 兼容的 /embeddings，本进程不加载模型。
+    默认（EMBEDDING_PROVIDER 为 remote 或 openai）请求 OpenAI 兼容的 /embeddings，
+    本进程不加载模型。huggingface / local / flagembedding 才用本进程里的 FlagEmbedding。
     cancel_event 已置位时抛出 EncodingCancelled，且不会为了取消去加载模型。
     返回 (dense_vecs, sparse_vecs)。
     """
