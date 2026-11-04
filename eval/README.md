@@ -4,9 +4,9 @@
 
 检索只冻结一套配置，对上
 [`retrieval-baseline-98q-titlepath-rerun.json`](reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)
-的 fused 阶段：混合检索（稠密 + 稀疏）、RRF（`FUSION_MODE=rrf`，`RRF_K=60`）、
+的 fused 阶段：混合检索（稠密 + 稀疏）、RRF（`RRF_K=60`）、
 `CHUNKING_STRATEGY=title_path`（`CHUNK_SIZE=1000` / overlap `200`，父块 `2500` / `300`）、
-重排候选 `30`、阈值 `0.3`、`FINAL_CONTEXT_K=15`、`MULTI_QUERY_ENABLED=false`。
+重排候选 `30`、阈值 `0.3`、`FINAL_CONTEXT_K=15`。
 加权融合、多查询、`parent_child` 只留在环境变量里，不是第二套默认。
 不要新增融合臂、不要把多查询改成默认开、不要再加切块策略。
 要改其中任何一项，先重跑 `ragmate-eval retrieval`，再按下面「有意更新基线」替换钉住的门槛。
@@ -117,8 +117,7 @@ reranked 那一臂要 cross-encoder，词法重放对不齐）。余量 `0.015`�
 
 扫参脚本已删除；扫参结论见 [`retrieval-baseline-98q-failures.md`](reports/baseline/retrieval-baseline-98q-failures.md)（融合调参一点）与仓库根目录 `RETRIEVAL_EXPERIMENTS.md`。
 
-生产开关已冻结：`FUSION_MODE=rrf`、`RRF_K=60`。`weighted` 和 `FUSION_DENSE_WEIGHT`
-只是环境变量，扫参结果不能直接改默认。不要新增融合臂。若某次扫参真要替换默认，
+生产融合已冻结为 RRF（`RRF_K=60`）；加权融合已删除。不要新增融合臂。若某次扫参真要替换默认，
 按上面「有意更新基线」重跑确定性检索并改门槛，避免 98 题过拟合。
 
 ## 切块策略（冻结为 title_path）
