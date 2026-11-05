@@ -4,203 +4,210 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="RagMate：面向自有文档的检索问答。上传、入库，并核对带来源的回答。">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net">
-<title>RagMate · 对话</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23171614'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Georgia,serif' font-size='18' fill='%238EE0CB'%3ER%3C/text%3E%3C/svg%3E">
-<script src="/js/boot.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:">
+<title>RagMate · 文档问答</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg-elev: #ffffff; --bg-nav: #fafafa; --bg-sunken: #f5f5f4;
+    --ink: #111111; --ink-soft: #404040; --muted: #8a8a8a;
+    --line: #e8e8e8; --line-strong: #d4d4d4;
+    --accent: #111111; --accent-ink: #ffffff; --accent-soft: #f5f5f4;
+    --ok: #404040; --ok-soft: #f5f5f4;
+    --shadow: none;
+    --font: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101010; --bg-elev: #171717; --bg-nav: #141414; --bg-sunken: #262626;
+      --ink: #f5f5f5; --ink-soft: #d4d4d4; --muted: #9ca3af;
+      --line: #262626; --line-strong: #3f3f3f;
+      --accent: #f5f5f5; --accent-ink: #111111; --accent-soft: #262626;
+      --ok: #d4d4d4; --ok-soft: #262626;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); line-height: 1.6; }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; background: var(--bg-elev);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand-name { font-weight: 700; font-size: 17px; }
+  .brand-tag { color: var(--muted); font-size: 13px; margin-left: 6px; }
+  .topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pill {
+    font-size: 12.5px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--ink-soft); background: var(--bg);
+  }
+  .pill.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); font-weight: 600; }
+  .pill.ok::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #16a34a; margin-right: 6px; vertical-align: 1px; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 120px; }
+  .lede { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .lede b { color: var(--ink-soft); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+  .chip {
+    border: 1px solid var(--line-strong); background: var(--bg-elev);
+    color: var(--ink-soft); border-radius: 999px; padding: 7px 14px;
+    font: inherit; font-size: 14px; cursor: pointer; text-align: left;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  .msg { margin-bottom: 22px; }
+  .msg-user { display: flex; justify-content: flex-end; }
+  .bubble-user {
+    background: var(--bg-sunken); color: var(--ink);
+    padding: 10px 14px; border-radius: var(--radius);
+    border-bottom-right-radius: 4px; max-width: 85%; white-space: pre-wrap;
+  }
+  .bubble-ai { padding: 2px 0; }
+  .bubble-ai p { margin: 0 0 10px; }
+  .bubble-ai pre {
+    background: var(--bg-sunken); border-radius: 8px; padding: 12px 14px;
+    overflow-x: auto; font-size: 13.5px; margin: 0 0 10px;
+  }
+  .bubble-ai pre code { font-size: inherit; }
+  .bubble-ai a { color: var(--accent); }
+  .answer-status { font-size: 12.5px; color: var(--muted); margin: 4px 0 0; }
+  .cite {
+    display: inline-grid; place-items: center;
+    min-width: 20px; height: 20px; padding: 0 5px;
+    border-radius: 6px; border: 1px solid var(--line-strong);
+    background: var(--bg-elev); color: var(--ink-soft);
+    font-size: 12px; font-weight: 600; cursor: pointer; vertical-align: 2px;
+  }
+  .cite:hover { border-color: var(--accent); }
+
+  .sources { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+  .sources h3 { font-size: 13px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .source-card {
+    background: var(--bg-elev); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px;
+    box-shadow: var(--shadow);
+  }
+  .source-card.flash { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .source-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .source-name { font-family: var(--mono); font-size: 13.5px; font-weight: 500; }
+  .source-loc { font-size: 12.5px; color: var(--muted); }
+
+  details.docs, details.connect {
+    margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg-elev); padding: 12px 16px;
+  }
+  details.docs summary, details.connect summary { cursor: pointer; font-weight: 600; font-size: 14.5px; }
+  details.docs summary span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
+  .doc-list { list-style: none; margin: 12px 0 0; padding: 0; }
+  .doc-list li {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px;
+  }
+  .doc-list li:first-child { border-top: 0; }
+  .doc-list .mono { font-size: 13px; }
+  .doc-list .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .doc-empty { color: var(--muted); font-size: 14px; margin: 12px 0 0; }
+  .dropzone {
+    margin-top: 14px; border: 1.5px dashed var(--line-strong); border-radius: var(--radius);
+    padding: 18px; text-align: center; color: var(--muted); font-size: 14px; cursor: pointer;
+  }
+  .dropzone:hover { border-color: var(--accent); color: var(--accent); }
+  .dropzone.busy { pointer-events: none; opacity: .6; }
+  .connect-body { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .connect-body input {
+    flex: 1; min-width: 200px; font: inherit; font-size: 14px;
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 12px;
+  }
+  .connect-body button, .mini-btn {
+    font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: 8px; padding: 8px 16px;
+  }
+  .connect-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+
+  .composer {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--bg); border-top: 1px solid var(--line);
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  }
+  .composer-inner { max-width: 760px; margin: 0 auto; display: flex; gap: 10px; }
+  .composer textarea {
+    flex: 1; resize: none; font: inherit; font-size: 15px;
+    background: var(--bg-elev); color: var(--ink);
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    padding: 10px 14px; min-height: 44px; max-height: 160px;
+  }
+  .composer textarea:focus { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); border-color: var(--accent); }
+  .composer button {
+    flex: none; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: var(--radius); padding: 0 20px;
+  }
+  .composer button:disabled { opacity: .5; cursor: default; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
+    background: var(--ink); color: var(--bg); font-size: 13.5px;
+    padding: 8px 16px; border-radius: 999px; opacity: 0; pointer-events: none;
+    transition: opacity .2s; max-width: 90vw; text-align: center; z-index: 10;
+  }
+  .toast.show { opacity: 1; }
+  .hint { color: var(--muted); font-size: 14px; }
+</style>
 </head>
 <body>
-<a class="skip-link" href="#main">跳到主要内容</a>
-<div class="shell" id="shell">
-  <aside class="nav" id="nav" aria-label="主导航">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true">R</span>
-      <span class="brand-text">
-        <span class="brand-name">RagMate</span>
-        <span class="brand-tag">文档问答</span>
-      </span>
+<header class="topbar">
+  <span class="brand-name">RagMate</span>
+  <span class="brand-tag">文档问答</span>
+  <div class="topbar-right">
+    <span class="pill" id="corpus-pill">文档加载中</span>
+    <span class="pill" id="ready-pill">检查中</span>
+  </div>
+</header>
+
+<main>
+  <p class="lede">基于已入库的文档提问，回答附带来源，点引用可查看来源文件。</p>
+
+  <div class="chips" id="chips">
+    <button type="button" class="chip" data-q="一个查询里有三个排序节点、work_mem 保持默认 4MB 时，最多能用多少内存？64MB 配 100 个并发连接时理论峰值是多少？">work_mem 能用多少内存？</button>
+    <button type="button" class="chip" data-q="RagMate 本地开发环境的 Docker Compose 编排文件在仓库的什么位置？用什么命令启动整套基础设施？">Compose 文件在哪，怎么启动？</button>
+    <button type="button" class="chip" data-q="web 服务的启动命令是什么？接口文档在哪个地址打开？">web 服务怎么启动，文档在哪？</button>
+  </div>
+  <div id="thread">
+    <p class="hint" id="empty-hint">还没有提问。点上面一道试试，或直接在下面输入。</p>
+  </div>
+
+  <details class="docs" id="docs-box">
+    <summary>已入库的文档<span id="docs-count"></span></summary>
+    <ul class="doc-list" id="doc-list"></ul>
+    <p class="doc-empty" id="doc-empty" hidden>还没有入库的文档，先上传一份。</p>
+    <div class="dropzone" id="dropzone" role="button" tabindex="0">拖入文件或点这里上传新文档</div>
+    <input type="file" id="file-input" hidden>
+  </details>
+
+  <details class="connect">
+    <summary>连接</summary>
+    <div class="connect-body">
+      <input type="password" id="token-input" placeholder="API 令牌（默认空，不用填）" autocomplete="off">
+      <button type="button" id="token-save">保存</button>
     </div>
-    <nav class="nav-tabs" aria-label="视图">
-      <button type="button" class="nav-tab is-active" data-view="chat" aria-current="page">
-        <span class="nav-index" aria-hidden="true">1</span>对话
-      </button>
-      <button type="button" class="nav-tab" data-view="documents">
-        <span class="nav-index" aria-hidden="true">2</span>文档
-      </button>
-      <button type="button" class="nav-tab" data-view="settings">
-        <span class="nav-index" aria-hidden="true">3</span>设置
-      </button>
-    </nav>
-    <div class="nav-sessions" id="nav-sessions">
-      <button type="button" id="btn-new-chat" class="btn btn-primary btn-block">新对话</button>
-      <label class="search-field">
-        <span class="visually-hidden">搜索会话</span>
-        <input id="session-search" type="search" placeholder="搜索会话" autocomplete="off">
-      </label>
-      <div class="history-head">
-        <span>最近</span>
-        <button type="button" id="btn-refresh-sessions" class="btn btn-ghost btn-tiny" aria-label="刷新会话">刷新</button>
-      </div>
-      <div id="history-list" class="history-list" role="list"></div>
-    </div>
-    <div class="nav-foot">
-      <button type="button" id="btn-theme-quick" class="btn btn-ghost btn-block">外观 · 跟随系统</button>
-    </div>
-  </aside>
-  <button type="button" id="nav-scrim" class="nav-scrim" hidden aria-label="关闭菜单"></button>
+    <p class="connect-note">令牌只保存在本浏览器，用于 API 鉴权；服务端默认不设鉴权，不用填。</p>
+  </details>
+</main>
 
-  <div class="workspace" id="workspace">
-    <header class="topbar">
-      <button type="button" id="btn-nav-toggle" class="btn btn-ghost nav-toggle" aria-expanded="false" aria-controls="nav">菜单</button>
-      <div class="topbar-title">
-        <h1 id="view-title">对话</h1>
-        <p id="chat-context">新对话</p>
-      </div>
-      <button type="button" id="ingest-chip" class="ingest-chip" hidden>入库中</button>
-      <button type="button" id="btn-ready" class="ready-pill" data-state="pending">检查中</button>
-    </header>
-
-    <main id="main">
-      <section id="view-chat" class="view" aria-label="对话">
-        <div id="chat-status" class="visually-hidden" aria-live="polite"></div>
-        <div id="chat-scroll" class="chat-scroll">
-          <div id="chat-messages" class="chat-column"></div>
-        </div>
-        <button type="button" id="btn-jump-latest" class="jump-latest" hidden>回到底部</button>
-        <div id="chat-error" class="banner banner-danger chat-error" role="alert" hidden></div>
-        <form id="chat-form" class="composer">
-          <label class="visually-hidden" for="chat-textarea">问题</label>
-          <textarea id="chat-textarea" rows="1" maxlength="10000" placeholder="基于已入库的文档提问" autocomplete="off"></textarea>
-          <div class="composer-bar">
-            <label class="debug-toggle" title="开发模式：随请求返回检索轨迹">
-              <input type="checkbox" id="chat-debug" data-debug-toggle>
-              检索调试
-            </label>
-            <span id="composer-count" class="composer-count" hidden>0 / 10000</span>
-            <span class="composer-hint">Enter 发送，Shift+Enter 换行</span>
-            <button type="submit" id="btn-send" class="btn btn-primary">发送</button>
-            <button type="button" id="btn-stop" class="btn btn-danger" hidden>停止</button>
-          </div>
-        </form>
-      </section>
-
-      <section id="view-documents" class="view view-pad" aria-label="文档" hidden>
-        <header class="page-head">
-          <div>
-            <h2>文档库</h2>
-            <p id="library-summary">正在读取文档…</p>
-          </div>
-        </header>
-        <div id="library-error" class="banner banner-danger" hidden>
-          <span></span>
-          <button type="button" id="btn-library-retry" class="btn btn-ghost">重试</button>
-        </div>
-        <section id="ingest-banner" class="ingest-banner" hidden aria-live="polite"></section>
-        <label class="upload-zone" id="upload-zone">
-          <input type="file" id="file-input" accept=".pdf,.docx,.xlsx,.xls,.txt,.md" multiple>
-          <span class="upload-title">拖入文件，或点击选择</span>
-          <span class="upload-hint">PDF、DOCX、XLSX、XLS、TXT、Markdown · 单个最大 50 MB</span>
-        </label>
-        <ul id="upload-queue" class="upload-queue" hidden></ul>
-        <div class="library-tools">
-          <label class="search-field">
-            <span class="visually-hidden">搜索文档</span>
-            <input id="doc-search" type="search" placeholder="搜索文件名" autocomplete="off">
-          </label>
-          <div class="filter-row" role="group" aria-label="按状态筛选">
-            <button type="button" class="chip is-active" data-filter="all" aria-pressed="true">全部</button>
-            <button type="button" class="chip" data-filter="pending">待处理</button>
-            <button type="button" class="chip" data-filter="ingested">已入库</button>
-            <button type="button" class="chip" data-filter="failed">失败</button>
-          </div>
-          <div class="library-actions">
-            <label class="check-line">
-              <input type="checkbox" id="doc-select-all">
-              <span>全选当前列表</span>
-            </label>
-            <button type="button" id="btn-ingest" class="btn btn-primary" disabled>入库</button>
-            <button type="button" id="btn-batch-delete" class="btn btn-danger" disabled>删除所选</button>
-          </div>
-        </div>
-        <div id="doc-list" class="doc-list" role="list"></div>
-        <p id="doc-empty" class="empty-copy" hidden>把文件拖到上方，或点击选择。入库之后，对话才能引用它们。</p>
-      </section>
-
-      <section id="view-settings" class="view view-pad" aria-label="设置" hidden>
-        <header class="page-head">
-          <div>
-            <h2>设置</h2>
-            <p>演示壳。外观、开发用检索轨迹，以及这台浏览器保存的访问令牌。检索配置在服务端冻结。</p>
-          </div>
-        </header>
-        <div class="settings-grid">
-          <section class="card">
-            <h3>外观</h3>
-            <p class="card-lead">选择跟着系统，或固定浅色、深色。快捷键 Alt+1 到 Alt+3 切换视图。</p>
-            <div class="choice-row" role="radiogroup" aria-label="外观">
-              <label class="choice"><input type="radio" name="theme" value="system"> 跟随系统</label>
-              <label class="choice"><input type="radio" name="theme" value="light"> 浅色</label>
-              <label class="choice"><input type="radio" name="theme" value="dark"> 深色</label>
-            </div>
-          </section>
-          <section class="card">
-            <h3>检索调试</h3>
-            <p class="card-lead">开发模式轨迹。打开后，下一次提问会带上 debug，并在回答下列出候选片段、分数和丢弃原因。预览是文档原文，演示时保持关闭。</p>
-            <label class="check-line">
-              <input type="checkbox" id="settings-debug" data-debug-toggle>
-              <span>随请求返回检索调试</span>
-            </label>
-          </section>
-          <section class="card">
-            <h3>API 令牌</h3>
-            <p class="card-lead">服务端设置了 API_AUTH_TOKEN 时才需要。令牌只留在这台浏览器的本地存储里，请求时作为 Bearer 发送。</p>
-            <label class="field" for="api-token">令牌</label>
-            <div class="token-row">
-              <input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="留空表示不发送">
-              <button type="button" id="btn-token-reveal" class="btn btn-ghost" aria-pressed="false">显示</button>
-            </div>
-            <div class="card-actions">
-              <button type="button" id="btn-token-save" class="btn btn-primary">保存</button>
-              <button type="button" id="btn-token-clear" class="btn btn-ghost">清除</button>
-            </div>
-            <p id="token-note" class="card-note" role="status"></p>
-          </section>
-          <section class="card">
-            <h3>服务状态</h3>
-            <p id="ready-summary" class="card-lead">正在检查…</p>
-            <ul id="ready-list" class="ready-list"></ul>
-            <button type="button" id="btn-ready-refresh" class="btn btn-secondary">重新检查</button>
-          </section>
-        </div>
-      </section>
-    </main>
-
-    <aside id="source-panel" class="source-panel" aria-label="来源" hidden>
-      <header class="source-head">
-        <h2 id="source-title" class="source-heading">来源</h2>
-        <button type="button" id="btn-close-source" class="btn btn-ghost" aria-label="关闭来源">关闭</button>
-      </header>
-      <div id="source-body" class="source-body"></div>
-    </aside>
+<div class="composer">
+  <div class="composer-inner">
+    <textarea id="input" rows="1" placeholder="基于已入库的文档提问" aria-label="问题"></textarea>
+    <button type="button" id="send">发送</button>
   </div>
 </div>
-
-<dialog id="confirm-dialog" aria-labelledby="confirm-message">
-  <form method="dialog">
-    <p id="confirm-message"></p>
-    <div class="dialog-actions">
-      <button type="submit" value="cancel" class="btn btn-ghost">取消</button>
-      <button type="submit" value="ok" id="confirm-ok" class="btn btn-primary">确定</button>
-    </div>
-  </form>
-</dialog>
-
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
-<script type="module" src="/js/app.js"></script>
+<div class="toast" id="toast" role="status"></div>
+<script src="/js/shell.js" defer></script>
 </body>
 </html>

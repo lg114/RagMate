@@ -152,11 +152,11 @@ uvicorn backend.app:app --reload --port 8000
 
 ## 首次使用
 
-1. 打开 **文档**，上传一个或多个支持的文件。
-2. 入库未处理的文件，等页面上的进度条结束。
-3. 打开 **对话**，针对已索引文档提问。
-4. 点击引用，查看来源文件、页码、入库状态；打开检索调试时还可以看到命中的片段。
-5. **设置** 里可以切换外观、同步「检索调试」开关、填写可选的 API 令牌，并查看 PostgreSQL 和 pgvector 是否就绪。只有设置了 `REDIS_URL` 时，列表里才会出现 Redis。
+1. 在页面下方的文档区上传一个或多个支持的文件。
+2. 入库未处理的文件，等状态结束。
+3. 在输入框提问，回答会流式返回并附带引用。
+4. 点击引用，跳到来源卡查看来源文件与页码。
+5. API 需要令牌时，填在折叠的 **连接** 栏里（只保存在本浏览器）。PostgreSQL 和 pgvector 是否就绪显示在顶栏。
 
 界面是一层薄演示壳：零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。检索调试是开发模式轨迹（`"debug": true`），正常演示保持关闭。检索参数不在页面上，它们是下面冻结的服务端默认值。
 
@@ -179,7 +179,7 @@ RagMate/
 │   ├── infrastructure/     # config、database、pgvector、可选 redis、encoding、model_factory
 │   ├── eval/               # retrieval-gate 与确定性检索评测
 │   └── tests/
-└── frontend/               # 零构建界面（对话 / 文档 / 设置），由 FastAPI 挂在 /
+└── frontend/               # 零构建界面（单视图演示壳：对话 + 文档），由 FastAPI 挂在 /
 ```
 
 ---
@@ -275,7 +275,7 @@ data: {"error": "..."}                               // 终止性错误
 
 非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
 
-`retrieval_debug` 是开发模式轨迹，只有请求带 `"debug": true` 时才返回。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。输入框和 **设置** 页共用「检索调试」开关，选择会记在浏览器里。正常演示关掉；preview 是文档原文片段。
+`retrieval_debug` 是开发模式轨迹，只有请求带 `"debug": true` 时才返回。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。演示壳从不发送 `"debug": true`，正常使用时不返回 `retrieval_debug`；preview 是文档原文片段。
 
 ---
 

@@ -152,11 +152,11 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 
 ## First-use workflow
 
-1. Open **文档** and upload one or more supported files.
-2. Ingest the pending files and wait until the in-page status banner finishes.
-3. Open **对话** and ask questions about the indexed documents.
-4. Click a citation to open the source: file name, page, library status, and the retrieved passage when retrieval debug is on.
-5. **设置** holds appearance, the shared retrieval-debug switch, an optional API token, and readiness for PostgreSQL and pgvector. Redis appears in that list only when `REDIS_URL` is set.
+1. Upload one or more supported files in the documents section at the bottom of the page.
+2. Ingest the pending files and wait until the status finishes.
+3. Ask questions in the composer; answers stream in with citations.
+4. Click a citation to jump to its source card: file name and page.
+5. If the API needs a token, put it in the collapsed **连接** section (stored only in this browser). Readiness for PostgreSQL and pgvector is shown in the top bar.
 
 The UI is a thin demo shell: the zero-build page at `frontend/index.html`, served at `/`. No frontend build step. Retrieval debug is a dev-mode trace (`"debug": true`); leave it off for a normal demo. Retrieval knobs are not in the page — they are the frozen server defaults below.
 
@@ -179,7 +179,7 @@ RagMate/
 │   ├── infrastructure/     # config, database, pgvector, optional redis, encoding, model_factory
 │   ├── eval/               # retrieval-gate and deterministic retrieval evaluation
 │   └── tests/
-└── frontend/               # Zero-build UI (对话 / 文档 / 设置), served by FastAPI at /
+└── frontend/               # Zero-build UI (single-view demo shell: chat + documents), served by FastAPI at /
 ```
 
 ---
@@ -275,7 +275,7 @@ Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, 
 
 The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
-`retrieval_debug` is a dev-mode trace. It is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The composer and the **设置** page share a “检索调试” checkbox that sends this flag and remembers it in the browser. Leave it off for a normal demo; previews are excerpts of your documents.
+`retrieval_debug` is a dev-mode trace. It is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The shell never sends `"debug": true`, so `retrieval_debug` is omitted in normal use; previews are excerpts of your documents.
 
 ---
 
