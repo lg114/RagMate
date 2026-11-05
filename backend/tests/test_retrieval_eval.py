@@ -183,6 +183,22 @@ def test_run_retrieval_eval_end_to_end_with_fake_client(monkeypatch, tmp_path):
     assert json.loads(cp_path.read_text(encoding="utf-8"))["manifest"] == manifest
 
 
+def test_run_retrieval_eval_delay_sleeps_between_questions(monkeypatch):
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
+                        lambda q, texts: [0.9] * len(texts))
+    monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: _FakeClient(HITS))
+    sleeps = []
+    monkeypatch.setattr("backend.eval.retrieval_eval.time.sleep", sleeps.append)
+    cases = [_valid_case(user_input="q1"), _valid_case(user_input="q2")]
+    run_retrieval_eval(cases, ["dense"], over_fetch=10, repeat=1,
+                       ks=(5,), manifest={}, delay=2.5)
+    assert sleeps == [2.5]
+    run_retrieval_eval(cases, ["dense"], over_fetch=10, repeat=1,
+                       ks=(5,), manifest={}, delay=0.0)
+    assert sleeps == [2.5]
+
+
 def test_run_retrieval_eval_requires_existing_collection(monkeypatch):
     monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: None)
     with pytest.raises(RuntimeError, match="does not exist"):
