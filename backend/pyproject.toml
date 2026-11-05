@@ -1,7 +1,7 @@
 [project]
 name = "ragmate"
 version = "0.8.0"
-description = "RAG application with agentic workflow"
+description = "Self-hosted RAG application"
 requires-python = ">=3.12"
 dependencies = [
     # ── LangChain ecosystem ──

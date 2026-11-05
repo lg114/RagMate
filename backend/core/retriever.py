@@ -350,7 +350,7 @@ def _expand_to_parent(candidates: list[dict]) -> list[dict]:
     用于交付的父片段（context）。这里只替换交付内容，score / source / page /
     chunk_index 原样保留，因此不影响已经完成的阈值判断与来源去重。
 
-    无父片段的场景（如 Excel 表格未设 parent_text）保持原文本不变。
+    无父片段的场景保持原文本不变。
     """
     for c in candidates:
         parent = c.get("context")

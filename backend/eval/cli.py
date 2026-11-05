@@ -185,7 +185,7 @@ def cmd_retrieval(args):
         sys.exit(1)
 
     report_path = str(resolve_path(args.report) if args.report else
-                      DEFAULT_REPORTS_DIR / "baseline" / "retrieval-baseline-50q.json")
+                      DEFAULT_REPORTS_DIR / "retrieval-baseline.json")
 
     manifest = build_manifest(
         testset_path=testset_path, stages=stages, over_fetch=args.over_fetch,

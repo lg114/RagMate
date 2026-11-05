@@ -63,7 +63,7 @@ async def _ground_response(
 ) -> tuple[str, dict]:
     """按检索置信度改写回答。返回 (最终文本, 要并入 API 的附加字段)。
 
-    rdata 为 None 时从 agent 上下文里弹出检索信号；单次检索链路直接传入。
+    rdata 为 None 时表示本次没有检索信号；单次检索链路直接传入。
     """
     confidence, unsupported, citations, debug_trace = await _pop_retrieval_signals(
         session_id, response_text, is_error, debug=debug, rdata=rdata,

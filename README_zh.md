@@ -172,7 +172,7 @@ RagMate/
 │   ├── api/                # HTTP 路由：chat、documents、ingest、health
 │   ├── application/        # 用例编排
 │   │   └── ingest/         # pipeline（加载 → 切分 → 去重 → 编码）、loaders、db_sync
-│   ├── core/               # RAG 内核：retriever、agent、prompts/researcher.md
+│   ├── core/               # RAG 内核：retriever、prompts/researcher.md
 │   ├── domain/             # ORM 模型、Pydantic schema、错误类型
 │   ├── infrastructure/     # config、database、pgvector、可选 redis、encoding、model_factory
 │   ├── eval/               # retrieval-gate 与确定性检索评测
@@ -190,7 +190,7 @@ RagMate/
 |---|---|---|
 | 接口层 | `api/` | 只处理 HTTP：路由、请求校验、限流 |
 | 应用层 | `application/` | 用例编排：对话流程、文档 CRUD、入库生命周期 |
-| 核心层 | `core/` | RAG 领域逻辑：检索管线、Agent、系统提示词 |
+| 核心层 | `core/` | RAG 领域逻辑：检索管线、系统提示词 |
 | 领域层 | `domain/` | ORM 模型、Pydantic schema、`AppError` 体系 |
 | 基础设施层 | `infrastructure/` | 外部系统：PostgreSQL + pgvector、可选 Redis、模型、配置 |
 
@@ -202,7 +202,7 @@ flowchart LR
     P --> M[(PostgreSQL 元数据)]
     Q[用户问题] --> R[混合检索 + RRF]
     R --> RR[重排、压缩、过滤]
-    RR --> A[Agent 与 LLM]
+    RR --> A[LLM]
     A --> O[带引用的回答]
 ```
 
@@ -210,7 +210,7 @@ flowchart LR
 
 **查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加 BM25 词法检索，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认关闭；开启后只在检索置信度低时校验）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
 
-简单的寒暄类问题会绕过 Agent，直接路由到 LLM。
+简单的寒暄类问题会绕过检索，直接路由到 LLM。
 
 ---
 
@@ -299,7 +299,7 @@ data: {"error": "..."}                               // 终止性错误
 
 ### 检索（已冻结）
 
-只认一套经过验证的检索配置：稠密 + BM25 混合检索，RRF 融合，再重排。fused 阶段的数字钉在 [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)。除非对那 98 题重跑 `ragmate-eval retrieval`，并改掉 [`eval/README.md`](eval/README.md) 和 `backend/tests/test_retrieval_gate.py` 里的门槛，否则保持下面的默认值。
+只认一套经过验证的检索配置：稠密 + BM25 混合检索，RRF 融合，再重排。fused 阶段的数字钉在 [`eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json`](eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json)。除非对那 130 题重跑 `ragmate-eval retrieval`，并改掉 [`eval/README.md`](eval/README.md) 和 `backend/tests/test_retrieval_gate.py` 里的门槛，否则保持下面的默认值。
 
 | 部分 | 冻结值 |
 |---|---|
@@ -348,7 +348,7 @@ CI 不需要 GPU，也不需要真的嵌入服务。测试 mock 了 HTTP 客户�
 ragmate-eval retrieval-gate
 ```
 
-它对已入库的 98 题样本做确定性 BM25 重放（不查 pgvector、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 [`eval/README.md`](eval/README.md)。GitHub Actions 在 pytest 之后运行这条命令。这次换向量库没有降低门槛。
+它对已入库的 130 题样本做确定性 BM25 重放（不查 pgvector、不加载 BGE、不用 GPU），Recall@k 或 nDCG 低于 `eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json` fused 阶段钉住的门槛时失败。具体数字、0.015 的余量，以及有意更换基线的步骤见 [`eval/README.md`](eval/README.md)。GitHub Actions 在 pytest 之后运行这条命令。
 
 RAGAS judge 打分已删除：它始终没跑出可用的基线，此前已从 CI 和 CLI 主路径搁置。确定性检索门禁（`eval/`）是回归守门员。
 
