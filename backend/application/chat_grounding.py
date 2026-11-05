@@ -17,7 +17,7 @@ async def _pop_retrieval_signals(
 ) -> tuple[dict | None, list[dict] | None, list[dict], list[dict] | None]:
     """取出本次问答的检索数据，计算置信度、引用与（可选的）无依据声明。
 
-    一次问答只能调用一次：pop_retrieval_data 会清除该 session 的 agent 上下文。
+    rdata 由单次检索链路直接传入（见 _retrieval_rdata）。
 
     Returns:
         (confidence, unsupported_claims, citations)。
@@ -29,8 +29,7 @@ async def _pop_retrieval_signals(
     from backend.core.retriever import calculate_confidence, check_faithfulness
 
     if rdata is None:
-        from backend.core.agent import pop_retrieval_data
-        rdata = pop_retrieval_data(session_id)
+        return None, None, [], None
     if not rdata:
         return None, None, [], None
 

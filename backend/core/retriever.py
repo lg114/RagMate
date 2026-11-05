@@ -60,7 +60,7 @@ class _MetricsLocal(threading.local):
 _metrics = _MetricsLocal()
 
 # 仅在请求显式打开 debug 时记录候选轨迹。ContextVar 会随线程池复制，
-# 所以 agent 工具线程里也能看到调用方在 run_agent 上设置的开关。
+# 所以 to_thread 的检索线程里也能看到调用方设置的开关。
 _retrieval_debug_enabled: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "retrieval_debug_enabled", default=False,
 )

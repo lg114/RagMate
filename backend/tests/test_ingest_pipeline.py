@@ -26,17 +26,15 @@ class TestDiscoverFiles:
             (open(os.path.join(tmpdir, "test2.docx"), "w")).close()
             (open(os.path.join(tmpdir, "test3.txt"), "w")).close()
             (open(os.path.join(tmpdir, "test4.md"), "w")).close()
-            (open(os.path.join(tmpdir, "test5.xlsx"), "w")).close()
             (open(os.path.join(tmpdir, "unsupported.xyz"), "w")).close()
 
             files = _discover_files(tmpdir, None)
 
-            assert len(files) == 5
+            assert len(files) == 4
             assert "test1.pdf" in files
             assert "test2.docx" in files
             assert "test3.txt" in files
             assert "test4.md" in files
-            assert "test5.xlsx" in files
             assert "unsupported.xyz" not in files
 
     def test_discover_with_filter(self):
@@ -101,11 +99,6 @@ class TestGetTextSplitter:
         assert splitter is not None
         assert splitter._chunk_size == 1000  # CHUNK_SIZE default
         assert splitter._chunk_overlap == 200  # CHUNK_OVERLAP default
-
-    def test_excel_returns_none(self):
-        """Excel 文件应返回 None（不切分）。"""
-        assert _get_text_splitter(".xlsx") is None
-        assert _get_text_splitter(".xls") is None
 
 
 class TestReconstructWithHeaders:

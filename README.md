@@ -15,7 +15,7 @@
 
 ---
 
-RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Markdown files into a searchable knowledge base. It combines hybrid vector search, cross-encoder reranking, agentic reasoning, streaming responses, and optional faithfulness checks — while keeping your data and infrastructure under your own control.
+RagMate is a self-hosted RAG application that turns PDF, DOCX, TXT, and Markdown files into a searchable knowledge base. It combines hybrid vector search, cross-encoder reranking, streaming responses, and optional faithfulness checks — while keeping your data and infrastructure under your own control.
 
 ## Contents
 
@@ -42,8 +42,8 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 - **Hybrid retrieval** — dense + BM25 search fused with RRF (k=60). Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
 - **Reranked, filtered context** — remote reranking by default, plus dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression. A local cross-encoder is opt-in.
 - **Title-path chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees. That strategy is frozen.
-- **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
-- **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (on by default) that flags unsupported claims.
+- **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call.
+- **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (off by default; when enabled, checked only when retrieval confidence is low) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
 - **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 98-question sample with deterministic BM25. Deterministic retrieval metrics are the CI gate; there is no LLM-judge scoring.
 - **Self-hosted by design** — one Postgres with pgvector holds documents, chat, and vectors. Redis is optional and only used for shared rate limits.
@@ -102,8 +102,6 @@ pip install -e .
 
 For a byte-identical environment, use the lockfile instead (from `backend/`): `uv sync --frozen --extra test`. Exact versions are pinned in `backend/uv.lock`; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`.
 
-DeepAgents support is an optional extra: `pip install -e ".[agents]"` (run from `backend/`). The default install excludes deepagents.
-
 ### 3. Configure the application
 
 Stay in the `backend` directory:
@@ -160,7 +158,7 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 
 The UI is a single-view app: the zero-build page at `frontend/index.html` plus one `js/shell.js`, served at `/`. No frontend build step. The interface is bilingual (English/中文, toggle in the top bar). The sidebar navigates three views — Chat, Documents, Settings — with conversation history under Chat. Each answer carries a collapsed **检索详情** section fed by the retrieval trace (`"debug": true`); the trace shows the kept passages with scores — it is the transparency view, not a dev-only switch. Retrieval knobs are not in the page — they are the frozen server defaults below.
 
-Supported formats: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
+Supported formats: `.pdf`, `.docx`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
 
 ---
 
@@ -208,9 +206,9 @@ flowchart LR
     A --> O[Answer with citations]
 ```
 
-**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense + sparse encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
+**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
-**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus BM25 over chunk text, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
+**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus BM25 over chunk text, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (off by default; when enabled, checked only when retrieval confidence is low). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
 
 Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
 
@@ -315,7 +313,7 @@ One retrieval config is validated. It is hybrid dense + BM25 search, fused with 
 
 The 98-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
 
-`DEEP_AGENTS_ENABLED` stays `false` (one retrieve, one answer, then grounding). `FAITHFULNESS_CHECK` stays `false` (off by default; when enabled, checked only when retrieval confidence is low).
+`FAITHFULNESS_CHECK` stays `false` (off by default; when enabled, checked only when retrieval confidence is low).
 
 <details>
 <summary><strong>Frozen env overrides</strong> — listed so a deployment can see them, not so they get tuned in place</summary>
@@ -328,13 +326,11 @@ Overlap must be smaller than its chunk size, otherwise startup fails with a vali
 
 **Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 
-`remote` (also `openai`) calls `POST {EMBEDDING_API_BASE_URL}/embeddings`. Startup does not import torch or warm a local BGE model. `RERANKER_PROVIDER` defaults to `api` and calls `POST {RERANKER_API_BASE_URL}/rerank` (`RERANKER_API_KEY` optional, `RERANKER_API_TIMEOUT` `30`). If the embeddings service includes `sparse` (or `lexical_weights`) on each result, those weights are stored; otherwise RagMate fills a stable hashed sparse vector. That hash is not BGE-M3 lexical weight, so re-ingest after switching providers.
+`remote` (also `openai`) calls `POST {EMBEDDING_API_BASE_URL}/embeddings`. Startup does not import torch or warm a local BGE model. `RERANKER_PROVIDER` defaults to `api` and calls `POST {RERANKER_API_BASE_URL}/rerank` (`RERANKER_API_KEY` optional, `RERANKER_API_TIMEOUT` `30`). If the embeddings service includes `sparse` (or `lexical_weights`) on each result, those weights are ignored; only the dense vector is stored. Re-ingest after switching embedding providers.
 
 **Local opt-in** — first install the optional models with `pip install -e ".[local]"` (run from `backend/`), then set `EMBEDDING_PROVIDER=huggingface` (`local` and `flagembedding` are the same path) to load BGE-M3 with FlagEmbedding inside the API process. `EMBEDDING_DEVICE` (`cpu` or `cuda`) applies only then. Set `RERANKER_PROVIDER=local` to load the cross-encoder in-process. Turning either of those on imports torch on first use and warms the weights at startup. The commented block in [`backend/.env.example`](backend/.env.example) shows both lines.
 
 CI does not need a GPU or a live embeddings service. Tests mock the HTTP client, and the retrieval gate replays BM25. The workflow still exports placeholder URLs because settings are validated at import.
-
-**Agent** — `AGENT_RECURSION_LIMIT` (`30`).
 
 **Tracing** — `LANGSMITH_TRACING` (`false`), `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` (`default`), `LANGSMITH_ENDPOINT`.
 
@@ -392,7 +388,7 @@ RagMate validates requests — filename allowlist, magic-byte checks, path-trave
 
 ## Vector storage
 
-Chunks live in the Postgres table named by `VECTOR_TABLE` (default `ragmate_docs`). An existing `MILVUS_COLLECTION` value is still read as that table name when `VECTOR_TABLE` is empty.
+Chunks live in the Postgres table named by `VECTOR_TABLE` (default `ragmate_docs`).
 
 To rebuild vectors from the files on disk, re-ingest. Incremental ingest skips a file whose `documents` row is already `ingested`, even when the vector table is empty. Clear that marker, then ingest again:
 
@@ -444,4 +440,4 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [pgvector](https://github.com/pgvector/pgvector) · [BGE](https://github.com/FlagOpen/FlagEmbedding)
+[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [pgvector](https://github.com/pgvector/pgvector) · [BGE](https://github.com/FlagOpen/FlagEmbedding)

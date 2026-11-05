@@ -11,7 +11,6 @@ import logging
 import time
 import uuid
 
-from backend.core.agent import run_agent, run_agent_streaming
 from backend.infrastructure.config import settings
 from backend.infrastructure.session_store import load_session, save_session
 
@@ -247,7 +246,7 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
     # 3. 追加用户消息
     history.append({"role": "user", "content": message})
 
-    # 3.5 查询路由：简单查询跳过 agent
+    # 3.5 查询路由：简单查询直接回复
     from backend.infrastructure.config import settings
     if settings.QUERY_ROUTING_ENABLED and _is_simple_query(message):
         t0 = time.monotonic()
@@ -272,42 +271,8 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
         await _persist_messages(session_id, msgs)
         return {"response": _strip_error_sentinel(response_text), "session_id": session_id}
 
-    if not settings.DEEP_AGENTS_ENABLED:
-        return await _chat_single(message, session_id, history, debug)
-
-    # 4. 调用 Agent（同步，放到线程中执行，带超时）。仅 DEEP_AGENTS_ENABLED 时走到这里。
-    t0 = time.monotonic()
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(run_agent, history, session_id, debug),
-            timeout=settings.AGENT_TIMEOUT,
-        )
-        response_text = normalize_citations(extract_text(result))
-    except asyncio.TimeoutError:
-        response_text = f"{_ERROR_SENTINEL}请求超时，请稍后重试"
-    except asyncio.CancelledError:
-        raise  # 上层取消，不吞掉
-    except Exception as e:
-        response_text = _classify_error(e)
-    elapsed = time.monotonic() - t0
-
-    # 4. 按检索置信度改写回答，再写入历史（错误提示不写入历史，但用户消息需要保留）
-    is_error = _is_error_response(response_text)
-    response_text, extra = await _ground_response(session_id, response_text, is_error, debug=debug)
-    visible = _strip_error_sentinel(response_text)
-    if is_error:
-        logger.warning(f"chat error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={visible}")
-    else:
-        history.append({"role": "assistant", "content": visible})
-        logger.info(f"chat ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(visible)} elapsed={elapsed:.1f}s")
-    await save_session(session_id, history)
-
-    msgs = [("user", message)]
-    if not is_error:
-        msgs.append(("assistant", visible))
-    await _persist_messages(session_id, msgs)
-
-    return {"response": visible, "session_id": session_id, **extra}
+    # 4. 默认链路：一次检索、一次生成、再接地。
+    return await _chat_single(message, session_id, history, debug)
 
 
 _SENTINEL = object()
@@ -328,7 +293,7 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
     history = _trim_history(history)
     history.append({"role": "user", "content": message})
 
-    # 查询路由：简单查询跳过 agent
+    # 查询路由：简单查询直接回复
     from backend.infrastructure.config import settings
     if settings.QUERY_ROUTING_ENABLED and _is_simple_query(message):
         t0 = time.monotonic()
@@ -354,62 +319,7 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
         yield {"done": True, "session_id": session_id}
         return
 
-    if not settings.DEEP_AGENTS_ENABLED:
-        async for event in _chat_stream_single(message, session_id, history, debug, t0):
-            yield event
-        return
+    # 默认流式链路。
+    async for event in _chat_stream_single(message, session_id, history, debug, t0):
+        yield event
 
-    # Deep Agents 打开时：先收齐最终回复，再决定发什么。
-    # 工具规划不会进入 full_response（见 run_agent_streaming），拒答也不会先把原稿推出去再替换。
-    full_response: list[str] = []
-    error_msg: str | None = None
-
-    def _run():
-        nonlocal error_msg
-        try:
-            for token in run_agent_streaming(history, session_id, debug):
-                full_response.append(token)
-        except Exception as e:
-            error_msg = _classify_error(e)
-
-    task = asyncio.get_running_loop().run_in_executor(None, _run)
-    try:
-        await task
-    except asyncio.CancelledError:
-        await save_session(session_id, history)
-        raise
-    except Exception:
-        pass
-
-    if error_msg:
-        elapsed = time.monotonic() - t0
-        visible = _strip_error_sentinel(error_msg)
-        logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={visible}")
-        await save_session(session_id, history)
-        yield {"error": visible}
-        return
-
-    response_text = normalize_citations("".join(full_response))
-    is_error = _is_error_response(response_text)
-    elapsed = time.monotonic() - t0
-
-    response_text, extra = await _ground_response(session_id, response_text, is_error, debug=debug)
-    visible = _strip_error_sentinel(response_text)
-
-    if is_error:
-        logger.warning(f"chat_stream error: session={session_id[:8]} msg_len={len(message)} elapsed={elapsed:.1f}s err={visible}")
-    else:
-        history.append({"role": "assistant", "content": visible})
-        logger.info(f"chat_stream ok: session={session_id[:8]} msg_len={len(message)} resp_len={len(visible)} elapsed={elapsed:.1f}s")
-    await save_session(session_id, history)
-
-    msgs = [("user", message)]
-    if not is_error:
-        msgs.append(("assistant", visible))
-    await _persist_messages(session_id, msgs)
-
-    # 拒答时不先推出模型原文。有片段时，token 只包含最终回答，done.response 再补上引用和保留语。
-    if extra.get("grounding") != "refused":
-        for token in full_response:
-            yield {"token": token}
-    yield {"done": True, "session_id": session_id, "response": visible, **extra}

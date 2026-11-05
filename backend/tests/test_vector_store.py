@@ -17,12 +17,11 @@ def _hit(item_id, score, text="t"):
     }
 
 
-def test_resolve_vector_table_prefers_explicit_name_then_legacy():
-    assert resolve_vector_table("", "") == "ragmate_docs"
-    assert resolve_vector_table("", "legacy_docs") == "legacy_docs"
-    assert resolve_vector_table("custom_docs", "legacy_docs") == "custom_docs"
+def test_resolve_vector_table_defaults_to_ragmate_docs():
+    assert resolve_vector_table("") == "ragmate_docs"
+    assert resolve_vector_table("custom_docs") == "custom_docs"
     try:
-        resolve_vector_table("bad name", "")
+        resolve_vector_table("bad name")
     except ValueError as exc:
         assert "VECTOR_TABLE" in str(exc)
     else:

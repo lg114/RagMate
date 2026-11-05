@@ -1,14 +1,27 @@
-"""直接调 LLM 的几处：简单查询路由、回答生成（同步/流式）、
-agent 回复文本提取。"""
+"""直接调 LLM 的几处：简单查询路由、回答生成（同步/流式）。"""
 
 import re
+from pathlib import Path
 
 from langchain_core.messages import AIMessage
 
-from backend.core.agent import extract_text_content
+
+def extract_text_content(content) -> str:
+    """从 AIMessage.content 中提取文本，支持 str 和 list 两种格式。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [block["text"] for block in content if isinstance(block, dict) and block.get("type") == "text" and "text" in block]
+        return "\n".join(parts)
+    return ""
+
+
+def _load_system_prompt() -> str:
+    return (Path(__file__).resolve().parent.parent / "core" / "prompts" / "researcher.md").read_text(encoding="utf-8")
+
 
 def extract_text(response: dict) -> str:
-    """从 deepagents 的 AIMessage 中提取最终回复文本。"""
+    """从 AIMessage 中提取最终回复文本。"""
     messages = response.get("messages", [])
     if not messages:
         return "没有收到回复"
@@ -40,9 +53,8 @@ def _is_simple_query(message: str) -> bool:
 
 
 def _direct_llm_reply(history: list[dict]) -> str:
-    """直接调用 LLM 回复简单查询，不经过 agent（同步）。"""
+    """直接调用 LLM 回复简单查询，不经过检索（同步）。"""
     from backend.infrastructure.model_factory import get_llm
-    from backend.core.agent import _load_system_prompt
 
     llm = get_llm()
     messages = [{"role": "system", "content": _load_system_prompt()}] + history

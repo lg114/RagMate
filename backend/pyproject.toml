@@ -5,8 +5,8 @@ description = "RAG application with agentic workflow"
 requires-python = ">=3.12"
 dependencies = [
     # ── LangChain ecosystem ──
-    # langchain-core 只给 LLM 客户端与文本切分用；Agent（deepagents）已移到
-    # agents extra，不再是默认安装。core 的下限 >=1.2.27 仍保留。
+    # langchain-core 只给 LLM 客户端与文本切分用（Agent 已删，不再需要它之外的
+    # langchain 包）。core 的下限 >=1.2.27 仍保留。
     "langchain-core>=1.2.27,<2.0.0",
     "langchain-openai>=1.0.0,<2.0.0",
     "langchain-text-splitters>=1.0.0,<2.0.0",
@@ -22,9 +22,6 @@ dependencies = [
     # ── Document parsing ──
     "pypdf>=4.0.0",
     "docx2txt>=0.8",
-    "pandas>=2.0.0",
-    "openpyxl>=3.1.0",
-    "xlrd>=2.0.0",
     # ── Configuration ──
     "pydantic-settings>=2.0.0",
     # ── CLI / progress ──
@@ -42,11 +39,6 @@ local = [
     "sentence-transformers>=2.2.0",
     "FlagEmbedding>=0.1.0",
     "langchain-huggingface>=1.0.0,<2.0.0",
-]
-# Agent（opt-in）：只有 DEEP_AGENTS_ENABLED=true 时才需要。默认聊天路径
-# 不 import deepagents，因此它不在主依赖里。
-agents = [
-    "deepagents>=0.5.0",
 ]
 test = [
     "pytest>=8.0",

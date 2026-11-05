@@ -6,7 +6,6 @@ from backend.application.chat import (
     note_unsupported_claims,
     public_citations,
 )
-from backend.core.agent import remember_retrieval
 from backend.core.retriever import check_faithfulness
 from backend.infrastructure.config import settings
 
@@ -95,25 +94,6 @@ def test_unsupported_note_is_appended_once():
     assert note_unsupported_claims("答案", None) == "答案"
 
 
-def test_remember_retrieval_records_empty_hit_as_low_signal():
-    ctx = {"metrics": [], "texts": []}
-    remember_retrieval(ctx, [], None)
-    assert ctx["metrics"] == [{"top_score": 0.0, "returned": 0, "candidates": 0}]
-    assert "citations" not in ctx
-
-
-def test_remember_retrieval_keeps_sources_for_citations():
-    ctx = {}
-    remember_retrieval(
-        ctx,
-        [{"text": "正文", "source": "a.pdf", "page": 3, "chunk_index": 1, "score": 0.8}],
-        {"top_score": 0.8, "returned": 1, "candidates": 4},
-    )
-    assert ctx["texts"] == ["正文"]
-    assert ctx["citations"] == [{"source": "a.pdf", "page": 3, "chunk_index": 1}]
-    assert "score" not in ctx["citations"][0]
-
-
 def test_faithfulness_disabled_skips_llm(monkeypatch):
     monkeypatch.setattr(settings, "FAITHFULNESS_CHECK", False)
 
@@ -142,7 +122,3 @@ def test_faithfulness_parses_unsupported_claim(monkeypatch):
 
 def test_faithfulness_defaults_off():
     assert type(settings).model_fields["FAITHFULNESS_CHECK"].default is False
-
-
-def test_deep_agents_default_off():
-    assert type(settings).model_fields["DEEP_AGENTS_ENABLED"].default is False

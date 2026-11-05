@@ -15,7 +15,7 @@
 
 ---
 
-RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markdown 文件构建为可搜索的知识库。它结合混合向量检索、交叉编码器重排序、Agent 推理、流式响应和可选的忠实度校验，同时让数据与基础设施完全掌握在你自己手中。
+RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、TXT 和 Markdown 文件构建为可搜索的知识库。它结合混合向量检索、交叉编码器重排序、流式响应和可选的忠实度校验，同时让数据与基础设施完全掌握在你自己手中。
 
 ## 目录
 
@@ -42,8 +42,8 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 - **混合检索** — 稠密 + BM25 检索，用 RRF（k=60）融合。嵌入默认走 OpenAI 兼容 API；进程内 BGE-M3 需显式打开。
 - **重排序与过滤后的上下文** — 默认远程重排，加上动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。本地交叉编码器需显式打开。
 - **标题路径分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。该策略已冻结。
-- **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。只有 `DEEP_AGENTS_ENABLED=true` 才走 Deep Agents。
-- **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认开启，标记缺乏依据的声明。
+- **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。
+- **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认关闭（开启后只在检索置信度低时校验），标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
 - **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 98 题样本。确定性检索指标是 CI 门禁，没有 LLM judge 打分。
 - **自托管设计** — 一套带 pgvector 的 Postgres 存放文档、会话和向量。Redis 可选，只用于多进程共享限流。
@@ -102,8 +102,6 @@ pip install -e .
 
 要装出和锁定版本完全一致的环境，改用锁文件（在 `backend/` 下）：`uv sync --frozen --extra test`。确切版本钉在 `backend/uv.lock` 里；改 `pyproject.toml` 里的依赖后，用 `uv lock` 重新生成。
 
-DeepAgents 支持是可选 extra：`pip install -e ".[agents]"`（在 `backend/` 下执行）。默认安装不含 deepagents。
-
 ### 3. 配置环境变量
 
 仍在 `backend` 目录时执行：
@@ -160,7 +158,7 @@ uvicorn backend.app:app --reload --port 8000
 
 界面是单视图应用：零构建的 `frontend/index.html` 加一个 `js/shell.js`，由 FastAPI 挂在 `/`，不需要前端构建。界面中英双语（顶栏切换）。侧栏导航切三个视图——对话、文档、设置，历史对话只在对话视图下。每个回答下面有个折叠的 **检索详情**，数据来自检索轨迹（`"debug": true`），列出命中的片段原文与分数——这是核对用的透明视图，不是只给开发看的开关。检索参数不在页面上，它们是下面冻结的服务端默认值。
 
-支持格式：`.pdf`、`.docx`、`.xlsx`、`.xls`、`.txt`、`.md`。默认单文件上传上限为 50 MB。
+支持格式：`.pdf`、`.docx`、`.txt`、`.md`。默认单文件上传上限为 50 MB。
 
 ---
 
@@ -208,9 +206,9 @@ flowchart LR
     A --> O[带引用的回答]
 ```
 
-**入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 pgvector 表去重 → 经嵌入 API 做稠密 + 稀疏编码（只有显式打开时才在进程内用 FlagEmbedding）→ 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
+**入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 pgvector 表去重 → 经嵌入 API 做稠密编码（只有显式打开时才在进程内用 FlagEmbedding）→ 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
 
-**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加 BM25 词法检索，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
+**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加 BM25 词法检索，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认关闭；开启后只在检索置信度低时校验）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
 
 简单的寒暄类问题会绕过 Agent，直接路由到 LLM。
 
@@ -315,7 +313,7 @@ data: {"error": "..."}                               // 终止性错误
 
 那份 98 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
 
-`DEEP_AGENTS_ENABLED` 保持 `false`（一次检索、一次生成、再接地）。`FAITHFULNESS_CHECK` 保持 `false`（默认关闭；开启后只在检索置信度低时校验）。
+`FAITHFULNESS_CHECK` 保持 `false`（默认关闭；开启后只在检索置信度低时校验）。
 
 <details>
 <summary><strong>已冻结的环境变量</strong> — 列出来是为了部署时能看见，不是为了就地调参</summary>
@@ -328,13 +326,11 @@ data: {"error": "..."}                               // 终止性错误
 
 **嵌入** — `EMBEDDING_PROVIDER`（`remote`）、`EMBEDDING_MODEL`（`BAAI/bge-m3`）、`EMBEDDING_NORMALIZE`（`true`）、`HF_TOKEN`、`EMBEDDING_API_KEY`（可选）、`EMBEDDING_API_BASE_URL`（`remote` / `openai` 时必填）、`EMBEDDING_API_TIMEOUT`（`60`）。
 
-`remote`（以及 `openai`）请求 `POST {EMBEDDING_API_BASE_URL}/embeddings`。启动时不 import torch，也不预热本地 BGE。`RERANKER_PROVIDER` 默认为 `api`，请求 `POST {RERANKER_API_BASE_URL}/rerank`（`RERANKER_API_KEY` 可选，`RERANKER_API_TIMEOUT` 为 `30`）。服务如果在每条结果里带了 `sparse`（或 `lexical_weights`）就用它；否则用稳定的词哈希补稀疏向量。这个哈希不是 BGE-M3 的 lexical weights，切换嵌入方式后必须重新入库。
+`remote`（以及 `openai`）请求 `POST {EMBEDDING_API_BASE_URL}/embeddings`。启动时不 import torch，也不预热本地 BGE。`RERANKER_PROVIDER` 默认为 `api`，请求 `POST {RERANKER_API_BASE_URL}/rerank`（`RERANKER_API_KEY` 可选，`RERANKER_API_TIMEOUT` 为 `30`）。服务如果在每条结果里带了 `sparse`（或 `lexical_weights`），会被忽略；只存稠密向量。切换嵌入模型后必须重新入库。
 
 **本地可选** — 先在 `backend/` 目录安装可选模型依赖：`pip install -e ".[local]"`，再设 `EMBEDDING_PROVIDER=huggingface`（`local` 与 `flagembedding` 是同一条路径）会在 API 进程里用 FlagEmbedding 加载 BGE-M3，`EMBEDDING_DEVICE`（`cpu` 或 `cuda`）只在这时生效。`RERANKER_PROVIDER=local` 会在进程内加载交叉编码器。打开其中任意一项都会在首次使用时 import torch，并在启动时预热对应权重。写法见 [`backend/.env.example`](backend/.env.example) 里的注释。
 
 CI 不需要 GPU，也不需要真的嵌入服务。测试 mock 了 HTTP 客户端，检索门禁走的是 BM25。工作流仍会导出占位 URL，因为配置在 import 时就会校验。
-
-**Agent** — `AGENT_RECURSION_LIMIT` (`30`)。
 
 **链路追踪** — `LANGSMITH_TRACING` (`false`)、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` (`default`)、`LANGSMITH_ENDPOINT`。
 
@@ -392,7 +388,7 @@ RagMate 提供了请求校验：文件名白名单、magic bytes 校验、路径
 
 ## 向量存储
 
-切块存在 `VECTOR_TABLE` 指定的 Postgres 表里（默认 `ragmate_docs`）。`VECTOR_TABLE` 为空时，旧的 `MILVUS_COLLECTION` 仍会当作表名。
+切块存在 `VECTOR_TABLE` 指定的 Postgres 表里（默认 `ragmate_docs`）。
 
 要用磁盘上的文件重建向量，重新入库。增量入库会跳过 `documents` 里已经是 `ingested` 的文件，即使向量表是空的。先清掉这个标记，再入库：
 
@@ -444,4 +440,4 @@ MIT License，详见 [LICENSE](LICENSE)。
 
 ## 致谢
 
-[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [Deep Agents](https://github.com/langchain-ai/deepagents) · [pgvector](https://github.com/pgvector/pgvector) · [BGE](https://github.com/FlagOpen/FlagEmbedding)
+[FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [pgvector](https://github.com/pgvector/pgvector) · [BGE](https://github.com/FlagOpen/FlagEmbedding)

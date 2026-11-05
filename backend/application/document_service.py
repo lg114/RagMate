@@ -31,8 +31,6 @@ _MAGIC_BYTES = {
     ".pdf": b"%PDF",
     ".docx": b"PK\x03\x04",  # ZIP 格式
     ".doc": b"\xd0\xcf\x11\xe0",  # OLE2 格式
-    ".xlsx": b"PK\x03\x04",  # ZIP 格式
-    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2 格式
 }
 
 
