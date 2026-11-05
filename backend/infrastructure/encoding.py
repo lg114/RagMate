@@ -1,11 +1,9 @@
 """向量编码：默认走远程 OpenAI 兼容 HTTP；显式 opt-in 后才在进程内用 FlagEmbedding。"""
 import json
 import logging
-import math
 import time
 import urllib.error
 import urllib.request
-import zlib
 from functools import lru_cache
 
 from backend.infrastructure.config import REMOTE_EMBEDDING_PROVIDERS, settings
@@ -13,7 +11,6 @@ from backend.infrastructure.config import REMOTE_EMBEDDING_PROVIDERS, settings
 logger = logging.getLogger("ragmate")
 
 ENCODE_BATCH_SIZE = 64
-_SPARSE_BUCKETS = 262144
 # 429 重试：与 reranker（PR #40）同一口径——优先用 Retry-After，
 # 否则按 5/10/20/40 秒退避，最多 5 次；其它错误直接抛出。
 _EMBED_MAX_ATTEMPTS = 5
@@ -31,7 +28,7 @@ def uses_remote_embeddings() -> bool:
 
 @lru_cache(maxsize=1)
 def get_bge_m3():
-    """加载 bge-m3 模型（单例），用于提取 dense + sparse 向量。
+    """加载 bge-m3 模型（单例），用于提取 dense 向量。
 
     仅 EMBEDDING_PROVIDER 为 huggingface / local / flagembedding 时调用。
     FlagEmbedding 在函数内导入，默认远程路径不会加载它。
@@ -48,57 +45,6 @@ def get_bge_m3():
     device = settings.EMBEDDING_DEVICE
     use_fp16 = device == "cuda"
     return BGEM3FlagModel(settings.EMBEDDING_MODEL, use_fp16=use_fp16, devices=device)
-
-
-def _tokens(text: str) -> list[str]:
-    tokens: list[str] = []
-    buf: list[str] = []
-
-    def flush():
-        if buf:
-            tokens.append("".join(buf).lower())
-            buf.clear()
-
-    for ch in text:
-        if "\u4e00" <= ch <= "\u9fff":
-            flush()
-            tokens.append(ch)
-        elif ch.isalnum():
-            buf.append(ch)
-        else:
-            flush()
-    flush()
-    return [tok for tok in tokens if len(tok) >= 2 or "\u4e00" <= tok <= "\u9fff"]
-
-
-def _hash_sparse(text: str) -> dict[int, float]:
-    """远程服务没有返回 sparse 时，用词哈希造一个稳定的稀疏向量。
-
-    这不是 BGE-M3 的 lexical weights。索引和查询必须用同一种嵌入方式，切换后要重新入库。
-    """
-    weights: dict[int, float] = {}
-    for tok in _tokens(text):
-        idx = zlib.crc32(tok.encode("utf-8")) % _SPARSE_BUCKETS
-        weights[idx] = weights.get(idx, 0.0) + 1.0
-    if not weights:
-        return {0: 1.0}
-    return {idx: 1.0 + math.log(weight) for idx, weight in weights.items()}
-
-
-def _coerce_sparse(raw) -> dict[int, float] | None:
-    try:
-        if isinstance(raw, dict) and raw:
-            return {int(k): float(v) for k, v in raw.items()}
-        if isinstance(raw, list) and raw:
-            out: dict[int, float] = {}
-            for item in raw:
-                if isinstance(item, dict) and "index" in item:
-                    value = item.get("value", item.get("weight", 0.0))
-                    out[int(item["index"])] = float(value)
-            return out or None
-    except (TypeError, ValueError):
-        return None
-    return None
 
 
 def _post_embeddings(texts: list[str]) -> list[dict]:
@@ -142,50 +88,46 @@ def _post_embeddings(texts: list[str]) -> list[dict]:
     return rows
 
 
-def _encode_remote(texts: list[str], cancel_event=None) -> tuple[list, list]:
-    """远程 dense（以及服务若提供的 sparse）。缺 sparse 时用本地词哈希补上。"""
+def _encode_remote(texts: list[str], cancel_event=None) -> list:
+    """远程 dense。sparse 向量不再计算：服务返回的 sparse 字段直接忽略。"""
     if cancel_event is not None and cancel_event.is_set():
         raise EncodingCancelled()
     all_dense: list = []
-    all_sparse: list = []
     for i in range(0, len(texts), ENCODE_BATCH_SIZE):
         if cancel_event is not None and cancel_event.is_set():
             raise EncodingCancelled()
         batch = texts[i:i + ENCODE_BATCH_SIZE]
-        for text, row in zip(batch, _post_embeddings(batch)):
+        for row in _post_embeddings(batch):
             embedding = row.get("embedding")
             if not isinstance(embedding, list) or not embedding:
                 raise RuntimeError("embedding service returned an empty vector")
             all_dense.append([float(x) for x in embedding])
-            sparse = _coerce_sparse(row.get("sparse") if row.get("sparse") is not None else row.get("lexical_weights"))
-            all_sparse.append(sparse if sparse is not None else _hash_sparse(text))
-    return all_dense, all_sparse
+    return all_dense
 
 
-def _encode_local(texts: list[str], cancel_event=None) -> tuple[list, list]:
+def _encode_local(texts: list[str], cancel_event=None) -> list:
+    """本地 dense。sparse 不再计算（return_sparse=False）。"""
     if cancel_event is not None and cancel_event.is_set():
         raise EncodingCancelled()
     model = get_bge_m3()
     all_dense = []
-    all_sparse = []
     for i in range(0, len(texts), ENCODE_BATCH_SIZE):
         if cancel_event is not None and cancel_event.is_set():
             raise EncodingCancelled()
         batch = texts[i:i + ENCODE_BATCH_SIZE]
-        output = model.encode(batch, return_dense=True, return_sparse=True)
+        output = model.encode(batch, return_dense=True, return_sparse=False)
         all_dense.extend(output["dense_vecs"].tolist())
-        for lexical_weight in output["lexical_weights"]:
-            all_sparse.append({int(k): float(v) for k, v in lexical_weight.items()})
-    return all_dense, all_sparse
+    return all_dense
 
 
-def encode_documents(texts: list[str], cancel_event=None) -> tuple[list, list]:
-    """提取 dense 和 sparse 向量（分批处理避免内存溢出）。
+def encode_documents(texts: list[str], cancel_event=None) -> list:
+    """提取 dense 向量（分批处理避免内存溢出），只返回 dense 向量列表。
 
+    sparse 向量不再计算：自 PR #52 起 sparse 臂为 BM25，不再读 `sparsevec` 列；
+    入库时该列写常量占位（列为 NOT NULL，不做迁移）。
     默认（EMBEDDING_PROVIDER 为 remote 或 openai）请求 OpenAI 兼容的 /embeddings，
     本进程不加载模型。huggingface / local / flagembedding 才用本进程里的 FlagEmbedding。
     cancel_event 已置位时抛出 EncodingCancelled，且不会为了取消去加载模型。
-    返回 (dense_vecs, sparse_vecs)。
     """
     if not texts:
         return [], []
@@ -194,7 +136,6 @@ def encode_documents(texts: list[str], cancel_event=None) -> tuple[list, list]:
     return _encode_local(texts, cancel_event)
 
 
-def encode_query(query: str) -> tuple[list, dict]:
-    """提取 query 的 dense 和 sparse 向量。远程模式下不会加载本地 BGE-M3。"""
-    dense, sparse = encode_documents([query])
-    return dense[0], sparse[0]
+def encode_query(query: str) -> list:
+    """提取 query 的 dense 向量。远程模式下不会加载本地 BGE-M3。"""
+    return encode_documents([query])[0]

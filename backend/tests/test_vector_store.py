@@ -1,11 +1,9 @@
-"""pgvector 混合检索的纯函数：稀疏格式、RRF、表名；BM25 sparse 臂。"""
+"""pgvector 混合检索的纯函数：RRF、表名；BM25 sparse 臂。"""
 from backend.core.lexical import LexicalIndex
 from backend.infrastructure.config import resolve_vector_table
 from backend.infrastructure.vector_store import (
-    SPARSE_DIM,
     dense_search_sql,
     format_dense,
-    format_sparse,
     fuse_hits,
     quote_ident,
 )
@@ -19,27 +17,18 @@ def _hit(item_id, score, text="t"):
     }
 
 
-def test_resolve_vector_table_prefers_explicit_name_then_legacy():
-    assert resolve_vector_table("", "") == "ragmate_docs"
-    assert resolve_vector_table("", "legacy_docs") == "legacy_docs"
-    assert resolve_vector_table("custom_docs", "legacy_docs") == "custom_docs"
+def test_resolve_vector_table_defaults_to_ragmate_docs():
+    assert resolve_vector_table("") == "ragmate_docs"
+    assert resolve_vector_table("custom_docs") == "custom_docs"
     try:
-        resolve_vector_table("bad name", "")
+        resolve_vector_table("bad name")
     except ValueError as exc:
         assert "VECTOR_TABLE" in str(exc)
     else:
         raise AssertionError("invalid table name was accepted")
 
 
-def test_format_sparse_is_one_based_and_dense_keeps_bge_width():
-    assert format_sparse({0: 1.0, 2: 0.5}) == "{1:1,3:0.5}/" + str(SPARSE_DIM)
-    assert format_sparse({}) == "{1:1}/" + str(SPARSE_DIM)
-    try:
-        format_sparse({SPARSE_DIM: 1.0})
-    except Exception as exc:
-        assert "sparse index" in str(exc)
-    else:
-        raise AssertionError("out-of-range sparse index was accepted")
+def test_format_dense_rejects_short_vector():
     try:
         format_dense([0.1, 0.2])
     except Exception as exc:

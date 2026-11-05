@@ -15,9 +15,9 @@ REMOTE_EMBEDDING_PROVIDERS = ("openai", "remote")
 _VECTOR_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$")
 
 
-def resolve_vector_table(vector_table: str, legacy_collection: str = "") -> str:
-    """VECTOR_TABLE 优先；空则用旧的 MILVUS_COLLECTION；再空则 ragmate_docs。"""
-    table = (vector_table or "").strip() or (legacy_collection or "").strip() or "ragmate_docs"
+def resolve_vector_table(vector_table: str) -> str:
+    """VECTOR_TABLE 为空则默认 ragmate_docs。"""
+    table = (vector_table or "").strip() or "ragmate_docs"
     if not _VECTOR_TABLE_RE.fullmatch(table):
         raise ValueError(
             "VECTOR_TABLE must be a SQL identifier of at most 40 characters, "
@@ -62,9 +62,8 @@ class Settings(BaseSettings):
     REDIS_URL: str = ""
 
     # pgvector 表，建在 DATABASE_URL 的同一个 Postgres 里。
-    # 留空则用 ragmate_docs；若只设置了旧的 MILVUS_COLLECTION，用那个名字。
+    # 留空则用 ragmate_docs。
     VECTOR_TABLE: str = ""
-    MILVUS_COLLECTION: str = ""
 
     # Ingestion
     CHUNK_SIZE: int = Field(default=1000, gt=0)
@@ -77,7 +76,6 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_DOCX: int = Field(default=150, ge=0)
     CHUNK_SIZE_TXT: int = Field(default=1000, gt=0)
     CHUNK_OVERLAP_TXT: int = Field(default=200, ge=0)
-    CHUNK_SIZE_TABLE: int = Field(default=1500, gt=0)
 
     # Parent-child chunking (small-to-big)
     CHUNK_SIZE_PARENT: int = Field(default=2500, gt=0)
@@ -101,20 +99,17 @@ class Settings(BaseSettings):
     FINAL_CONTEXT_K: int = Field(default=15, gt=0)
     RERANK_SCORE_THRESHOLD: float = Field(default=0.3, gt=0.0, lt=1.0)
 
-    # 忠诚度校验（默认开启，但只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答；false 则全关）
-    FAITHFULNESS_CHECK: bool = True
+    # 忠诚度校验（默认关闭；开启后只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答）
+    FAITHFULNESS_CHECK: bool = False
 
     # Query processing
-    QUERY_CONTEXTUALIZE: bool = True   # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
+    QUERY_CONTEXTUALIZE: bool = False  # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
     # 冻结为关。多查询扩展不是默认；打开前先重跑 ragmate-eval retrieval 并更新门槛。
-    QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过检索，直接回复寒暄
-    # 默认一条链路：检索一次 → 生成一次 → 接地。显式打开才走 Deep Agents 工具循环。
-    DEEP_AGENTS_ENABLED: bool = False
+    QUERY_ROUTING_ENABLED: bool = False  # 简单查询跳过检索，直接回复寒暄
 
 
-    # Agent
-    AGENT_RECURSION_LIMIT: int = Field(default=30, gt=0)
-    AGENT_TIMEOUT: int = Field(default=120, gt=0)  # Agent 调用超时（秒）
+    # 超时
+    AGENT_TIMEOUT: int = Field(default=120, gt=0)  # 检索/回答调用超时（秒）
 
     # Chat & Session
     MAX_HISTORY_TURNS: int = Field(default=10, gt=0)  # 上下文窗口保留最近 N 轮对话
@@ -145,7 +140,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _check_required(self):
         object.__setattr__(
-            self, "VECTOR_TABLE", resolve_vector_table(self.VECTOR_TABLE, self.MILVUS_COLLECTION)
+            self, "VECTOR_TABLE", resolve_vector_table(self.VECTOR_TABLE)
         )
         if self.RERANKER_PROVIDER not in ("local", "api"):
             raise ValueError(f"RERANKER_PROVIDER must be 'local' or 'api', got '{self.RERANKER_PROVIDER}'")

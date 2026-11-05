@@ -1,4 +1,4 @@
-"""远程嵌入：API 进程不加载 BGE，dense 走 HTTP，sparse 可由服务返回或本地哈希补齐。"""
+"""远程嵌入：API 进程不加载 BGE，dense 走 HTTP；sparse 不再计算（服务返回的 sparse 字段直接忽略）。"""
 import io
 import json
 import threading
@@ -10,7 +10,6 @@ import pytest
 from backend.infrastructure.config import Settings, settings
 from backend.infrastructure.encoding import (
     EncodingCancelled,
-    _hash_sparse,
     _post_embeddings,
     encode_documents,
     encode_query,
@@ -38,15 +37,7 @@ def _urlopen(response, captured):
     return fake
 
 
-def test_hash_sparse_is_stable_and_nonempty():
-    first = _hash_sparse("混合检索 hybrid search")
-    second = _hash_sparse("混合检索 hybrid search")
-    assert first == second
-    assert first
-    assert all(isinstance(k, int) and isinstance(v, float) for k, v in first.items())
-
-
-def test_remote_dense_only_response_hashes_sparse_and_skips_local_model(remote_settings, monkeypatch):
+def test_remote_dense_only_response_returns_dense_only(remote_settings, monkeypatch):
     captured = {}
     response = {
         "data": [
@@ -61,11 +52,9 @@ def test_remote_dense_only_response_hashes_sparse_and_skips_local_model(remote_s
     monkeypatch.setattr("backend.infrastructure.encoding.get_bge_m3", boom)
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen(response, captured))
 
-    dense, sparse = encode_documents(["甲", "乙"])
+    dense = encode_documents(["甲", "乙"])
     assert uses_remote_embeddings() is True
     assert dense == [[0.1, 0.4], [0.2, 0.3]]
-    assert sparse[0] == _hash_sparse("甲")
-    assert sparse[1] == _hash_sparse("乙")
     assert captured["url"] == "http://embed.example/v1/embeddings"
     assert captured["auth"] == "Bearer secret"
     assert captured["timeout"] == 12
@@ -73,7 +62,7 @@ def test_remote_dense_only_response_hashes_sparse_and_skips_local_model(remote_s
     assert captured["body"]["input"] == ["甲", "乙"]
 
 
-def test_remote_sparse_from_service_is_kept(remote_settings, monkeypatch):
+def test_remote_sparse_from_service_is_ignored(remote_settings, monkeypatch):
     captured = {}
     response = {
         "data": [
@@ -81,9 +70,7 @@ def test_remote_sparse_from_service_is_kept(remote_settings, monkeypatch):
         ]
     }
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen(response, captured))
-    dense, sparse = encode_query("问题")
-    assert dense == [0.5]
-    assert sparse == {7: 0.25, 8: 0.5}
+    assert encode_query("问题") == [0.5]
 
 
 def test_remote_cancel_does_not_call_the_service(remote_settings, monkeypatch):

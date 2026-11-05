@@ -130,9 +130,7 @@ def strip_title_path_prefix(text: str) -> str:
 
 
 def _get_text_splitter(ext: str):
-    """根据文件扩展名返回对应的 text splitter。表格类返回 None（不切分）。"""
-    if ext in (".xlsx", ".xls"):
-        return None
+    """根据文件扩展名返回对应的 text splitter。"""
     size, overlap = {
         ".md": (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP),
         ".markdown": (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP),
@@ -192,7 +190,7 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
                 "current_file": filename, "progress": i, "total": len(new_files),
             })
             filepath = os.path.join(docs_dir, filename)
-            pages = load_document(filepath, table_chunk_size=settings.CHUNK_SIZE_TABLE)
+            pages = load_document(filepath)
             logger.info(f"{filename}: {len(pages)} pages, {sum(len(p.page_content) for p in pages)} chars")
 
             if not pages:
@@ -209,8 +207,6 @@ def _load_and_split(docs_dir, new_files, cancel_event=None):
                     for section in sections:
                         section.metadata.update({k: v for k, v in doc.metadata.items() if k not in section.metadata})
                         chunks.extend(_split_markdown_section(section, ext))
-                elif ext in (".xlsx", ".xls"):
-                    chunks.append(doc)
                 else:
                     splitter = _get_text_splitter(ext)
                     if splitter is not None:
@@ -334,7 +330,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         "chunk_count": len(chunks),
     })
     try:
-        dense_vecs, sparse_vecs = encode_documents(texts, cancel_event)
+        dense_vecs = encode_documents(texts, cancel_event)
     except EncodingCancelled:
         return {"status": "idle", "message": "Cancelled"}
 
@@ -344,7 +340,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         "current_file": "", "progress": len(new_files), "total": len(new_files),
         "chunk_count": len(chunks),
     })
-    keep_ids_by_source = insert_chunks(client, chunks, dense_vecs, sparse_vecs)
+    keep_ids_by_source = insert_chunks(client, chunks, dense_vecs)
 
     # 9. 新向量写入成功后，再删除旧向量（仅限确实有新数据的文件）。
     # 删除失败必须让本次入库失败：不能在旧向量还在时把状态写成 success。

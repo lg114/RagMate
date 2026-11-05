@@ -33,7 +33,7 @@ def get_embeddings():
 
     remote / openai 使用 OpenAI 兼容 HTTP，本函数不会 import torch。
     huggingface / local / flagembedding 才在本进程加载 HuggingFace 权重。
-    入库和查询的 dense/sparse 编码走 encoding.py，不经过这里。
+    入库和查询的 dense 编码走 encoding.py，不经过这里。
     """
     if settings.EMBEDDING_PROVIDER in REMOTE_EMBEDDING_PROVIDERS:
         kwargs = {"model": settings.EMBEDDING_MODEL}
