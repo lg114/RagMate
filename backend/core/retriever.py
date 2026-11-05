@@ -6,6 +6,8 @@ import math
 import os
 import re
 import threading
+import time
+import urllib.error
 import urllib.request
 
 from backend.domain.errors import AppError, ServiceUnavailableError
@@ -26,6 +28,10 @@ _SOURCE_DOMINANCE_THRESHOLD = 0.9
 _SOURCE_DOMINANCE_BOOST = 1.5
 _COMPRESSION_SCORE_THRESHOLD = 0.4
 _COMPRESSION_MIN_CHARS = 300
+
+# 远程 rerank 429 重试：只重试 429（读操作，重试安全），其它错误直接抛出。
+_RERANK_MAX_ATTEMPTS = 5
+_RERANK_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 40.0)
 
 
 def canonical_source(source: str) -> str:
@@ -223,6 +229,8 @@ def _api_rerank_scores(query: str, texts: list[str]) -> list[float]:
     请求：POST {RERANKER_API_BASE_URL}/rerank，体为 {model, query, documents, top_n}；
     响应：{results: [{index, relevance_score}, ...]}，relevance_score 已是 [0, 1] 概率。
     响应缺失的下标按 0.0 计（等同于被阈值过滤）。
+    429 时重试：优先用响应里的 Retry-After，否则按 5/10/20/40 秒指数退避，
+    最多 5 次；其它错误直接抛出。rerank 是只读调用，重试安全。
     """
     url = settings.RERANKER_API_BASE_URL.rstrip("/") + "/rerank"
     payload = json.dumps({
@@ -235,8 +243,22 @@ def _api_rerank_scores(query: str, texts: list[str]) -> list[float]:
     req.add_header("Content-Type", "application/json")
     if settings.RERANKER_API_KEY:
         req.add_header("Authorization", f"Bearer {settings.RERANKER_API_KEY}")
-    with urllib.request.urlopen(req, timeout=settings.RERANKER_API_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    data = None
+    for attempt in range(_RERANK_MAX_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=settings.RERANKER_API_TIMEOUT) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == _RERANK_MAX_ATTEMPTS - 1:
+                raise
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            try:
+                wait = float(retry_after) if retry_after else _RERANK_BACKOFF_SECONDS[attempt]
+            except (TypeError, ValueError):
+                wait = _RERANK_BACKOFF_SECONDS[attempt]
+            logger.warning("rerank 429，第 %d 次重试前等待 %.1f 秒", attempt + 1, wait)
+            time.sleep(wait)
     scores = [0.0] * len(texts)
     for item in data.get("results", []):
         idx = item.get("index")
