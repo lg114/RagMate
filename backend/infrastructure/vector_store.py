@@ -236,14 +236,6 @@ class PgVectorStore:
         with self._connect() as conn:
             ensure_schema_conn(conn, self.table)
 
-    def drop_table(self) -> None:
-        ident = quote_ident(self.table)
-        with self._connect() as conn:
-            conn.execute(text(f"DROP TABLE IF EXISTS {ident}"))
-        with _ready_lock:
-            _ready_tables.discard(self.table)
-            _lexical_indexes.pop(self.table, None)
-
     def validate_schema(self) -> None:
         with self._connect() as conn:
             _validate_schema(conn, self.table)
@@ -427,25 +419,6 @@ class PgVectorStore:
                     found.add(row[0])
         return found
 
-    def existing_identity_keys(self, hashes: list[str]) -> set[tuple]:
-        """(source, chunk_index, content_hash) 已在表里的键，给迁移去重用。"""
-        if not hashes:
-            return set()
-        ident = quote_ident(self.table)
-        found: set[tuple] = set()
-        for start in range(0, len(hashes), 100):
-            batch = hashes[start:start + 100]
-            placeholders = ", ".join(f":h{i}" for i in range(len(batch)))
-            params = {f"h{i}": value for i, value in enumerate(batch)}
-            with self._connect() as conn:
-                rows = conn.execute(text(
-                    f"SELECT source, chunk_index, content_hash FROM {ident} "
-                    f"WHERE content_hash IN ({placeholders})"
-                ), params).all()
-            for source, chunk_index, content_hash in rows:
-                found.add((source or "", chunk_index, content_hash or ""))
-        return found
-
     def insert_rows(self, rows: list[dict]) -> list[int]:
         if not rows:
             return []
@@ -483,12 +456,6 @@ class PgVectorStore:
         if len(ids) != len(rows):
             raise ServiceUnavailableError("向量写入结果无法确认")
         return ids
-
-    def count_rows(self) -> int:
-        ident = quote_ident(self.table)
-        with self._connect() as conn:
-            value = conn.execute(text(f"SELECT COUNT(*) FROM {ident}")).scalar_one()
-        return int(value)
 
     def fetch_chunks(self, limit: int = 16384) -> list[dict]:
         ident = quote_ident(self.table)
@@ -593,13 +560,6 @@ def ensure_schema_conn(conn, table: str | None = None) -> None:
 
 def get_vector_store() -> PgVectorStore:
     return PgVectorStore()
-
-
-def reset_vector_store_cache() -> None:
-    """切换 VECTOR_TABLE 后调用，让下次 init 重新检查那张表。"""
-    with _ready_lock:
-        _ready_tables.clear()
-        _lexical_indexes.clear()
 
 
 def init_vector_store() -> PgVectorStore | None:

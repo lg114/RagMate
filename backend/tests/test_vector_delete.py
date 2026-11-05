@@ -227,7 +227,7 @@ def _patch_ingest(monkeypatch, tmp_path, delete_impl):
 
 def test_reingest_delete_failure_is_not_success(monkeypatch, tmp_path):
     def boom(*args, **kwargs):
-        raise ServiceUnavailableError("milvus delete failed")
+        raise ServiceUnavailableError("delete failed")
 
     statuses, synced = _patch_ingest(monkeypatch, tmp_path, boom)
     result = pipeline.ingest_documents(str(tmp_path), ["a.txt"])

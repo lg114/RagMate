@@ -1,4 +1,4 @@
-"""确定性检索指标与实验 manifest 的测试：纯函数，不碰 Milvus/LLM。"""
+"""确定性检索指标与实验 manifest 的测试：纯函数，不碰向量库/LLM。"""
 import json
 
 import pytest

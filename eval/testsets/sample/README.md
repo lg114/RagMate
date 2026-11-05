@@ -1,8 +1,7 @@
 # 样本评测集（重建版）
 
 本目录是 2026-11-02 重建、2026-11-03 加难扩容后的精选小测试集：原始 10
-题测试集与语料只在作者本地、已丢失，按原实验设计（`RETRIEVAL_EXPERIMENTS.md`
-阶段 0 与 `eval/reports/baseline/retrieval-stage0.md`）重做并扩容。参考答案
+题测试集与语料只在作者本地、已丢失，按原实验设计（`RETRIEVAL_EXPERIMENTS.md` 阶段 0）重做并扩容。参考答案
 全部手写，逐条可从语料原文核对，没有用 LLM 生成。
 
 ## 内容
@@ -28,7 +27,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| `gold_chunks` | `{source, page, chunk_index}` 列表；chunk 身份用三元组，不用 Milvus 自增 id |
+| `gold_chunks` | `{source, page, chunk_index}` 列表；chunk 身份用三元组，不用向量库自增 id |
 | `expected_claims` | 参考答案拆出的可核查要点（1–3 条） |
 | `question_type` | `factoid` / `paraphrase` / `ambiguous` / `multi-hop` / `unanswerable` |
 | `source_doc` | 主来源文档名；跨文档题填首个主文档；unanswerable 为空 |
@@ -47,7 +46,7 @@ ragmate-eval check-gold --testset eval/testsets/sample/testset.json --live
 ragmate-eval retrieval --testset eval/testsets/sample/testset.json --repeat 3
 ```
 
-3. 与 `retrieval-stage0.md`（已丢失的 10 题语料）或扩容前 50 题基线**不可直接比数字**；只做同集前后对比。
+3. 不同题集之间**不可直接比数字**；只做同集前后对比。
 
 ## 局限
 

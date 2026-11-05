@@ -5,7 +5,7 @@ Tier-1（检索层）基线专用。与 RAGAS 的 context_precision / context_re
 gold chunk ID 集合与实际返回的排序直接算出，同一索引、同一问题，跑多少
 遍结果都一样。
 
-Chunk 的身份用 (source, page, chunk_index) 三元组：Milvus 的自增 id 不可
+Chunk 的身份用 (source, page, chunk_index) 三元组：向量库的自增 id 不可
 复现，而三元组是入库切分时写进 metadata 的确定性标识，检索链路内部也用它认 chunk。
 """
 import math

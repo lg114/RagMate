@@ -172,7 +172,7 @@ RagMate/
 │   ├── api/                # HTTP routes: chat, documents, ingest, health
 │   ├── application/        # Use-case orchestration
 │   │   └── ingest/         # pipeline (load → chunk → dedupe → encode), loaders, db_sync
-│   ├── core/               # RAG core: retriever, agent, prompts/researcher.md
+│   ├── core/               # RAG core: retriever, prompts/researcher.md
 │   ├── domain/             # ORM models, Pydantic schemas, error types
 │   ├── infrastructure/     # config, database, pgvector, optional redis, encoding, model_factory
 │   ├── eval/               # retrieval-gate and deterministic retrieval evaluation
@@ -190,7 +190,7 @@ The backend is strictly layered — each layer only calls downward:
 |---|---|---|
 | Interface | `api/` | HTTP concerns only: routing, request validation, rate limiting |
 | Application | `application/` | Use-case orchestration: chat flow, document CRUD, ingestion lifecycle |
-| Core | `core/` | RAG domain logic: retrieval pipeline, agent, system prompts |
+| Core | `core/` | RAG domain logic: retrieval pipeline, system prompts |
 | Domain | `domain/` | ORM models, Pydantic schemas, `AppError` hierarchy |
 | Infrastructure | `infrastructure/` | External systems: PostgreSQL + pgvector, optional Redis, models, config |
 
@@ -202,7 +202,7 @@ flowchart LR
     P --> M[(PostgreSQL metadata)]
     Q[User query] --> R[Hybrid search + RRF]
     R --> RR[Rerank, compress, filter]
-    RR --> A[Agent and LLM]
+    RR --> A[LLM]
     A --> O[Answer with citations]
 ```
 
@@ -210,7 +210,7 @@ flowchart LR
 
 **Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus BM25 over chunk text, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (off by default; when enabled, checked only when retrieval confidence is low). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
 
-Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
+Simple greetings and other non-RAG messages are routed straight to the LLM, skipping retrieval entirely.
 
 ---
 
@@ -299,7 +299,7 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 
 ### Retrieval (frozen)
 
-One retrieval config is validated. It is hybrid dense + BM25 search, fused with RRF, then reranked. The fused-stage numbers are pinned in [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json). Leave the defaults below unless you re-run `ragmate-eval retrieval` on that 98-question set and replace the floors in [`eval/README.md`](eval/README.md) and `backend/tests/test_retrieval_gate.py`.
+One retrieval config is validated. It is hybrid dense + BM25 search, fused with RRF, then reranked. The fused-stage numbers are pinned in [`eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json`](eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json). Leave the defaults below unless you re-run `ragmate-eval retrieval` on that 130-question set and replace the floors in [`eval/README.md`](eval/README.md) and `backend/tests/test_retrieval_gate.py`.
 
 | Piece | Frozen value |
 |---|---|
@@ -348,7 +348,7 @@ The regression guard is `ragmate-eval retrieval-gate`. It ships with the base in
 ragmate-eval retrieval-gate
 ```
 
-It replays the committed 98-question sample with deterministic BM25 (no pgvector query, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in [`eval/README.md`](eval/README.md). GitHub Actions runs this command after pytest. The floors were not lowered for this store change.
+It replays the committed 130-question sample with deterministic BM25 (no pgvector query, no BGE, no GPU) and fails when Recall@k or nDCG drops below the fused-stage floors pinned from `eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json`. The floors, the 0.015 allowance, and the steps for replacing that baseline on purpose are in [`eval/README.md`](eval/README.md). GitHub Actions runs this command after pytest.
 
 RAGAS judge scoring was removed: it never produced a usable baseline and had been shelved from CI and the CLI main path. The deterministic retrieval gate in `eval/` is the regression guard.
 

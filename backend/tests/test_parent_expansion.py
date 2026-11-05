@@ -1,6 +1,6 @@
 """父子分块（small-to-big）检索侧行为的回归测试。
 
-背景：parent_text 曾被写入 Milvus 却从未在检索时请求，`or` 回退把缺陷静默吞掉，
+背景：parent_text 曾被写入向量库却从未在检索时请求，`or` 回退把缺陷静默吞掉，
 导致 README 宣称的 "small-to-big" 实际退化为纯小片段检索。这组测试锁定三件事：
 
 1. 稠密查询与 BM25 取行都必须取出 parent_text（否则父片段永远取不到）
@@ -22,7 +22,7 @@ from backend.infrastructure.vector_store import dense_search_sql
 
 def _hit(text: str, parent_text: str | None = None, source: str = "a.pdf",
          page: int = 0, chunk_index: int = 0) -> dict:
-    """构造一条 Milvus 搜索命中。parent_text=None 表示未请求该字段。"""
+    """构造一条向量库搜索命中。parent_text=None 表示未请求该字段。"""
     entity = {
         "text": text,
         "metadata": {"source": source, "page": page, "chunk_index": chunk_index},
@@ -165,7 +165,7 @@ class TestCompressionRunsOnParentText:
         )
 
     def test_returns_parent_text_to_caller(self, override_settings):
-        """最终返回给调用方（agent / 评测）的必须是父片段。"""
+        """最终返回给调用方（chat 链路 / 评测）的必须是父片段。"""
         parent = "父片段内容。" * 50
         candidate = {"text": "小片段", "context": parent, "source": "a.pdf", "score": 0.9}
 

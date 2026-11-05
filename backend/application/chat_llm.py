@@ -34,7 +34,7 @@ def extract_text(response: dict) -> str:
     return text if text else str(last_msg.content)
 
 
-# ── 查询路由：明显的非 RAG 查询，跳过 agent 直接回复 ─────────────────────────
+# ── 查询路由：明显的非 RAG 查询，跳过检索直接回复 ─────────────────────────
 _NON_RAG_RE = re.compile(
     r"^(?:"
     r"你好|hello|hi|hey|嗨|哈喽|哈啰"

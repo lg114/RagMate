@@ -6,7 +6,7 @@ backend.application.chat 导入它们）。
 
 import re
 
-_CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|xlsx?|xls|txt|md))(?:[,，]\s*第\d+页)?】", re.IGNORECASE)
+_CITATION_RE = re.compile(r"【([^】]+\.(?:pdf|docx?|txt|md))(?:[,，]\s*第\d+页)?】", re.IGNORECASE)
 
 
 _SOURCE_LINE_RE = re.compile(r"^\s*数据来源[:：].*$", re.MULTILINE)
