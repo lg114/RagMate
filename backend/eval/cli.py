@@ -231,7 +231,8 @@ def cmd_retrieval(args):
     checkpoint_path = write_retrieval_checkpoint(result["checkpoint"], report_path)
     print(f"Raw ranked lists checkpointed to {checkpoint_path}")
 
-    report = build_retrieval_report(manifest, result["evaluations"], checkpoint_path, stages)
+    report = build_retrieval_report(manifest, result["evaluations"], checkpoint_path, stages,
+                                    timings=result.get("timings"))
     report_output = Path(report_path)
     report_output.parent.mkdir(parents=True, exist_ok=True)
     with open(report_output, "w", encoding="utf-8") as f:

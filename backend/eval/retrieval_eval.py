@@ -14,6 +14,7 @@ Chunk 身份用 (source, page, chunk_index) 三元组，与 gold 标注一致。
 """
 import json
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -87,26 +88,42 @@ def _search_fused(store, dense_vec, sparse_vec, over_fetch):
     return [store.search_hybrid(dense_vec, sparse_vec, over_fetch)]
 
 
-def run_stages(client, question: str, stages, over_fetch: int) -> dict:
+def run_stages(client, question: str, stages, over_fetch: int, timings: dict | None = None) -> dict:
     """对一个问题跑出各阶段的排序。返回 {stage: [record, ...]}。
 
     编码只做一次，各阶段共用同一对向量；reranked 复用 fused 的候选。
+    传 timings 字典时填入各环节耗时（秒，perf_counter）：encode（查询编码）、
+    dense / sparse / fused（向量库搜索）、rerank（打分 + 重排）；只记实际跑
+    的环节。计时不改变任何排序结果。
     """
     unknown = [s for s in stages if s not in STAGES]
     if unknown:
         raise ValueError(f"Unknown stage(s): {unknown}, expected one of {STAGES}")
+    t0 = time.perf_counter()
     dense_vec, sparse_vec = encode_query(question)
+    if timings is not None:
+        timings["encode"] = time.perf_counter() - t0
     out = {}
     fused_records = None
     if "dense" in stages:
+        t0 = time.perf_counter()
         out["dense"] = _extract_stage_records(_search_dense(client, dense_vec, over_fetch))
+        if timings is not None:
+            timings["dense"] = time.perf_counter() - t0
     if "sparse" in stages:
+        t0 = time.perf_counter()
         out["sparse"] = _extract_stage_records(_search_sparse(client, sparse_vec, over_fetch))
+        if timings is not None:
+            timings["sparse"] = time.perf_counter() - t0
     if "fused" in stages or "reranked" in stages:
+        t0 = time.perf_counter()
         fused_records = _extract_stage_records(_search_fused(client, dense_vec, sparse_vec, over_fetch))
+        if timings is not None:
+            timings["fused"] = time.perf_counter() - t0
     if "fused" in stages:
         out["fused"] = fused_records
     if "reranked" in stages:
+        t0 = time.perf_counter()
         reranked = [dict(r) for r in fused_records]
         scores = score_pairs(question, [r["text"] for r in reranked])
         for record, score in zip(reranked, scores):
@@ -115,6 +132,8 @@ def run_stages(client, question: str, stages, over_fetch: int) -> dict:
         for rank, record in enumerate(reranked):
             record["rank"] = rank + 1
         out["reranked"] = reranked
+        if timings is not None:
+            timings["rerank"] = time.perf_counter() - t0
     return out
 
 
@@ -261,12 +280,54 @@ def _checkpoint_records(records: list[dict]) -> list[dict]:
     } for r in records]
 
 
+def _percentile(values: list[float], p: float) -> float:
+    """最近秩法百分位：p=50 即中位，p=95 即 p95。不引入 numpy 依赖。"""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = max(1, min(len(ordered), math.ceil(p / 100.0 * len(ordered))))
+    return ordered[rank - 1]
+
+
+def _summarize_times(values: list[float]) -> dict:
+    """一组耗时的汇总：个数、均值、p50、p95、总和（单位均为秒）。"""
+    if not values:
+        return {"count": 0, "mean": 0.0, "p50": 0.0, "p95": 0.0, "total": 0.0}
+    return {
+        "count": len(values),
+        "mean": sum(values) / len(values),
+        "p50": _percentile(values, 50),
+        "p95": _percentile(values, 95),
+        "total": sum(values),
+    }
+
+
+def summarize_timings(question_timings: list[dict]) -> dict:
+    """把每题的计时汇总成报告用的 timings 块。
+
+    per_question_total 是单题端到端耗时（run_stages 墙钟，不含 --delay-seconds
+    的 sleep）；per_stage 是各环节耗时。只汇总第一遍（与指标取第一遍一致）。
+    """
+    totals = [q["total"] for q in question_timings]
+    per_stage = {}
+    for part in ("encode", "dense", "sparse", "fused", "rerank"):
+        vals = [q["parts"][part] for q in question_timings if part in q["parts"]]
+        if vals:
+            per_stage[part] = _summarize_times(vals)
+    return {
+        "unit": "seconds",
+        "per_question_total": _summarize_times(totals),
+        "per_stage": per_stage,
+    }
+
+
 def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
                        ks, manifest: dict, delay: float = 0.0) -> dict:
-    """跑 repeat 遍分阶段检索，返回 checkpoint + 每遍的指标汇总。
+    """跑 repeat 遍分阶段检索，返回 checkpoint + 每遍的指标汇总 + 计时。
 
     repeat 遍的排序应当完全相同（固定索引下的确定性检索）；spread 在
     报告里单独列出，非 0 即说明检索链路里有不确定性。
+    计时只取第一遍（与指标取第一遍一致），不含 --delay-seconds 的 sleep。
     """
     client = init_vector_store()
     if client is None:
@@ -276,6 +337,7 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
         )
     checkpoint = None
     evaluations = []
+    question_timings = []
     total = repeat * len(cases)
     pbar = tqdm(total=total, desc="Retrieval eval", unit="q")
     try:
@@ -286,7 +348,15 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
             stage_lists = {}
             for idx, tc in enumerate(cases):
                 pbar.set_postfix(rep=f"{rep + 1}/{repeat}", refresh=False)
-                stage_records = run_stages(client, tc["user_input"], stages, over_fetch)
+                q_timings = {} if rep == 0 else None
+                t0 = time.perf_counter()
+                stage_records = run_stages(client, tc["user_input"], stages, over_fetch,
+                                           timings=q_timings)
+                if rep == 0:
+                    question_timings.append({
+                        "total": time.perf_counter() - t0,
+                        "parts": q_timings,
+                    })
                 for stage in stages:
                     items[stage].append({
                         "user_input": tc["user_input"],
@@ -318,12 +388,16 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
             })
     finally:
         pbar.close()
-    return {"checkpoint": checkpoint, "evaluations": evaluations}
+    return {"checkpoint": checkpoint, "evaluations": evaluations,
+            "timings": summarize_timings(question_timings)}
 
 
 def build_retrieval_report(manifest: dict, evaluations: list[dict],
-                           checkpoint_path, stages) -> dict:
-    """把多遍评测汇总成报告：每阶段的指标、重复跑的极差、确定性结论。"""
+                           checkpoint_path, stages, timings: dict | None = None) -> dict:
+    """把多遍评测汇总成报告：每阶段的指标、重复跑的极差、确定性结论。
+
+    timings 不进 manifest（计时不影响分数），只作为报告顶层 timings 块。
+    """
     per_stage_summaries = {}
     for stage in stages:
         per_stage_summaries[stage] = [ev[stage]["summary"] for ev in evaluations]
@@ -333,7 +407,7 @@ def build_retrieval_report(manifest: dict, evaluations: list[dict],
         for stage_spread in spread.values()
     )
     first = evaluations[0]
-    return {
+    report = {
         "meta": {
             **manifest,
             "checkpoint_path": str(checkpoint_path),
@@ -354,6 +428,9 @@ def build_retrieval_report(manifest: dict, evaluations: list[dict],
             for stage in stages
         },
     }
+    if timings is not None:
+        report["timings"] = timings
+    return report
 
 
 def write_retrieval_checkpoint(checkpoint: dict, report_path) -> Path:
@@ -413,6 +490,24 @@ def write_retrieval_markdown(report: dict, report_path) -> Path:
                 f"{p['user_input']}"
             )
         lines.append("")
+    timings = report.get("timings")
+    if timings:
+        lines.append("## Timings (seconds, first repeat only, excludes --delay-seconds sleeps)")
+        lines.append("")
+        total = timings["per_question_total"]
+        lines.append(
+            f"Per-question end-to-end: count={total['count']}, mean={total['mean']:.3f}, "
+            f"p50={total['p50']:.3f}, p95={total['p95']:.3f}, total={total['total']:.3f}."
+        )
+        lines.append("")
+        lines.append("| part | count | mean | p50 | p95 | total |")
+        lines.append("|---|---|---|---|---|---|")
+        for part, summary in timings["per_stage"].items():
+            lines.append(
+                f"| {part} | {summary['count']} | {summary['mean']:.3f} | "
+                f"{summary['p50']:.3f} | {summary['p95']:.3f} | {summary['total']:.3f} |"
+            )
+        lines.append("")
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text("\n".join(lines), encoding="utf-8")
     return md_path
@@ -438,6 +533,16 @@ def print_retrieval_report(report: dict):
               f"  MRR={summary.get('mrr', 0):.2f} "
               f"fail@20={summary.get('failure_rate@20', 0):.2f} "
               f"(unanswerable excluded: {data['n_unanswerable']})")
+    timings = report.get("timings")
+    if timings:
+        total = timings["per_question_total"]
+        print(f"\nTimings (seconds, first repeat only, excludes --delay-seconds sleeps):")
+        print(f"  per-question end-to-end: mean={total['mean']:.3f} "
+              f"p50={total['p50']:.3f} p95={total['p95']:.3f} total={total['total']:.3f}")
+        for part, summary in timings["per_stage"].items():
+            print(f"  {part:<10} mean={summary['mean']:.3f} "
+                  f"p50={summary['p50']:.3f} p95={summary['p95']:.3f} "
+                  f"total={summary['total']:.3f}")
     print(f"\nFull report saved to {meta.get('report_path', 'N/A')}")
 
 

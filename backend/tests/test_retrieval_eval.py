@@ -14,6 +14,7 @@ from backend.eval.retrieval_eval import (
     write_retrieval_checkpoint,
     write_retrieval_markdown,
     _extract_stage_records,
+    _percentile,
 )
 from backend.eval.utils import resolve_path
 
@@ -203,6 +204,65 @@ def test_run_retrieval_eval_requires_existing_collection(monkeypatch):
     monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: None)
     with pytest.raises(RuntimeError, match="does not exist"):
         run_retrieval_eval([_valid_case()], ["dense"], 10, 1, (5,), {})
+
+
+def test_percentile_nearest_rank():
+    assert _percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 50) == 5
+    assert _percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95) == 10
+    assert _percentile([2, 4], 50) == 2
+    assert _percentile([], 50) == 0.0
+
+
+def test_run_stages_records_timings_for_each_part(monkeypatch):
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
+                        lambda q, texts: [0.9] * len(texts))
+    timings = {}
+    out = run_stages(_FakeClient(HITS), "q", list(STAGES), over_fetch=10, timings=timings)
+    assert set(out) == set(STAGES)
+    assert set(timings) == {"encode", "dense", "sparse", "fused", "rerank"}
+    assert all(isinstance(v, float) and v >= 0 for v in timings.values())
+
+
+def test_run_stages_timings_only_for_requested_stages(monkeypatch):
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    timings = {}
+    out = run_stages(_FakeClient(HITS), "q", ["dense"], over_fetch=10, timings=timings)
+    assert set(out) == {"dense"}
+    assert set(timings) == {"encode", "dense"}
+
+
+def test_run_retrieval_eval_collects_timings(monkeypatch, tmp_path):
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
+                        lambda q, texts: [0.9] * len(texts))
+    monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: _FakeClient(HITS))
+    cases = [_valid_case(user_input="q1"), _valid_case(user_input="q2")]
+    result = run_retrieval_eval(cases, list(STAGES), over_fetch=10, repeat=1,
+                                ks=(5,), manifest={})
+    timings = result["timings"]
+    assert timings["unit"] == "seconds"
+    assert timings["per_question_total"]["count"] == 2
+    assert set(timings["per_stage"]) == {"encode", "dense", "sparse", "fused", "rerank"}
+    assert timings["per_stage"]["dense"]["count"] == 2
+    assert result["evaluations"][0]["dense"]["summary"]["hit@5"] == 1.0
+    from backend.eval.manifest import build_manifest
+    testset_file = tmp_path / "testset.json"
+    testset_file.write_text(json.dumps(cases), encoding="utf-8")
+    manifest = build_manifest(
+        testset_path=testset_file, stages=list(STAGES), over_fetch=10,
+        ks=[5], repeat=1, n_questions=len(cases), git_commit="test",
+    )
+    report = build_retrieval_report(manifest, result["evaluations"], tmp_path / "c.json",
+                                    list(STAGES), timings=timings)
+    assert report["timings"] == timings
+    assert "timings" not in manifest
+    md_path = write_retrieval_markdown(report, tmp_path / "r.json")
+    md = md_path.read_text(encoding="utf-8")
+    assert "## Timings" in md and "Per-question end-to-end" in md
+    report_no_timings = build_retrieval_report(manifest, result["evaluations"],
+                                               tmp_path / "c.json", list(STAGES))
+    assert "timings" not in report_no_timings
 
 
 def test_shipped_golden_set_passes_schema_and_inventory():
