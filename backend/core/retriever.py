@@ -670,8 +670,8 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
-        # 查询的 sparse 向量不再用于检索（sparse 臂已解耦为 BM25），只取 dense。
-        dense_vec, _ = encode_query(query)
+        # encode_query 只返回 dense；sparse 臂已解耦为 BM25，不再用 query 的 sparse 向量。
+        dense_vec = encode_query(query)
         candidates = _extract_candidates(_do_search(client, dense_vec, query, over_fetch))
 
         if not candidates:

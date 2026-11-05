@@ -149,7 +149,7 @@ class TestCompressionRunsOnParentText:
         candidate = {"text": small, "context": parent, "source": "a.pdf", "score": 0.9}
 
         with patch("backend.core.retriever.init_vector_store") as mock_init, \
-             patch("backend.core.retriever.encode_query", return_value=([0.1], None)), \
+             patch("backend.core.retriever.encode_query", return_value=[0.1]), \
              patch("backend.core.retriever._do_search", return_value=[[]]), \
              patch("backend.core.retriever._extract_candidates", return_value=[dict(candidate)]), \
              patch("backend.core.retriever._rerank_and_score", return_value=([dict(candidate)], 0.9)), \
@@ -170,7 +170,7 @@ class TestCompressionRunsOnParentText:
         candidate = {"text": "小片段", "context": parent, "source": "a.pdf", "score": 0.9}
 
         with patch("backend.core.retriever.init_vector_store") as mock_init, \
-             patch("backend.core.retriever.encode_query", return_value=([0.1], None)), \
+             patch("backend.core.retriever.encode_query", return_value=[0.1]), \
              patch("backend.core.retriever._do_search", return_value=[[]]), \
              patch("backend.core.retriever._extract_candidates", return_value=[dict(candidate)]), \
              patch("backend.core.retriever._rerank_and_score", return_value=([dict(candidate)], 0.9)), \

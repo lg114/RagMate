@@ -213,7 +213,7 @@ def _patch_ingest(monkeypatch, tmp_path, delete_impl):
     monkeypatch.setattr(pipeline, "_load_and_split", lambda *args, **kwargs: ([chunk], Counter({"a.txt": 1}), []))
     monkeypatch.setattr(pipeline, "get_vector_store", lambda: _IngestStore())
     monkeypatch.setattr(pipeline, "deduplicate_chunks", lambda *args, **kwargs: ([chunk], {}))
-    monkeypatch.setattr(pipeline, "encode_documents", lambda texts, cancel_event=None: ([[0.1]], [{}]))
+    monkeypatch.setattr(pipeline, "encode_documents", lambda texts, cancel_event=None: [[0.1]])
     monkeypatch.setattr(pipeline, "insert_chunks", lambda *args, **kwargs: {"a.txt": [11]})
     monkeypatch.setattr(pipeline, "delete_old_chunks", delete_impl)
     monkeypatch.setattr(pipeline, "set_ingest_status_sync", lambda data: statuses.append(dict(data)))

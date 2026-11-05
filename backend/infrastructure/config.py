@@ -101,13 +101,13 @@ class Settings(BaseSettings):
     FINAL_CONTEXT_K: int = Field(default=15, gt=0)
     RERANK_SCORE_THRESHOLD: float = Field(default=0.3, gt=0.0, lt=1.0)
 
-    # 忠诚度校验（默认开启，但只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答；false 则全关）
-    FAITHFULNESS_CHECK: bool = True
+    # 忠诚度校验（默认关闭；开启后只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答）
+    FAITHFULNESS_CHECK: bool = False
 
     # Query processing
-    QUERY_CONTEXTUALIZE: bool = True   # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
+    QUERY_CONTEXTUALIZE: bool = False  # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
     # 冻结为关。多查询扩展不是默认；打开前先重跑 ragmate-eval retrieval 并更新门槛。
-    QUERY_ROUTING_ENABLED: bool = True  # 简单查询跳过检索，直接回复寒暄
+    QUERY_ROUTING_ENABLED: bool = False  # 简单查询跳过检索，直接回复寒暄
     # 默认一条链路：检索一次 → 生成一次 → 接地。显式打开才走 Deep Agents 工具循环。
     DEEP_AGENTS_ENABLED: bool = False
 

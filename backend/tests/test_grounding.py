@@ -140,8 +140,8 @@ def test_faithfulness_parses_unsupported_claim(monkeypatch):
     assert claims == [{"claim": "这是一个足够长的声明句子。", "supported": False}]
 
 
-def test_faithfulness_defaults_on():
-    assert type(settings).model_fields["FAITHFULNESS_CHECK"].default is True
+def test_faithfulness_defaults_off():
+    assert type(settings).model_fields["FAITHFULNESS_CHECK"].default is False
 
 
 def test_deep_agents_default_off():

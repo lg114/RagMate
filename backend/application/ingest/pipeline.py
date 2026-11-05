@@ -334,7 +334,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         "chunk_count": len(chunks),
     })
     try:
-        dense_vecs, sparse_vecs = encode_documents(texts, cancel_event)
+        dense_vecs = encode_documents(texts, cancel_event)
     except EncodingCancelled:
         return {"status": "idle", "message": "Cancelled"}
 
@@ -344,7 +344,7 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
         "current_file": "", "progress": len(new_files), "total": len(new_files),
         "chunk_count": len(chunks),
     })
-    keep_ids_by_source = insert_chunks(client, chunks, dense_vecs, sparse_vecs)
+    keep_ids_by_source = insert_chunks(client, chunks, dense_vecs)
 
     # 9. 新向量写入成功后，再删除旧向量（仅限确实有新数据的文件）。
     # 删除失败必须让本次入库失败：不能在旧向量还在时把状态写成 success。

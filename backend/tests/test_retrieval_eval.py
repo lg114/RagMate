@@ -66,7 +66,7 @@ def test_extract_stage_records_keeps_triple_rank_score():
 def test_run_stages_encode_once_per_question(monkeypatch):
     encoded = []
     monkeypatch.setattr("backend.eval.retrieval_eval.encode_query",
-                        lambda q: encoded.append(q) or ([0.1], "sparse-vec"))
+                        lambda q: encoded.append(q) or [0.1])
     client = _FakeClient(HITS)
     out = run_stages(client, "q", ["dense", "sparse", "fused"], over_fetch=10)
     assert set(out) == {"dense", "sparse", "fused"}
@@ -85,7 +85,7 @@ def test_do_search_always_uses_hybrid():
 
 
 def test_run_stages_reranked_reorders_by_score_pairs(monkeypatch):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
                         lambda q, texts: [0.1, 0.9, 0.5])
     client = _FakeClient(HITS)
@@ -98,7 +98,7 @@ def test_run_stages_reranked_reorders_by_score_pairs(monkeypatch):
 
 
 def test_run_stages_rejects_unknown_stage(monkeypatch):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     with pytest.raises(ValueError, match="Unknown stage"):
         run_stages(_FakeClient(HITS), "q", ["nope"], over_fetch=10)
 
@@ -152,7 +152,7 @@ def test_verify_gold_in_inventory_reports_missing():
 
 
 def test_run_retrieval_eval_end_to_end_with_fake_client(monkeypatch, tmp_path):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
                         lambda q, texts: [0.9] * len(texts))
     monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: _FakeClient(HITS))
@@ -185,7 +185,7 @@ def test_run_retrieval_eval_end_to_end_with_fake_client(monkeypatch, tmp_path):
 
 
 def test_run_retrieval_eval_delay_sleeps_between_questions(monkeypatch):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
                         lambda q, texts: [0.9] * len(texts))
     monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: _FakeClient(HITS))
@@ -214,7 +214,7 @@ def test_percentile_nearest_rank():
 
 
 def test_run_stages_records_timings_for_each_part(monkeypatch):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
                         lambda q, texts: [0.9] * len(texts))
     timings = {}
@@ -225,7 +225,7 @@ def test_run_stages_records_timings_for_each_part(monkeypatch):
 
 
 def test_run_stages_timings_only_for_requested_stages(monkeypatch):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     timings = {}
     out = run_stages(_FakeClient(HITS), "q", ["dense"], over_fetch=10, timings=timings)
     assert set(out) == {"dense"}
@@ -233,7 +233,7 @@ def test_run_stages_timings_only_for_requested_stages(monkeypatch):
 
 
 def test_run_retrieval_eval_collects_timings(monkeypatch, tmp_path):
-    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: ([0.1], "s"))
+    monkeypatch.setattr("backend.eval.retrieval_eval.encode_query", lambda q: [0.1])
     monkeypatch.setattr("backend.eval.retrieval_eval.score_pairs",
                         lambda q, texts: [0.9] * len(texts))
     monkeypatch.setattr("backend.eval.retrieval_eval.init_vector_store", lambda: _FakeClient(HITS))

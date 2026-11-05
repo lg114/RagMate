@@ -315,7 +315,7 @@ One retrieval config is validated. It is hybrid dense + BM25 search, fused with 
 
 The 98-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
 
-`DEEP_AGENTS_ENABLED` stays `false` (one retrieve, one answer, then grounding). `FAITHFULNESS_CHECK` stays `true` (checked only when retrieval confidence is low).
+`DEEP_AGENTS_ENABLED` stays `false` (one retrieve, one answer, then grounding). `FAITHFULNESS_CHECK` stays `false` (off by default; when enabled, checked only when retrieval confidence is low).
 
 <details>
 <summary><strong>Frozen env overrides</strong> — listed so a deployment can see them, not so they get tuned in place</summary>
@@ -324,7 +324,7 @@ The 98-question report was collected with in-process BGE-M3 and a local cross-en
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 
-**Filter and compression** — frozen literals: dynamic threshold `0.5`×top score, per-source cap `4` (min `2`), dominance `0.9`×`1.5`, score-gap `0.15`, high-score ratio `0.6`; compression threshold `0.4`, min `300` chars. `QUERY_CONTEXTUALIZE` (`true`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`true`).
+**Filter and compression** — frozen literals: dynamic threshold `0.5`×top score, per-source cap `4` (min `2`), dominance `0.9`×`1.5`, score-gap `0.15`, high-score ratio `0.6`; compression threshold `0.4`, min `300` chars. `QUERY_CONTEXTUALIZE` (`false`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`false`).
 
 **Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 

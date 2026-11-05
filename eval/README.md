@@ -234,7 +234,7 @@ ragmate-eval annotate --testset eval/testsets/sample/testset.json \
 
 ## 融合调参（P2，离线扫参）
 
-扫参脚本已删除；扫参结论见 [`retrieval-baseline-98q-failures.md`](reports/baseline/retrieval-baseline-98q-failures.md)（融合调参一点）与仓库根目录 `RETRIEVAL_EXPERIMENTS.md`。
+扫参脚本已删除；扫参结论见仓库根目录 `RETRIEVAL_EXPERIMENTS.md`（融合调参一点）。
 
 生产融合已冻结为 RRF（`RRF_K=60`）；加权融合已删除。不要新增融合臂。若某次扫参真要替换默认，
 按上面「有意更新基线」重跑确定性检索并改门槛，避免 130 题过拟合。
@@ -243,8 +243,7 @@ ragmate-eval annotate --testset eval/testsets/sample/testset.json \
 
 Markdown 冻结为 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路径: H1 > H2 > H3`，
 `CHUNK_SIZE` 与历史上的 `parent_child` 边界对齐，130 题 gold 三元组可复用。
-`parent_child` 只是环境变量，不是第二套策略。对比数据见
-`reports/baseline/retrieval-baseline-98q-titlepath-compare.md`。改策略后必须重建
+`parent_child` 只是环境变量，不是第二套策略。改策略后必须重建
 向量表并重跑确定性基线，否则检索正文与标注切块不一致。
 
 ## 两层打分：排序层 vs 生产交付（不重跑检索）
@@ -260,7 +259,7 @@ ragmate-eval delivery \
 若报告里 `parent_text == child` 接近 100%，说明当前 `CHUNK_SIZE` 下父展开是空操作；
 要验「用 parent 正文重排是否稀释」需另建更小切块集合（如 c300）：
 
-对比数据见已入库报告 [`retrieval-baseline-98q-parent-rerank.md`](reports/baseline/retrieval-baseline-98q-parent-rerank.md)；该实验脚本已删除。
+该实验脚本已删除。
 
 ## 最终 k 截断模拟（不重跑检索）
 
@@ -273,4 +272,3 @@ ragmate-eval cutoff \
 ```
 
 默认读 checkpoint manifest 里的题库路径；结果写 `<stem>-cutoff.json` / `.md`。
-98 题样例结论见 `reports/baseline/retrieval-baseline-98q-cutoff.md`。

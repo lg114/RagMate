@@ -100,8 +100,8 @@ def run_stages(client, question: str, stages, over_fetch: int, timings: dict | N
     if unknown:
         raise ValueError(f"Unknown stage(s): {unknown}, expected one of {STAGES}")
     t0 = time.perf_counter()
-    # 查询的 sparse 向量不再用于检索（sparse 臂已解耦为 BM25），只取 dense。
-    dense_vec, _ = encode_query(question)
+    # encode_query 只返回 dense；sparse 臂已解耦为 BM25，不再用 query 的 sparse 向量。
+    dense_vec = encode_query(question)
     if timings is not None:
         timings["encode"] = time.perf_counter() - t0
     out = {}

@@ -6,14 +6,13 @@
 `backend.core.lexical.LexicalIndex`），再和稠密名次做 RRF（k=60）。
 
 BM25 索引按表缓存，凭 (行数, 最大 id) 指纹判断是否重建；入库删增行都会
-动到指纹，下一次检索即重建。`sparsevec` 列入库时照常写，留作回退。
+动到指纹，下一次检索即重建。`sparsevec` 列入库时写常量占位（列为 NOT NULL，不做迁移）；检索不再读该列。
 
 表不存在时检索返回空；结构对不上时拒绝启动，不在原地改向量列。
 """
 from __future__ import annotations
 
 import logging
-import math
 import os
 import re
 import threading
@@ -29,8 +28,10 @@ from backend.infrastructure.database import get_sync_engine
 logger = logging.getLogger("ragmate")
 
 DENSE_DIM = 1024
-# 1-based pgvector 下标 = 词 id + 1。BGE-M3 词表约 25 万，哈希桶 262144，100 万留余量。
+# sparsevec 列的维度。检索自 PR #52 起不再读该列；列为 NOT NULL 且不做迁移，
+# 入库时写下面的常量占位，不再存逐 chunk 的稀疏权重。
 SPARSE_DIM = 1_000_000
+_SPARSE_PLACEHOLDER = "{1:1}/" + str(SPARSE_DIM)
 _MIN_PGVECTOR = (0, 7, 0)
 _TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _REQUIRED_COLUMNS = (
@@ -89,33 +90,6 @@ def _version_at_least(value: str, minimum: tuple[int, ...]) -> bool:
     return padded >= target
 
 
-def as_sparse_dict(raw) -> dict[int, float]:
-    """把编码结果收成 {index: weight}。scipy 稀疏矩阵走 indices/data。"""
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        out: dict[int, float] = {}
-        for key, value in raw.items():
-            try:
-                idx = int(key)
-                weight = float(value)
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(weight) and weight != 0.0:
-                out[idx] = weight
-        return out
-    indices = getattr(raw, "indices", None)
-    data = getattr(raw, "data", None)
-    if indices is not None and data is not None:
-        out = {}
-        for idx, weight in zip(indices, data):
-            weight = float(weight)
-            if math.isfinite(weight) and weight != 0.0:
-                out[int(idx)] = weight
-        return out
-    raise ValidationError("sparse vector must be a mapping of index to weight")
-
-
 def format_dense(vec) -> str:
     if not isinstance(vec, (list, tuple)):
         raise ValidationError("dense vector must be a list of floats")
@@ -125,24 +99,6 @@ def format_dense(vec) -> str:
             "Re-ingest after changing the embedding model."
         )
     return "[" + ",".join(format(float(x), ".8g") for x in vec) + "]"
-
-
-def format_sparse(raw) -> str:
-    """pgvector sparsevec 文本：下标从 1 开始，`{1:0.5,3:0.2}/dim`。"""
-    weights = as_sparse_dict(raw)
-    items: list[tuple[int, float]] = []
-    for idx, weight in weights.items():
-        pg_index = idx + 1
-        if pg_index < 1 or pg_index > SPARSE_DIM:
-            raise ValidationError(
-                f"sparse index {idx} is outside 0..{SPARSE_DIM - 1}"
-            )
-        items.append((pg_index, weight))
-    if not items:
-        items = [(1, 1.0)]
-    items.sort()
-    body = ",".join(f"{idx}:{format(weight, '.8g')}" for idx, weight in items)
-    return "{" + body + "}/" + str(SPARSE_DIM)
 
 
 def fuse_hits(
@@ -509,7 +465,7 @@ class PgVectorStore:
                         page = None
                     new_id = conn.execute(text(sql), {
                         "dense": format_dense(row["dense"]),
-                        "sparse": format_sparse(row["sparse"]),
+                        "sparse": _SPARSE_PLACEHOLDER,
                         "text": row.get("text") or "",
                         "parent_text": row.get("parent_text") or row.get("text") or "",
                         "source": row.get("source") or "unknown",
@@ -784,11 +740,15 @@ def delete_old_chunks(store, keep_ids_by_source: dict[str, list[int]], *, ingest
             raise ServiceUnavailableError(f"删除旧向量失败: {filename}") from e
 
 
-def insert_chunks(store, chunks, dense_vecs, sparse_vecs) -> dict[str, list[int]]:
-    """把编码后的 chunk 写入 pgvector，并返回按来源文件分组的新 id。"""
+def insert_chunks(store, chunks, dense_vecs) -> dict[str, list[int]]:
+    """把编码后的 chunk 写入 pgvector，并返回按来源文件分组的新 id。
+
+    sparsevec 列写常量占位（见 _SPARSE_PLACEHOLDER）：检索不再读该列，逐 chunk 的
+    稀疏权重已停止计算。
+    """
     rows = []
     sources = []
-    for chunk, dense, sparse in zip(chunks, dense_vecs, sparse_vecs):
+    for chunk, dense in zip(chunks, dense_vecs):
         parent = chunk.metadata.pop("parent_text", chunk.page_content)
         source = os.path.basename(chunk.metadata.get("source", "unknown"))
         page = chunk.metadata.get("page")
@@ -796,7 +756,6 @@ def insert_chunks(store, chunks, dense_vecs, sparse_vecs) -> dict[str, list[int]
             page = None
         rows.append({
             "dense": dense,
-            "sparse": sparse,
             "text": chunk.page_content,
             "parent_text": parent,
             "source": source,
