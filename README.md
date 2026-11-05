@@ -155,10 +155,10 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 1. Upload one or more supported files in the documents section at the bottom of the page.
 2. Ingest the pending files and wait until the status finishes.
 3. Ask questions in the composer; answers stream in with citations.
-4. Click a citation to jump to its source card: file name and page.
-5. If the API needs a token, put it in the collapsed **连接** section (stored only in this browser). Readiness for PostgreSQL and pgvector is shown in the top bar.
+4. Click a citation to jump to its source card: file name and page. Open **检索详情** under an answer to see the retrieved passages and their scores.
+5. Conversations are saved: pick one up from the sidebar, or start a new one. If the API needs a token, put it in the collapsed **设置** section (stored only in this browser); service readiness is shown there too.
 
-The UI is a thin demo shell: the zero-build page at `frontend/index.html`, served at `/`. No frontend build step. Retrieval debug is a dev-mode trace (`"debug": true`); leave it off for a normal demo. Retrieval knobs are not in the page — they are the frozen server defaults below.
+The UI is a single-view app: the zero-build page at `frontend/index.html` plus one `js/shell.js`, served at `/`. No frontend build step. The interface is bilingual (English/中文, toggle in the top bar). Each answer carries a collapsed **检索详情** section fed by the retrieval trace (`"debug": true`); the trace shows the kept passages with scores — it is the transparency view, not a dev-only switch. Retrieval knobs are not in the page — they are the frozen server defaults below.
 
 Supported formats: `.pdf`, `.docx`, `.xlsx`, `.xls`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
 
@@ -179,7 +179,7 @@ RagMate/
 │   ├── infrastructure/     # config, database, pgvector, optional redis, encoding, model_factory
 │   ├── eval/               # retrieval-gate and deterministic retrieval evaluation
 │   └── tests/
-└── frontend/               # Zero-build UI (single-view demo shell: chat + documents), served by FastAPI at /
+└── frontend/               # Zero-build UI (single-view app: chat + history + documents), served by FastAPI at /
 ```
 
 ---
@@ -275,7 +275,7 @@ Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, 
 
 The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
 
-`retrieval_debug` is a dev-mode trace. It is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The shell never sends `"debug": true`, so `retrieval_debug` is omitted in normal use; previews are excerpts of your documents.
+`retrieval_debug` is a dev-mode trace. It is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The UI requests `"debug": true` so every answer can show its retrieval trace (collapsed by default). Previews are excerpts of your documents.
 
 ---
 

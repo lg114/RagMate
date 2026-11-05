@@ -155,10 +155,10 @@ uvicorn backend.app:app --reload --port 8000
 1. 在页面下方的文档区上传一个或多个支持的文件。
 2. 入库未处理的文件，等状态结束。
 3. 在输入框提问，回答会流式返回并附带引用。
-4. 点击引用，跳到来源卡查看来源文件与页码。
-5. API 需要令牌时，填在折叠的 **连接** 栏里（只保存在本浏览器）。PostgreSQL 和 pgvector 是否就绪显示在顶栏。
+4. 点击引用，跳到来源卡查看来源文件与页码；展开回答下的 **检索详情**，可以看到命中的片段原文与分数。
+5. 对话会保存：在侧栏接着聊，或开新对话。API 需要令牌时，填在折叠的 **设置** 栏里（只保存在本浏览器），服务状态也在那里看。
 
-界面是一层薄演示壳：零构建的 `frontend/index.html`，由 FastAPI 挂在 `/`，不需要前端构建。检索调试是开发模式轨迹（`"debug": true`），正常演示保持关闭。检索参数不在页面上，它们是下面冻结的服务端默认值。
+界面是单视图应用：零构建的 `frontend/index.html` 加一个 `js/shell.js`，由 FastAPI 挂在 `/`，不需要前端构建。界面中英双语（顶栏切换）。每个回答下面有个折叠的 **检索详情**，数据来自检索轨迹（`"debug": true`），列出命中的片段原文与分数——这是核对用的透明视图，不是只给开发看的开关。检索参数不在页面上，它们是下面冻结的服务端默认值。
 
 支持格式：`.pdf`、`.docx`、`.xlsx`、`.xls`、`.txt`、`.md`。默认单文件上传上限为 50 MB。
 
@@ -179,7 +179,7 @@ RagMate/
 │   ├── infrastructure/     # config、database、pgvector、可选 redis、encoding、model_factory
 │   ├── eval/               # retrieval-gate 与确定性检索评测
 │   └── tests/
-└── frontend/               # 零构建界面（单视图演示壳：对话 + 文档），由 FastAPI 挂在 /
+└── frontend/               # 零构建界面（单视图应用：对话 + 历史 + 文档），由 FastAPI 挂在 /
 ```
 
 ---
@@ -275,7 +275,7 @@ data: {"error": "..."}                               // 终止性错误
 
 非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
 
-`retrieval_debug` 是开发模式轨迹，只有请求带 `"debug": true` 时才返回。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。演示壳从不发送 `"debug": true`，正常使用时不返回 `retrieval_debug`；preview 是文档原文片段。
+`retrieval_debug` 是开发模式轨迹，只有请求带 `"debug": true` 时才返回。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。界面会发送 `"debug": true`，以便每个回答都能展开检索轨迹（默认折叠）；preview 是文档原文片段。
 
 ---
 

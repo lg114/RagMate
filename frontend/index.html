@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="RagMate：面向自有文档的检索问答。上传、入库，并核对带来源的回答。">
+<meta name="description" content="RagMate: ask questions over your own documents, with cited answers.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:">
-<title>RagMate · 文档问答</title>
+<title>RagMate</title>
 <style>
   :root {
     --bg: #ffffff; --bg-elev: #ffffff; --bg-nav: #fafafa; --bg-sunken: #f5f5f4;
@@ -29,34 +29,72 @@
     }
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); line-height: 1.6; }
   code, .mono { font-family: var(--mono); font-size: .92em; }
+  button { font: inherit; }
 
+  .app { display: flex; height: 100dvh; }
+
+  /* ---- 侧栏：历史对话 ---- */
+  .sidebar {
+    width: 260px; flex: none; display: flex; flex-direction: column;
+    background: var(--bg-nav); border-right: 1px solid var(--line);
+  }
+  .side-new {
+    margin: 14px 12px 6px; padding: 9px 14px; text-align: left;
+    background: var(--bg-elev); color: var(--ink);
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    font-weight: 600; font-size: 14px; cursor: pointer;
+  }
+  .side-new:hover { border-color: var(--accent); }
+  .side-label {
+    padding: 10px 20px 6px; font-size: 12.5px; font-weight: 600; color: var(--muted);
+  }
+  .history-list { list-style: none; margin: 0; padding: 0 8px; overflow-y: auto; flex: 1; }
+  .history-list li {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px;
+  }
+  .history-list li:hover { background: var(--bg-sunken); }
+  .history-list li.is-active { background: var(--bg-sunken); font-weight: 600; }
+  .history-list .h-title {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .history-list .h-del {
+    flex: none; border: 0; background: none; color: var(--muted);
+    font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 4px; visibility: hidden;
+  }
+  .history-list li:hover .h-del { visibility: visible; }
+  .history-list .h-del:hover { color: var(--ink); }
+  .history-empty { padding: 4px 20px; color: var(--muted); font-size: 13.5px; }
+
+  /* ---- 主栏 ---- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar {
-    position: sticky; top: 0; z-index: 5;
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 20px; background: var(--bg-elev);
-    border-bottom: 1px solid var(--line);
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px; background: var(--bg-elev); border-bottom: 1px solid var(--line);
   }
   .brand-name { font-weight: 700; font-size: 17px; }
-  .brand-tag { color: var(--muted); font-size: 13px; margin-left: 6px; }
-  .topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .pill {
-    font-size: 12.5px; padding: 3px 10px; border-radius: 999px;
-    border: 1px solid var(--line); color: var(--ink-soft); background: var(--bg);
+  .icon-btn {
+    border: 0; background: none; color: var(--ink-soft); cursor: pointer;
+    font-size: 18px; line-height: 1; padding: 4px 6px; display: none;
   }
-  .pill.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); font-weight: 600; }
-  .pill.ok::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #16a34a; margin-right: 6px; vertical-align: 1px; }
+  .lang-btn {
+    margin-left: auto; border: 1px solid var(--line-strong); background: var(--bg);
+    color: var(--ink-soft); border-radius: 999px; padding: 4px 12px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .lang-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 120px; }
-  .lede { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
-  .lede b { color: var(--ink-soft); }
+  .scroll { flex: 1; overflow-y: auto; }
+  .scroll-inner { max-width: 760px; margin: 0 auto; padding: 28px 20px 40px; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
   .chip {
     border: 1px solid var(--line-strong); background: var(--bg-elev);
     color: var(--ink-soft); border-radius: 999px; padding: 7px 14px;
-    font: inherit; font-size: 14px; cursor: pointer; text-align: left;
+    font-size: 14px; cursor: pointer; text-align: left;
   }
   .chip:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -97,20 +135,39 @@
   .source-name { font-family: var(--mono); font-size: 13.5px; font-weight: 500; }
   .source-loc { font-size: 12.5px; color: var(--muted); }
 
-  details.docs, details.connect {
+  details.retrieval {
+    margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg-elev); padding: 10px 14px;
+  }
+  details.retrieval summary { cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink-soft); }
+  .retrieval-meta { font-size: 13px; color: var(--muted); margin: 10px 0 8px; }
+  .retrieval-chunks { list-style: none; margin: 0; padding: 0; }
+  .retrieval-chunks li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .retrieval-chunks li:first-child { border-top: 0; }
+  .retrieval-chunks .r-head { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+  .retrieval-chunks .r-head .mono { font-size: 12.5px; }
+  .retrieval-chunks .r-preview { margin: 4px 0 0; color: var(--ink-soft); }
+  .retrieval-dropped { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+
+  details.docs, details.settings {
     margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius);
     background: var(--bg-elev); padding: 12px 16px;
   }
-  details.docs summary, details.connect summary { cursor: pointer; font-weight: 600; font-size: 14.5px; }
+  details.docs summary, details.settings summary { cursor: pointer; font-weight: 600; font-size: 14.5px; }
   details.docs summary span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
   .doc-list { list-style: none; margin: 12px 0 0; padding: 0; }
   .doc-list li {
-    display: flex; justify-content: space-between; gap: 12px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px;
   }
   .doc-list li:first-child { border-top: 0; }
-  .doc-list .mono { font-size: 13px; }
+  .doc-list .mono { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-list .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .doc-list .doc-del {
+    flex: none; border: 0; background: none; color: var(--muted);
+    font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 4px;
+  }
+  .doc-list .doc-del:hover { color: var(--ink); }
   .doc-empty { color: var(--muted); font-size: 14px; margin: 12px 0 0; }
   .dropzone {
     margin-top: 14px; border: 1.5px dashed var(--line-strong); border-radius: var(--radius);
@@ -118,34 +175,39 @@
   }
   .dropzone:hover { border-color: var(--accent); color: var(--accent); }
   .dropzone.busy { pointer-events: none; opacity: .6; }
-  .connect-body { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .connect-body input {
-    flex: 1; min-width: 200px; font: inherit; font-size: 14px;
+  .settings-body { margin-top: 12px; }
+  .settings-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .settings-row input {
+    flex: 1; min-width: 200px; font-size: 14px;
     background: var(--bg); color: var(--ink);
     border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 12px;
   }
-  .connect-body button, .mini-btn {
-    font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  .settings-row button {
+    font-size: 14px; font-weight: 600; cursor: pointer;
     background: var(--accent); color: var(--accent-ink);
     border: 0; border-radius: 8px; padding: 8px 16px;
   }
-  .connect-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  .settings-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  .ready-list { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13.5px; }
+  .ready-list li { display: flex; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--line); }
+  .ready-list li:first-child { border-top: 0; }
+  .ready-list .ok { color: var(--ink-soft); }
+  .ready-list .bad { color: #b91c1c; }
 
   .composer {
-    position: fixed; left: 0; right: 0; bottom: 0;
-    background: var(--bg); border-top: 1px solid var(--line);
+    flex: none; background: var(--bg); border-top: 1px solid var(--line);
     padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
   }
   .composer-inner { max-width: 760px; margin: 0 auto; display: flex; gap: 10px; }
   .composer textarea {
-    flex: 1; resize: none; font: inherit; font-size: 15px;
+    flex: 1; resize: none; font-size: 15px;
     background: var(--bg-elev); color: var(--ink);
     border: 1px solid var(--line-strong); border-radius: var(--radius);
     padding: 10px 14px; min-height: 44px; max-height: 160px;
   }
   .composer textarea:focus { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); border-color: var(--accent); }
   .composer button {
-    flex: none; font: inherit; font-weight: 600; cursor: pointer;
+    flex: none; font-weight: 600; cursor: pointer;
     background: var(--accent); color: var(--accent-ink);
     border: 0; border-radius: var(--radius); padding: 0 20px;
   }
@@ -159,52 +221,72 @@
   }
   .toast.show { opacity: 1; }
   .hint { color: var(--muted); font-size: 14px; }
+
+  @media (max-width: 860px) {
+    .sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0; z-index: 20;
+      transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 40px rgba(0,0,0,.15);
+    }
+    .sidebar.open { transform: none; }
+    .icon-btn { display: block; }
+  }
 </style>
 </head>
 <body>
-<header class="topbar">
-  <span class="brand-name">RagMate</span>
-  <span class="brand-tag">文档问答</span>
-  <div class="topbar-right">
-    <span class="pill" id="corpus-pill">文档加载中</span>
-    <span class="pill" id="ready-pill">检查中</span>
-  </div>
-</header>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <button type="button" class="side-new" id="new-chat">＋ <span data-i18n="newChat">新对话</span></button>
+    <div class="side-label" data-i18n="history">历史对话</div>
+    <ul class="history-list" id="history-list"></ul>
+    <p class="history-empty" id="history-empty" data-i18n="historyEmpty">暂无历史对话</p>
+  </aside>
 
-<main>
-  <p class="lede">基于已入库的文档提问，回答附带来源，点引用可查看来源文件。</p>
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="icon-btn" id="menu" aria-label="Menu">☰</button>
+      <span class="brand-name">RagMate</span>
+      <button type="button" class="lang-btn" id="lang-toggle">EN</button>
+    </header>
 
-  <div class="chips" id="chips">
-    <button type="button" class="chip" data-q="一个查询里有三个排序节点、work_mem 保持默认 4MB 时，最多能用多少内存？64MB 配 100 个并发连接时理论峰值是多少？">work_mem 能用多少内存？</button>
-    <button type="button" class="chip" data-q="RagMate 本地开发环境的 Docker Compose 编排文件在仓库的什么位置？用什么命令启动整套基础设施？">Compose 文件在哪，怎么启动？</button>
-    <button type="button" class="chip" data-q="web 服务的启动命令是什么？接口文档在哪个地址打开？">web 服务怎么启动，文档在哪？</button>
-  </div>
-  <div id="thread">
-    <p class="hint" id="empty-hint">还没有提问。点上面一道试试，或直接在下面输入。</p>
-  </div>
+    <div class="scroll" id="scroll">
+      <div class="scroll-inner">
+        <div class="chips" id="chips">
+          <button type="button" class="chip" data-q="一个查询里有三个排序节点、work_mem 保持默认 4MB 时，最多能用多少内存？64MB 配 100 个并发连接时理论峰值是多少？" data-i18n="chip1">work_mem 能用多少内存？</button>
+          <button type="button" class="chip" data-q="RagMate 本地开发环境的 Docker Compose 编排文件在仓库的什么位置？用什么命令启动整套基础设施？" data-i18n="chip2">Compose 文件在哪，怎么启动？</button>
+          <button type="button" class="chip" data-q="web 服务的启动命令是什么？接口文档在哪个地址打开？" data-i18n="chip3">web 服务怎么启动，文档在哪？</button>
+        </div>
+        <div id="thread">
+          <p class="hint" id="empty-hint" data-i18n="emptyHint">还没有提问。点上面一道试试，或直接在下面输入。</p>
+        </div>
 
-  <details class="docs" id="docs-box">
-    <summary>已入库的文档<span id="docs-count"></span></summary>
-    <ul class="doc-list" id="doc-list"></ul>
-    <p class="doc-empty" id="doc-empty" hidden>还没有入库的文档，先上传一份。</p>
-    <div class="dropzone" id="dropzone" role="button" tabindex="0">拖入文件或点这里上传新文档</div>
-    <input type="file" id="file-input" hidden>
-  </details>
+        <details class="docs" id="docs-box">
+          <summary><span data-i18n="docsTitle">已入库的文档</span><span id="docs-count"></span></summary>
+          <ul class="doc-list" id="doc-list"></ul>
+          <p class="doc-empty" id="doc-empty" hidden data-i18n="docsEmpty">还没有入库的文档，先上传一份。</p>
+          <div class="dropzone" id="dropzone" role="button" tabindex="0" data-i18n="dropzone">拖入文件或点这里上传新文档</div>
+          <input type="file" id="file-input" hidden>
+        </details>
 
-  <details class="connect">
-    <summary>连接</summary>
-    <div class="connect-body">
-      <input type="password" id="token-input" placeholder="API 令牌（默认空，不用填）" autocomplete="off">
-      <button type="button" id="token-save">保存</button>
+        <details class="settings">
+          <summary data-i18n="settingsTitle">设置</summary>
+          <div class="settings-body">
+            <div class="settings-row">
+              <input type="password" id="token-input" data-i18n-ph="tokenPlaceholder" placeholder="API 令牌（默认空，不用填）" autocomplete="off">
+              <button type="button" id="token-save" data-i18n="tokenSave">保存</button>
+            </div>
+            <p class="settings-note" data-i18n="tokenNote">令牌只保存在本浏览器，用于 API 鉴权；服务端默认不设鉴权，不用填。</p>
+            <ul class="ready-list" id="ready-list"></ul>
+          </div>
+        </details>
+      </div>
     </div>
-    <p class="connect-note">令牌只保存在本浏览器，用于 API 鉴权；服务端默认不设鉴权，不用填。</p>
-  </details>
-</main>
 
-<div class="composer">
-  <div class="composer-inner">
-    <textarea id="input" rows="1" placeholder="基于已入库的文档提问" aria-label="问题"></textarea>
-    <button type="button" id="send">发送</button>
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="input" rows="1" data-i18n-ph="placeholder" placeholder="基于已入库的文档提问" aria-label="Question"></textarea>
+        <button type="button" id="send" data-i18n="send">发送</button>
+      </div>
+    </div>
   </div>
 </div>
 <div class="toast" id="toast" role="status"></div>
