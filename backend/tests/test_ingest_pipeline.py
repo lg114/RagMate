@@ -10,7 +10,9 @@ from backend.application.ingest.pipeline import (
     _discover_files,
     _get_text_splitter,
     _reconstruct_with_headers,
+    ingest_documents,
 )
+from backend.domain.errors import ServiceUnavailableError
 
 
 class TestDiscoverFiles:
@@ -244,3 +246,54 @@ class TestDetectNewFiles:
             assert len(new_files) == 1
             assert "new.pdf" in new_files
             assert "existing.pdf" not in new_files
+
+class TestIngestDocumentsSchemaEnsure:
+    """新库直接入库：先建表再查可用性，否则两处都会在新库上失败。"""
+
+    def test_ensures_schema_before_availability_check(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text("# A\n\ntext\n", encoding="utf-8")
+        calls = []
+
+        def fake_ensure():
+            calls.append("ensure")
+
+        def fake_check():
+            calls.append("check")
+            return False
+
+        monkeypatch.setattr(
+            "backend.application.ingest.pipeline.ensure_ingest_schema_sync", fake_ensure
+        )
+        monkeypatch.setattr(
+            "backend.application.ingest.pipeline.check_vector_store_available", fake_check
+        )
+        with pytest.raises(ServiceUnavailableError):
+            ingest_documents(directory=str(tmp_path))
+        assert calls == ["ensure", "check"]
+
+    def test_ensure_ingest_schema_sync_builds_tables(self, monkeypatch):
+        from backend.infrastructure import database as database_module
+        from backend.infrastructure.database import ensure_ingest_schema_sync
+
+        engine = MagicMock()
+        conn = MagicMock()
+        engine.begin.return_value.__enter__.return_value = conn
+        store = MagicMock()
+        seen = {}
+
+        monkeypatch.setattr(database_module, "get_sync_engine", lambda: engine)
+        monkeypatch.setattr(
+            database_module.Base.metadata, "create_all",
+            lambda bind: seen.setdefault("create_all_bind", bind),
+        )
+        monkeypatch.setattr(
+            database_module, "_ensure_ingest_row",
+            lambda sync_conn: seen.setdefault("ingest_row_conn", sync_conn),
+        )
+        monkeypatch.setattr(
+            "backend.infrastructure.vector_store.get_vector_store", lambda: store
+        )
+        ensure_ingest_schema_sync()
+        assert seen["create_all_bind"] is engine
+        assert seen["ingest_row_conn"] is conn
+        store.ensure_schema.assert_called_once_with()
