@@ -100,6 +100,8 @@ pip install -e .
 
 `ragmate-eval retrieval-gate` is part of that install. Tests and the retrieval gate need only the default install.
 
+For a byte-identical environment, use the lockfile instead (from `backend/`): `uv sync --frozen --extra test`. Exact versions are pinned in `backend/uv.lock`; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`.
+
 ### 3. Configure the application
 
 Stay in the `backend` directory:
