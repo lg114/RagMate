@@ -208,7 +208,7 @@ def cmd_retrieval(args):
 
     print(f"Loaded {len(cases)} golden cases from {testset_path}")
     print(f"Stages: {', '.join(stages)}, over_fetch={args.over_fetch}, "
-          f"ks={list(ks)}, repeat={args.repeat}")
+          f"ks={list(ks)}, repeat={args.repeat}, delay={args.delay_seconds}s")
     print(f"Embedding device: {settings.EMBEDDING_DEVICE}")
     if settings.EMBEDDING_DEVICE == "cuda":
         import torch
@@ -222,7 +222,8 @@ def cmd_retrieval(args):
         print(f"CUDA: {torch.cuda.get_device_name(0)}")
 
     try:
-        result = run_retrieval_eval(cases, stages, args.over_fetch, args.repeat, ks, manifest)
+        result = run_retrieval_eval(cases, stages, args.over_fetch, args.repeat, ks, manifest,
+                                    delay=args.delay_seconds)
     except RuntimeError as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -400,6 +401,7 @@ def main():
     retrieval_parser.add_argument("--ks", type=int, nargs="+", default=[5, 10, 20], help="k values for hit/recall/nDCG")
     retrieval_parser.add_argument("--repeat", type=int, default=1, help="Repeat runs to measure determinism spread")
     retrieval_parser.add_argument("--compare-manifest", type=str, default=None, help="Previous retrieval report path to diff config against")
+    retrieval_parser.add_argument("--delay-seconds", type=float, default=0.0, help="Seconds to sleep between questions (0 = no delay; useful when a remote embedding/rerank API rate-limits bulk runs)")
 
     check_gold_parser = subparsers.add_parser("check-gold", help="Validate golden set gold chunk annotations")
     check_gold_parser.add_argument("--testset", type=str, required=True, help="Golden test set JSON path")

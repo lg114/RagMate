@@ -14,6 +14,7 @@ Chunk 身份用 (source, page, chunk_index) 三元组，与 gold 标注一致。
 """
 import json
 import logging
+import time
 from pathlib import Path
 
 from tqdm import tqdm
@@ -261,7 +262,7 @@ def _checkpoint_records(records: list[dict]) -> list[dict]:
 
 
 def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
-                       ks, manifest: dict) -> dict:
+                       ks, manifest: dict, delay: float = 0.0) -> dict:
     """跑 repeat 遍分阶段检索，返回 checkpoint + 每遍的指标汇总。
 
     repeat 遍的排序应当完全相同（固定索引下的确定性检索）；spread 在
@@ -300,6 +301,8 @@ def run_retrieval_eval(cases: list[dict], stages, over_fetch: int, repeat: int,
                         for stage in stages
                     }
                 pbar.update(1)
+                if delay > 0 and not (rep == repeat - 1 and idx == len(cases) - 1):
+                    time.sleep(delay)
             if rep == 0:
                 checkpoint = {
                     "manifest": manifest,
