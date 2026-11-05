@@ -424,7 +424,7 @@ def main():
     gate_parser.add_argument(
         "--baseline", type=str, default=None,
         help="Committed retrieval report to pin floors from "
-             "(default: eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json, fused stage)",
+             "(default: eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json, fused stage)",
     )
 
     delivery_parser = subparsers.add_parser(

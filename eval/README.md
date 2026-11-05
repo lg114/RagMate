@@ -3,7 +3,7 @@
 回归门禁是 `ragmate-eval retrieval-gate`。RAGAS 打分已删除；确定性检索指标是唯一的门禁口径。
 
 检索只冻结一套配置，对上
-[`retrieval-baseline-98q-titlepath-rerun.json`](reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)
+[`retrieval-baseline-130q-jina-rerun.json`](reports/baseline/retrieval-baseline-130q-jina-rerun.json)
 的 fused 阶段：混合检索（稠密 + 稀疏）、RRF（`RRF_K=60`）、
 `CHUNKING_STRATEGY=title_path`（`CHUNK_SIZE=1000` / overlap `200`，父块 `2500` / `300`）、
 重排候选 `30`、阈值 `0.3`、`FINAL_CONTEXT_K=15`。
@@ -67,33 +67,33 @@ ragmate-eval retrieval-gate
 每次 PR 都拉起 BGE-M3、pgvector 和 reranker 太重，也依赖本机模型和 GPU。
 默认嵌入和重排已经是远程 HTTP，门禁仍然不调用它们；CI 只为通过启动校验而导出占位 URL。
 门禁用生产切块把 `eval/testsets/sample/corpus` 复现成 chunk，再用确定性
-BM25（汉字二字组 + 拉丁串，无网络、无随机）给 98 道题排序，指标仍是
+BM25（汉字二字组 + 拉丁串，无网络、无随机）给 130 道题排序，指标仍是
 `deterministic_metrics` 里的 Recall@k / nDCG。命令退出码非 0 即 CI 失败。
 
 门槛钉在已入库报告
-[`retrieval-baseline-98q-titlepath-rerun.json`](reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)
+[`retrieval-baseline-130q-jina-rerun.json`](reports/baseline/retrieval-baseline-130q-jina-rerun.json)
 的 **fused** 阶段（与当前默认 `CHUNKING_STRATEGY=title_path` 的混合检索一致；
 reranked 那一臂要 cross-encoder，词法重放对不齐）。余量 `0.015`，约等于
-91 道可答题里的 1 题（`1/91 ≈ 0.011`），用来容纳 BM25 和 BGE 混合检索的差距，
+121 道可答题里的 1 题（`1/121 ≈ 0.0083`），用来容纳 BM25 和 Jina 混合检索的差距，
 不是放宽线上数字。观察值低于「基线 − 0.015」就失败。
 
 | 指标 | fused 基线 | CI 门槛 |
 |---|---|---|
-| recall@5 | 0.9963 | 0.9813 |
-| nDCG@5 | 0.9839 | 0.9689 |
-| recall@10 | 1.0000 | 0.9850 |
-| nDCG@10 | 0.9855 | 0.9705 |
+| recall@5 | 0.9669 | 0.9519 |
+| nDCG@5 | 0.9505 | 0.9355 |
+| recall@10 | 0.9945 | 0.9795 |
+| nDCG@10 | 0.9606 | 0.9456 |
 | recall@20 | 1.0000 | 0.9850 |
-| nDCG@20 | 0.9855 | 0.9705 |
+| nDCG@20 | 0.9625 | 0.9475 |
 
-报告里记录的题库 sha256 是 `685eeb359d6a…`，与当前提交的
+报告里记录的题库 sha256 是 `9f23cc477947…`，与当前提交的
 `testset.json` 字节不一致；题干顺序和报告里的 `per_question` 一致，门禁
 按题干对齐，不按那条 sha 放行。
 
 有意更新基线时：
 
 1. 在有 pgvector 和模型的环境重跑 `ragmate-eval retrieval`，用新的报告替换
-   `eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`
+   `eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json`
    （保留 `stages.fused.summary` 和按题顺序的 `per_question`）。
 2. 把上表和 `backend/tests/test_retrieval_gate.py` 里的 `PINNED_FUSED`
    改成新的 fused 数字。门槛仍是这些数字减去 `0.015`。
@@ -134,8 +134,8 @@ ragmate-eval annotate --testset eval/testsets/sample/testset.json \
 3. `ragmate-eval retrieval-gate` 退出码为 0。
 
 不要手改基线报告凑门禁，不要把 `ALLOWANCE` 调大来换绿灯。一次扩题的量
-以能分辨为准：98 题时 1 题约 1 分，3–5 分的改进需要 100–150 题的规模；
-先扩到 130 题左右，再看分辨力够不够。
+以能分辨为准：130 题时 1 题约 0.8 分，3–5 分的改进需要 100–150 题的规模；
+已扩到 130 题，再看分辨力够不够。
 
 ## 实验纪律：manifest + 一次只改一个变量 + 噪声带宽
 
@@ -155,12 +155,12 @@ ragmate-eval annotate --testset eval/testsets/sample/testset.json \
 扫参脚本已删除；扫参结论见 [`retrieval-baseline-98q-failures.md`](reports/baseline/retrieval-baseline-98q-failures.md)（融合调参一点）与仓库根目录 `RETRIEVAL_EXPERIMENTS.md`。
 
 生产融合已冻结为 RRF（`RRF_K=60`）；加权融合已删除。不要新增融合臂。若某次扫参真要替换默认，
-按上面「有意更新基线」重跑确定性检索并改门槛，避免 98 题过拟合。
+按上面「有意更新基线」重跑确定性检索并改门槛，避免 130 题过拟合。
 
 ## 切块策略（冻结为 title_path）
 
 Markdown 冻结为 `CHUNKING_STRATEGY=title_path`：子块正文带 `标题路径: H1 > H2 > H3`，
-`CHUNK_SIZE` 与历史上的 `parent_child` 边界对齐，98 题 gold 三元组可复用。
+`CHUNK_SIZE` 与历史上的 `parent_child` 边界对齐，130 题 gold 三元组可复用。
 `parent_child` 只是环境变量，不是第二套策略。对比数据见
 `reports/baseline/retrieval-baseline-98q-titlepath-compare.md`。改策略后必须重建
 向量表并重跑确定性基线，否则检索正文与标注切块不一致。

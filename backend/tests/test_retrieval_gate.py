@@ -1,4 +1,4 @@
-"""检索质量门禁：门槛来自 98 题 fused 基线，词法重放低于门槛必须失败。"""
+"""检索质量门禁：门槛来自 130 题 fused 基线，词法重放低于门槛必须失败。"""
 import json
 
 import pytest
@@ -17,15 +17,15 @@ from backend.eval.retrieval_gate import (
     run_retrieval_gate,
 )
 
-# 数字抄自 retrieval-baseline-98q-titlepath-rerun.json 的 stages.fused.summary。
+# 数字抄自 retrieval-baseline-130q-jina-rerun.json 的 stages.fused.summary。
 # 换基线报告时要连这张表和 eval/README.md 一起改。
 PINNED_FUSED = {
-    "recall@5": 0.9963,
-    "ndcg@5": 0.9839,
-    "recall@10": 1.0,
-    "ndcg@10": 0.9855,
+    "recall@5": 0.9669,
+    "ndcg@5": 0.9505,
+    "recall@10": 0.9945,
+    "ndcg@10": 0.9606,
     "recall@20": 1.0,
-    "ndcg@20": 0.9855,
+    "ndcg@20": 0.9625,
 }
 
 
@@ -47,16 +47,16 @@ def test_bm25_ranks_matching_chunk_first():
 
 
 def test_floor_is_baseline_minus_allowance_at_4_decimals():
-    assert floor_metric(0.9963) == pytest.approx(0.9813)
+    assert floor_metric(0.9669) == pytest.approx(0.9519)
     assert floor_metric(1.0) == pytest.approx(0.985)
     floors = floors_from_published(PINNED_FUSED)
     assert floors == {
-        "recall@5": 0.9813,
-        "ndcg@5": 0.9689,
-        "recall@10": 0.985,
-        "ndcg@10": 0.9705,
+        "recall@5": 0.9519,
+        "ndcg@5": 0.9355,
+        "recall@10": 0.9795,
+        "ndcg@10": 0.9456,
         "recall@20": 0.985,
-        "ndcg@20": 0.9705,
+        "ndcg@20": 0.9475,
     }
 
 
@@ -98,8 +98,8 @@ def test_sample_corpus_meets_pinned_floors():
     result = run_retrieval_gate()
     assert result.failures == [], result.render()
     assert result.ok
-    assert result.n_questions == 98
-    assert result.n_answerable == 91
+    assert result.n_questions == 130
+    assert result.n_answerable == 121
     for name, floor in result.floors.items():
         assert result.summary[name] >= floor
         assert result.published[name] - result.summary[name] <= ALLOWANCE + 1e-9
