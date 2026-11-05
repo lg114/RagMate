@@ -36,7 +36,7 @@ jobs:
         working-directory: backend
         # 诚实的回归门禁。RAGAS 已搁置，不在这条流水线里。
         # 不启动 Postgres，也不下载 BGE / reranker。用样本语料做确定性 BM25 重放，
-        # 对照 eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json 的 fused 指标。
+        # 对照 eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json 的 fused 指标。
         # 门禁本身不调用嵌入或重排，但进程仍会校验默认远程 URL，所以同样给占位值。
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
