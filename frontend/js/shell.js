@@ -1,5 +1,6 @@
 "use strict";
 /* RagMate 前端：单页应用，无构建、无依赖。
+布局：侧栏导航切三个视图（对话 / 文档 / 设置），历史对话只在对话视图下；
 接口：POST /chat/stream（SSE，debug:true 以取回检索轨迹）、
 GET /chat/sessions、GET /chat/sessions/{id}、DELETE /chat/sessions/{id}、
 GET /documents、POST /documents/upload、DELETE /documents/{name}、
@@ -13,6 +14,7 @@ const LANG_KEY = "ragmate_lang";
 
 const I18N = {
 zh: {
+navChat: "对话", navDocuments: "文档", navSettings: "设置",
 newChat: "新对话", history: "历史对话", historyEmpty: "暂无历史对话",
 emptyHint: "还没有提问。点上面一道试试，或直接在下面输入。",
 chip1: "work_mem 能用多少内存？", chip2: "Compose 文件在哪，怎么启动？",
@@ -46,6 +48,7 @@ deleteSessionConfirm: "删除这段对话？",
 docIngested: "已入库", docUploaded: "待入库", docIngesting: "入库中", docFailed: "入库失败",
 },
 en: {
+navChat: "Chat", navDocuments: "Documents", navSettings: "Settings",
 newChat: "New chat", history: "History", historyEmpty: "No conversations yet",
 emptyHint: "No questions yet. Try one above, or type below.",
 chip1: "How much memory can work_mem use?", chip2: "Where is the Compose file, and how do I start it?",
@@ -652,6 +655,18 @@ list.appendChild(li);
 }
 }
 
+/* ---- 视图切换：侧栏导航（对话 / 文档 / 设置） ---- */
+let currentView = "chat";
+function setView(name) {
+currentView = name;
+["chat", "documents", "settings"].forEach((v) => { $(`view-${v}`).hidden = v !== name;});
+document.querySelectorAll("#side-nav button").forEach((b) => b.classList.toggle("is-active", b.dataset.view === name));
+$("history-block").hidden = name !== "chat";
+closeSidebar();
+if (name === "documents") loadDocuments();
+if (name === "settings") loadReady();
+}
+
 /* ---- 侧栏（移动端） ---- */
 function closeSidebar() { $("sidebar").classList.remove("open");}
 
@@ -672,6 +687,10 @@ input.style.height = "auto";
 input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
 });
 $("menu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+$("side-nav").addEventListener("click", (e) => {
+const btn = e.target.closest("button[data-view]");
+if (btn) setView(btn.dataset.view);
+});
 $("new-chat").addEventListener("click", startNewChat);
 $("lang-toggle").addEventListener("click", () => {
 LANG = LANG === "zh"? "en": "zh";
