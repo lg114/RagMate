@@ -102,6 +102,8 @@ pip install -e .
 
 For a byte-identical environment, use the lockfile instead (from `backend/`): `uv sync --frozen --extra test`. Exact versions are pinned in `backend/uv.lock`; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`.
 
+DeepAgents support is an optional extra: `pip install -e ".[agents]"` (run from `backend/`). The default install excludes deepagents.
+
 ### 3. Configure the application
 
 Stay in the `backend` directory:

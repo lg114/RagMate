@@ -102,6 +102,8 @@ pip install -e .
 
 要装出和锁定版本完全一致的环境，改用锁文件（在 `backend/` 下）：`uv sync --frozen --extra test`。确切版本钉在 `backend/uv.lock` 里；改 `pyproject.toml` 里的依赖后，用 `uv lock` 重新生成。
 
+DeepAgents 支持是可选 extra：`pip install -e ".[agents]"`（在 `backend/` 下执行）。默认安装不含 deepagents。
+
 ### 3. 配置环境变量
 
 仍在 `backend` 目录时执行：
