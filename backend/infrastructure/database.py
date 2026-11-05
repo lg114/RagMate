@@ -102,3 +102,20 @@ async def init_db():
             ensure_schema_conn(sync_conn)
 
         await conn.run_sync(_ensure_vectors)
+
+def ensure_ingest_schema_sync() -> None:
+    """同步建表：ORM 表 + ingest 控制行 + 向量表/扩展。
+
+    直接调 pipeline 入库时用（API 启动时 init_db 已做过，重复调用无害）。
+    没有它，新库直接入库会在两处失败：可用性检查要求 vector 扩展已存在，
+    而 _detect_new_files 要查的 documents 表也还不存在。
+    """
+    import backend.domain.models  # noqa: F401 — 注册 ORM 表
+
+    from backend.infrastructure.vector_store import get_vector_store
+
+    engine = get_sync_engine()
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        _ensure_ingest_row(conn)
+    get_vector_store().ensure_schema()

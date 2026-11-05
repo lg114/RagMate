@@ -206,6 +206,7 @@ def _patch_ingest(monkeypatch, tmp_path, delete_impl):
         def ensure_schema(self):
             return True
 
+    monkeypatch.setattr(pipeline, "ensure_ingest_schema_sync", lambda: None)
     monkeypatch.setattr(pipeline, "check_vector_store_available", lambda: True)
     monkeypatch.setattr(pipeline, "ingest_cancel_requested_sync", lambda: False)
     monkeypatch.setattr(pipeline, "_detect_new_files", lambda docs_dir, files: (["a.txt"], {"a.txt": 1.0}))

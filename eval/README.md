@@ -99,7 +99,10 @@ SciFact 必须进**单独的库**，别跟主库的 8 篇文档混在一起，�
 ```powershell
 # 1. 建库（容器名 ragmate-postgres）
 docker exec ragmate-postgres psql -U postgres -c "CREATE DATABASE ragmate_scifact;"
-# 2. 入库（直调 pipeline，不用起 API；表和 vector 扩展由 ensure_schema 建）
+# 2. 入库（直调 pipeline，不用起 API；ORM 表 + 向量表/扩展由 ingest 入口自建，
+#    新库不用手动 init_db。遇 Jina 429 自动按 Retry-After / 5/10/20/40 秒退避重试，
+#    与 reranker 同口径；10,416 块约 163 个 batch，免费档 TPM 下会多次等限流，
+#    总耗时以实测为准）
 $env:DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate_scifact'
 .\backend\.venv\Scripts\python.exe -c "from backend.application.ingest.pipeline import ingest_documents; print(ingest_documents(directory='eval/testsets/scifact/corpus'))"
 # 3. 先跑 10 题计时探针，确认单题耗时后再全量
@@ -110,6 +113,10 @@ $env:DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
 
 跑完后把 `retrieval-baseline-scifact-jina.json` 当作 SciFact 的钉住基线
 （可入仓），以后的改动（sparse 解耦、换 embedding）都在这套题上前后对比。
+
+建库若报 `template1 collation version mismatch`：先
+`docker exec ragmate-postgres psql -U postgres -c "ALTER DATABASE template1 REFRESH COLLATION VERSION;"`
+再建库（只改记录的版本号，不动数据）。
 
 ## CI 检索质量门禁
 

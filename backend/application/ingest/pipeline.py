@@ -10,7 +10,7 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 from sqlalchemy import select
 
 from backend.infrastructure.config import settings
-from backend.infrastructure.database import SyncSession
+from backend.infrastructure.database import SyncSession, ensure_ingest_schema_sync
 from backend.domain.errors import ServiceUnavailableError
 from backend.domain.models import Document
 from backend.infrastructure.encoding import EncodingCancelled, encode_documents
@@ -260,6 +260,11 @@ def ingest_documents(directory: str = None, filenames: list[str] = None, cancel_
     all_files = _discover_files(docs_dir, filenames)
     if not all_files:
         return {"status": "failed", "error": f"No supported files found in {docs_dir}"}
+
+    # 新库直接入库：先建 ORM 表 + 向量表/扩展，否则下面的可用性检查
+    # （要求 vector 扩展已存在）和 _detect_new_files（查 documents 表）
+    # 会在新库上直接失败。API 已起过的库上重复调用无害。
+    ensure_ingest_schema_sync()
 
     if not check_vector_store_available():
         raise ServiceUnavailableError("向量库不可用（PostgreSQL 未就绪或未安装 pgvector）")

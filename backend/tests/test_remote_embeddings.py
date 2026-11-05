@@ -2,6 +2,7 @@
 import io
 import json
 import threading
+import urllib.error
 import urllib.request
 
 import pytest
@@ -10,6 +11,7 @@ from backend.infrastructure.config import Settings, settings
 from backend.infrastructure.encoding import (
     EncodingCancelled,
     _hash_sparse,
+    _post_embeddings,
     encode_documents,
     encode_query,
     uses_remote_embeddings,
@@ -251,3 +253,69 @@ def test_local_paths_point_at_local_extra_when_packages_missing(monkeypatch, ove
         retriever_module.get_reranker()
     with pytest.raises(ImportError, match=r"\[local\]"):
         get_embeddings()
+
+def _http_error_429(retry_after=None):
+    from email.message import Message
+
+    headers = Message()
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return urllib.error.HTTPError(
+        "http://embed.example/v1/embeddings", 429, "Too Many Requests",
+        headers, io.BytesIO(b""),
+    )
+
+
+class TestPostEmbeddingsRetry429:
+    """_post_embeddings 429 重试：与 reranker（PR #40）同一口径。"""
+
+    def test_retries_429_with_retry_after_then_backoff(self, remote_settings, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr("backend.infrastructure.encoding.time.sleep", sleeps.append)
+        response = {"data": [{"index": 0, "embedding": [0.1, 0.2]}]}
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise _http_error_429(retry_after=7 if calls["n"] == 1 else None)
+            return io.BytesIO(json.dumps(response).encode("utf-8"))
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        rows = _post_embeddings(["hello"])
+        assert rows == [{"index": 0, "embedding": [0.1, 0.2]}]
+        assert calls["n"] == 3
+        assert sleeps == [7.0, 10.0]
+
+    def test_gives_up_after_max_attempts(self, remote_settings, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr("backend.infrastructure.encoding.time.sleep", sleeps.append)
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            raise _http_error_429()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(urllib.error.HTTPError):
+            _post_embeddings(["hello"])
+        assert calls["n"] == 5
+        assert sleeps == [5.0, 10.0, 20.0, 40.0]
+
+    def test_non_429_raises_without_retry(self, remote_settings, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr("backend.infrastructure.encoding.time.sleep", sleeps.append)
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(
+                "http://embed.example/v1/embeddings", 500, "Internal Error",
+                None, io.BytesIO(b""),
+            )
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(urllib.error.HTTPError):
+            _post_embeddings(["hello"])
+        assert calls["n"] == 1
+        assert sleeps == []
