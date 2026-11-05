@@ -3,7 +3,7 @@
 背景：parent_text 曾被写入 Milvus 却从未在检索时请求，`or` 回退把缺陷静默吞掉，
 导致 README 宣称的 "small-to-big" 实际退化为纯小片段检索。这组测试锁定三件事：
 
-1. 稠密和稀疏查询都必须取出 parent_text（否则父片段永远取不到）
+1. 稠密查询与 BM25 取行都必须取出 parent_text（否则父片段永远取不到）
 2. _extract_candidates 必须把「打分文本」与「交付文本」分开保存
 3. 压缩必须作用在父片段上，而不是用于打分的小片段
 """
@@ -17,7 +17,7 @@ from backend.core.retriever import (
     _extract_candidates,
     retrieve,
 )
-from backend.infrastructure.vector_store import dense_search_sql, sparse_search_sql
+from backend.infrastructure.vector_store import dense_search_sql
 
 
 def _hit(text: str, parent_text: str | None = None, source: str = "a.pdf",
@@ -38,18 +38,18 @@ def _hit(text: str, parent_text: str | None = None, source: str = "a.pdf",
 class TestDoSearchRequestsParentText:
     """回归：查询不取 parent_text 时，父片段会被静默丢弃。"""
 
-    def test_dense_and_sparse_sql_select_parent_text(self):
-        for sql in (dense_search_sql("ragmate_docs"), sparse_search_sql("ragmate_docs")):
-            assert "parent_text" in sql
-            assert "text" in sql
+    def test_dense_search_sql_selects_parent_text(self):
+        sql = dense_search_sql("ragmate_docs")
+        assert "parent_text" in sql
+        assert "text" in sql
 
     def test_do_search_always_uses_hybrid(self):
         store = MagicMock()
         store.search_hybrid.return_value = []
         store.search_dense.return_value = []
 
-        assert _do_search(store, [0.1], {1: 0.2}, over_fetch=5) == [[]]
-        store.search_hybrid.assert_called_once()
+        assert _do_search(store, [0.1], "query", over_fetch=5) == [[]]
+        store.search_hybrid.assert_called_once_with([0.1], "query", 5)
         store.search_dense.assert_not_called()
 
 

@@ -16,7 +16,6 @@ RETRIEVAL_SETTINGS_KEYS = [
     "EMBEDDING_MODEL",
     "EMBEDDING_DEVICE",
     "RRF_K",
-    "DROP_RATIO_SEARCH",
     "RERANKER_PROVIDER",
     "RERANKER_MODEL",
     "RERANK_CANDIDATES",
@@ -60,9 +59,12 @@ def get_git_commit(repo_root=None) -> str | None:
 
 def snapshot_retrieval_settings() -> dict:
     """当前生效的检索相关配置快照。"""
+    from backend.core.lexical import SPARSE_METHOD
     from backend.infrastructure.config import settings
 
-    return {key: getattr(settings, key) for key in RETRIEVAL_SETTINGS_KEYS}
+    snapshot = {key: getattr(settings, key) for key in RETRIEVAL_SETTINGS_KEYS}
+    snapshot["SPARSE_METHOD"] = SPARSE_METHOD
+    return snapshot
 
 
 def build_manifest(*, testset_path, stages, over_fetch, ks, repeat,

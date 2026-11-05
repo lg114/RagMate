@@ -39,7 +39,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、XLSX、TXT 和 Markd
 
 ## 项目亮点
 
-- **混合检索** — 稠密 + 稀疏检索，在 pgvector 里用 RRF（k=60）融合。嵌入默认走 OpenAI 兼容 API；进程内 BGE-M3 需显式打开。
+- **混合检索** — 稠密 + BM25 检索，用 RRF（k=60）融合。嵌入默认走 OpenAI 兼容 API；进程内 BGE-M3 需显式打开。
 - **重排序与过滤后的上下文** — 默认远程重排，加上动态分数阈值、同源去重、分数断崖截断、句子级上下文压缩。本地交叉编码器需显式打开。
 - **标题路径分块** — Markdown 子块带 `H1 > H2 > H3` 路径便于检索；交给 LLM 的仍是更大的父片段。该策略已冻结。
 - **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。只有 `DEEP_AGENTS_ENABLED=true` 才走 Deep Agents。
@@ -210,7 +210,7 @@ flowchart LR
 
 **入库链路** — 基于 mtime 的文件变更检测 → 按格式选择加载器（PyPDF、Docx2txt、TextLoader、Excel 转 Markdown）→ 标题感知切分（可选标题路径前缀）→ 基于 content-hash 对 pgvector 表去重 → 经嵌入 API 做稠密 + 稀疏编码（只有显式打开时才在进程内用 FlagEmbedding）→ 写入新向量 → 删除该来源的旧向量 → 同步 `documents` 表。
 
-**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加稀疏精确内积，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
+**查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加 BM25 词法检索，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认开启）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
 
 简单的寒暄类问题会绕过 Agent，直接路由到 LLM。
 
@@ -301,11 +301,11 @@ data: {"error": "..."}                               // 终止性错误
 
 ### 检索（已冻结）
 
-只认一套经过验证的检索配置：稠密 + 稀疏混合检索，RRF 融合，再重排。fused 阶段的数字钉在 [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)。除非对那 98 题重跑 `ragmate-eval retrieval`，并改掉 [`eval/README.md`](eval/README.md) 和 `backend/tests/test_retrieval_gate.py` 里的门槛，否则保持下面的默认值。
+只认一套经过验证的检索配置：稠密 + BM25 混合检索，RRF 融合，再重排。fused 阶段的数字钉在 [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json)。除非对那 98 题重跑 `ragmate-eval retrieval`，并改掉 [`eval/README.md`](eval/README.md) 和 `backend/tests/test_retrieval_gate.py` 里的门槛，否则保持下面的默认值。
 
 | 部分 | 冻结值 |
 |---|---|
-| 稠密 + 稀疏混合 | 始终开启 |
+| 稠密 + BM25 混合 | 始终开启 |
 | 融合 | RRF，`RRF_K=60` |
 | 分块 | `CHUNKING_STRATEGY=title_path`，`CHUNK_SIZE=1000`，重叠 `200`，父块 `2500` / `300` |
 | 重排后过滤 | `RERANK_CANDIDATES=30`，`RERANK_SCORE_THRESHOLD=0.3`，`FINAL_CONTEXT_K=15` |
@@ -324,7 +324,7 @@ data: {"error": "..."}                               // 终止性错误
 
 重叠长度必须小于对应分块大小，否则启动时会抛出校验错误。
 
-**过滤与压缩** — 冻结字面值：动态阈值 `0.5`×最高分、同源上限 `4`（最少 `2`）、主导度 `0.9`×`1.5`、断崖 `0.15`、高分比例 `0.6`；压缩阈值 `0.4`、最短 `300` 字符。`QUERY_CONTEXTUALIZE`（`true`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询）、`QUERY_ROUTING_ENABLED`（`true`）、`DROP_RATIO_SEARCH`（`0.2`）。
+**过滤与压缩** — 冻结字面值：动态阈值 `0.5`×最高分、同源上限 `4`（最少 `2`）、主导度 `0.9`×`1.5`、断崖 `0.15`、高分比例 `0.6`；压缩阈值 `0.4`、最短 `300` 字符。`QUERY_CONTEXTUALIZE`（`true`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询）、`QUERY_ROUTING_ENABLED`（`true`）。
 
 **嵌入** — `EMBEDDING_PROVIDER`（`remote`）、`EMBEDDING_MODEL`（`BAAI/bge-m3`）、`EMBEDDING_NORMALIZE`（`true`）、`HF_TOKEN`、`EMBEDDING_API_KEY`（可选）、`EMBEDDING_API_BASE_URL`（`remote` / `openai` 时必填）、`EMBEDDING_API_TIMEOUT`（`60`）。
 
@@ -417,7 +417,7 @@ docker compose up -d --force-recreate postgres
 - **同一时间只有一个 worker 在入库。** 状态、锁、进度、取消标志和失败原因都在 Postgres 的一行（`ingest_control`）里，任意 uvicorn worker 都能读进度并发起取消。只有持锁的 worker 写进度和终态，并按 `INGEST_HEARTBEAT_INTERVAL`（默认 5 秒）刷新心跳。该进程退出后，下一次状态查询会在 `INGEST_HEARTBEAT_STALE`（默认 30 秒）后把任务标成 `interrupted` 并释放锁。这一行没有 TTL，失败或中断的结果在重启之后还在。
 - **无认证与多租户。** 任何能访问 API 的人都可看到全部会话与文档。
 - **向量表结构变更需手动重建。** pgvector 表缺列，或 `vector` / `sparsevec` 类型不对时，启动会抛出校验错误而不是改这些列。删表后重新入库。
-- **稀疏检索是精确内积。** 稠密检索用 HNSW（内积）。稀疏检索对 `sparsevec` 做精确内积，因为当前 pgvector 没有稀疏 ANN 索引。查询侧仍按 `DROP_RATIO_SEARCH`（默认 0.2）丢掉最小的一批稀疏权重。RRF 仍是 k=60。
+- **稀疏检索是 BM25。** 稠密检索用 HNSW（内积）。sparse 臂对 chunk 文本算 BM25（与评测里的词法重放同一套打分），不再读 `sparsevec` 列；该列入库时照常写，留作回退。RRF 仍是 k=60。
 - **没有迁移工具。** 表结构变更通过 `create_all` 加上 `infrastructure/database.py` 中一份手写的补列清单完成。
 - **进程内嵌入和重排是可选项，CPU 推理较慢。** 默认请求远程嵌入和 `/rerank`，不加载 torch。只有希望本进程加载 BGE-M3 和交叉编码器时，才设置 `EMBEDDING_PROVIDER=huggingface` 和 `RERANKER_PROVIDER=local`。
 

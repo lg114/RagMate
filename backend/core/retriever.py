@@ -284,12 +284,12 @@ def score_pairs(query: str, texts: list[str]) -> list[float]:
 
 # ── Search ──────────────────────────────────────────────────────────────────
 
-def _do_search(store, dense_vec: list[float], sparse_vec, over_fetch: int):
+def _do_search(store, dense_vec: list[float], query: str, over_fetch: int):
     """执行一次混合检索。返回与旧结果相同的 [hits] 包装。
 
-    稠密 HNSW 内积 + 稀疏精确内积，再用 RRF（k=60）融合。
+    稠密 HNSW 内积 + BM25 词法，再用 RRF（k=60）融合。
     """
-    hits = store.search_hybrid(dense_vec, sparse_vec, over_fetch)
+    hits = store.search_hybrid(dense_vec, query, over_fetch)
     return [hits]
 
 
@@ -670,8 +670,9 @@ def retrieve(query: str, k: int = None) -> list[dict]:
             return []
         over_fetch = settings.RERANK_CANDIDATES
 
-        dense_vec, sparse_vec = encode_query(query)
-        candidates = _extract_candidates(_do_search(client, dense_vec, sparse_vec, over_fetch))
+        # 查询的 sparse 向量不再用于检索（sparse 臂已解耦为 BM25），只取 dense。
+        dense_vec, _ = encode_query(query)
+        candidates = _extract_candidates(_do_search(client, dense_vec, query, over_fetch))
 
         if not candidates:
             logger.info(f"Retrieval: len={len(query)} → 0 candidates")
