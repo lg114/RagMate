@@ -41,8 +41,16 @@
     width: 260px; flex: none; display: flex; flex-direction: column;
     background: var(--bg-nav); border-right: 1px solid var(--line);
   }
+  .side-nav { padding: 6px 8px 0; display: flex; flex-direction: column; gap: 2px; }
+  .side-nav button {
+    border: 0; background: none; color: var(--ink-soft); cursor: pointer;
+    padding: 9px 12px; border-radius: 8px; font-size: 14px; text-align: left;
+  }
+  .side-nav button:hover { background: var(--bg-sunken); }
+  .side-nav button.is-active { background: var(--bg-sunken); color: var(--ink); font-weight: 600; }
+  .history-block[hidden] { display: none; }
   .side-new {
-    margin: 14px 12px 6px; padding: 9px 14px; text-align: left;
+    margin: 10px 12px 6px; padding: 9px 14px; text-align: left;
     background: var(--bg-elev); color: var(--ink);
     border: 1px solid var(--line-strong); border-radius: var(--radius);
     font-weight: 600; font-size: 14px; cursor: pointer;
@@ -69,8 +77,10 @@
   .history-list .h-del:hover { color: var(--ink); }
   .history-empty { padding: 4px 20px; color: var(--muted); font-size: 13.5px; }
 
-  /* ---- 主栏 ---- */
+  /* ---- 主栏：三视图（对话 / 文档 / 设置） ---- */
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .view[hidden] { display: none; }
   .topbar {
     flex: none; display: flex; align-items: center; gap: 10px;
     padding: 12px 20px; background: var(--bg-elev); border-bottom: 1px solid var(--line);
@@ -149,12 +159,12 @@
   .retrieval-chunks .r-preview { margin: 4px 0 0; color: var(--ink-soft); }
   .retrieval-dropped { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
 
-  details.docs, details.settings {
-    margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius);
-    background: var(--bg-elev); padding: 12px 16px;
+  .panel {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg-elev); padding: 16px 18px;
   }
-  details.docs summary, details.settings summary { cursor: pointer; font-weight: 600; font-size: 14.5px; }
-  details.docs summary span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
+  .panel h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .panel h2 span { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
   .doc-list { list-style: none; margin: 12px 0 0; padding: 0; }
   .doc-list li {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
@@ -235,10 +245,17 @@
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
-    <button type="button" class="side-new" id="new-chat">＋ <span data-i18n="newChat">新对话</span></button>
-    <div class="side-label" data-i18n="history">历史对话</div>
-    <ul class="history-list" id="history-list"></ul>
-    <p class="history-empty" id="history-empty" data-i18n="historyEmpty">暂无历史对话</p>
+    <nav class="side-nav" id="side-nav" aria-label="Views">
+      <button type="button" data-view="chat" class="is-active" data-i18n="navChat">对话</button>
+      <button type="button" data-view="documents" data-i18n="navDocuments">文档</button>
+      <button type="button" data-view="settings" data-i18n="navSettings">设置</button>
+    </nav>
+    <div class="history-block" id="history-block">
+      <button type="button" class="side-new" id="new-chat">＋ <span data-i18n="newChat">新对话</span></button>
+      <div class="side-label" data-i18n="history">历史对话</div>
+      <ul class="history-list" id="history-list"></ul>
+      <p class="history-empty" id="history-empty" data-i18n="historyEmpty">暂无历史对话</p>
+    </div>
   </aside>
 
   <div class="main">
@@ -248,43 +265,57 @@
       <button type="button" class="lang-btn" id="lang-toggle">EN</button>
     </header>
 
-    <div class="scroll" id="scroll">
-      <div class="scroll-inner">
-        <div class="chips" id="chips">
-          <button type="button" class="chip" data-q="一个查询里有三个排序节点、work_mem 保持默认 4MB 时，最多能用多少内存？64MB 配 100 个并发连接时理论峰值是多少？" data-i18n="chip1">work_mem 能用多少内存？</button>
-          <button type="button" class="chip" data-q="RagMate 本地开发环境的 Docker Compose 编排文件在仓库的什么位置？用什么命令启动整套基础设施？" data-i18n="chip2">Compose 文件在哪，怎么启动？</button>
-          <button type="button" class="chip" data-q="web 服务的启动命令是什么？接口文档在哪个地址打开？" data-i18n="chip3">web 服务怎么启动，文档在哪？</button>
-        </div>
-        <div id="thread">
-          <p class="hint" id="empty-hint" data-i18n="emptyHint">还没有提问。点上面一道试试，或直接在下面输入。</p>
-        </div>
-
-        <details class="docs" id="docs-box">
-          <summary><span data-i18n="docsTitle">已入库的文档</span><span id="docs-count"></span></summary>
-          <ul class="doc-list" id="doc-list"></ul>
-          <p class="doc-empty" id="doc-empty" hidden data-i18n="docsEmpty">还没有入库的文档，先上传一份。</p>
-          <div class="dropzone" id="dropzone" role="button" tabindex="0" data-i18n="dropzone">拖入文件或点这里上传新文档</div>
-          <input type="file" id="file-input" hidden>
-        </details>
-
-        <details class="settings">
-          <summary data-i18n="settingsTitle">设置</summary>
-          <div class="settings-body">
-            <div class="settings-row">
-              <input type="password" id="token-input" data-i18n-ph="tokenPlaceholder" placeholder="API 令牌（默认空，不用填）" autocomplete="off">
-              <button type="button" id="token-save" data-i18n="tokenSave">保存</button>
-            </div>
-            <p class="settings-note" data-i18n="tokenNote">令牌只保存在本浏览器，用于 API 鉴权；服务端默认不设鉴权，不用填。</p>
-            <ul class="ready-list" id="ready-list"></ul>
+    <div class="view" id="view-chat">
+      <div class="scroll" id="scroll">
+        <div class="scroll-inner">
+          <div class="chips" id="chips">
+            <button type="button" class="chip" data-q="一个查询里有三个排序节点、work_mem 保持默认 4MB 时，最多能用多少内存？64MB 配 100 个并发连接时理论峰值是多少？" data-i18n="chip1">work_mem 能用多少内存？</button>
+            <button type="button" class="chip" data-q="RagMate 本地开发环境的 Docker Compose 编排文件在仓库的什么位置？用什么命令启动整套基础设施？" data-i18n="chip2">Compose 文件在哪，怎么启动？</button>
+            <button type="button" class="chip" data-q="web 服务的启动命令是什么？接口文档在哪个地址打开？" data-i18n="chip3">web 服务怎么启动，文档在哪？</button>
           </div>
-        </details>
+          <div id="thread">
+            <p class="hint" id="empty-hint" data-i18n="emptyHint">还没有提问。点上面一道试试，或直接在下面输入。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <textarea id="input" rows="1" data-i18n-ph="placeholder" placeholder="基于已入库的文档提问" aria-label="Question"></textarea>
+          <button type="button" id="send" data-i18n="send">发送</button>
+        </div>
       </div>
     </div>
 
-    <div class="composer">
-      <div class="composer-inner">
-        <textarea id="input" rows="1" data-i18n-ph="placeholder" placeholder="基于已入库的文档提问" aria-label="Question"></textarea>
-        <button type="button" id="send" data-i18n="send">发送</button>
+    <div class="view" id="view-documents" hidden>
+      <div class="scroll">
+        <div class="scroll-inner">
+          <section class="panel" id="docs-box">
+            <h2><span data-i18n="docsTitle">已入库的文档</span><span id="docs-count"></span></h2>
+            <ul class="doc-list" id="doc-list"></ul>
+            <p class="doc-empty" id="doc-empty" hidden data-i18n="docsEmpty">还没有入库的文档，先上传一份。</p>
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" data-i18n="dropzone">拖入文件或点这里上传新文档</div>
+            <input type="file" id="file-input" hidden>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-settings" hidden>
+      <div class="scroll">
+        <div class="scroll-inner">
+          <section class="panel">
+            <h2 data-i18n="settingsTitle">设置</h2>
+            <div class="settings-body">
+              <div class="settings-row">
+                <input type="password" id="token-input" data-i18n-ph="tokenPlaceholder" placeholder="API 令牌（默认空，不用填）" autocomplete="off">
+                <button type="button" id="token-save" data-i18n="tokenSave">保存</button>
+              </div>
+              <p class="settings-note" data-i18n="tokenNote">令牌只保存在本浏览器，用于 API 鉴权；服务端默认不设鉴权，不用填。</p>
+              <ul class="ready-list" id="ready-list"></ul>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   </div>
