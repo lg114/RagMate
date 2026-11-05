@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass, field
 
 from .deterministic_metrics import evaluate_questions, normalize_key
-from .lexical_retrieval import LexicalIndex
+from backend.core.lexical import LexicalIndex
 from .retrieval_eval import (
     build_chunk_inventory,
     load_golden_testset,

@@ -1,8 +1,12 @@
-"""pgvector 向量库：同一套 Postgres 上的稠密 + 稀疏混合检索。
+"""pgvector 向量库：同一套 Postgres 上的稠密 + BM25 混合检索。
 
-稠密字段是 vector(1024)，HNSW、内积。稀疏字段是 sparsevec，精确内积
-（pgvector 0.8 没有稀疏 ANN 索引）。查询侧仍按 DROP_RATIO_SEARCH 丢掉
-最小的一批稀疏权重，再和稠密名次做 RRF（k=60）。
+稠密字段是 vector(1024)，HNSW、内积。sparse 臂已与 embedding 模型解耦：
+不再读 `sparsevec` 列（BGE-M3 自带稀疏权重，Jina 不给，远程下只能退化
+成词哈希），而是对表里全部 chunk 文本算 BM25（与门禁词法重放同一套
+`backend.core.lexical.LexicalIndex`），再和稠密名次做 RRF（k=60）。
+
+BM25 索引按表缓存，凭 (行数, 最大 id) 指纹判断是否重建；入库删增行都会
+动到指纹，下一次检索即重建。`sparsevec` 列入库时照常写，留作回退。
 
 表不存在时检索返回空；结构对不上时拒绝启动，不在原地改向量列。
 """
@@ -17,6 +21,7 @@ import threading
 from sqlalchemy import text
 
 from backend.core.fusion import rrf_contribution
+from backend.core.lexical import LexicalIndex
 from backend.domain.errors import ServiceUnavailableError, ValidationError
 from backend.infrastructure.config import settings
 from backend.infrastructure.database import get_sync_engine
@@ -43,6 +48,11 @@ _REQUIRED_COLUMNS = (
 
 _ready_tables: set[str] = set()
 _ready_lock = threading.Lock()
+
+# BM25 索引缓存：表名 -> (指纹, 索引, {chunk key: 行})。指纹是 (行数, 最大 id)，
+# 入库的删增都会动到它；同进程内 get_vector_store() 每次新建实例，因此缓存
+# 必须放模块级（与 _ready_tables 同一模式），只清表时才失效。
+_lexical_indexes: dict[str, tuple[tuple[int, int], LexicalIndex, dict]] = {}
 
 _QUERY_PAGE = 1000
 _QUERY_HARD_CAP = 100_000
@@ -106,18 +116,6 @@ def as_sparse_dict(raw) -> dict[int, float]:
     raise ValidationError("sparse vector must be a mapping of index to weight")
 
 
-def apply_drop_ratio(weights: dict[int, float], drop_ratio: float) -> dict[int, float]:
-    """丢掉绝对值最小的一批权重。比例为 0 时原样返回。至少留一个非零项。"""
-    if not weights or drop_ratio <= 0:
-        return dict(weights)
-    items = sorted(weights.items(), key=lambda kv: (abs(float(kv[1])), int(kv[0])))
-    n_drop = int(len(items) * float(drop_ratio))
-    kept = items[n_drop:] if n_drop > 0 else items
-    if not kept:
-        kept = items[-1:]
-    return {int(k): float(v) for k, v in kept}
-
-
 def format_dense(vec) -> str:
     if not isinstance(vec, (list, tuple)):
         raise ValidationError("dense vector must be a list of floats")
@@ -179,15 +177,6 @@ def dense_search_sql(table: str) -> str:
         "SELECT id, text, parent_text, source, page, chunk_index, content_hash, ingest_batch_id, "
         f"-(dense <#> CAST(:q AS vector)) AS score FROM {ident} "
         "ORDER BY dense <#> CAST(:q AS vector), id LIMIT :lim"
-    )
-
-
-def sparse_search_sql(table: str) -> str:
-    ident = quote_ident(table)
-    return (
-        "SELECT id, text, parent_text, source, page, chunk_index, content_hash, ingest_batch_id, "
-        f"-(sparse <#> CAST(:q AS sparsevec)) AS score FROM {ident} "
-        "ORDER BY sparse <#> CAST(:q AS sparsevec), id LIMIT :lim"
     )
 
 
@@ -297,6 +286,7 @@ class PgVectorStore:
             conn.execute(text(f"DROP TABLE IF EXISTS {ident}"))
         with _ready_lock:
             _ready_tables.discard(self.table)
+            _lexical_indexes.pop(self.table, None)
 
     def validate_schema(self) -> None:
         with self._connect() as conn:
@@ -313,22 +303,89 @@ class PgVectorStore:
             ef_search=ef,
         )
 
-    def search_sparse(self, sparse_vec, limit: int, drop_ratio: float | None = None) -> list[dict]:
+    def _lexical_fingerprint(self) -> tuple[int, int]:
+        """表内容指纹：(行数, 最大 id)。入库删增都会动到它。"""
+        ident = quote_ident(self.table)
+        with self._connect() as conn:
+            row = conn.execute(text(
+                f"SELECT COUNT(*), COALESCE(MAX(id), 0) FROM {ident}"
+            )).first()
+        return (int(row[0]), int(row[1]))
+
+    def _fetch_all_chunk_rows(self) -> list[dict]:
+        """一次快照读出建 BM25 索引要的全部行（id 排序，上限防爆）。"""
+        ident = quote_ident(self.table)
+        with self._connect() as conn:
+            batch = conn.execute(text(
+                "SELECT id, text, parent_text, source, page, chunk_index, "
+                f"content_hash, ingest_batch_id FROM {ident} "
+                f"ORDER BY id LIMIT :lim"
+            ), {"lim": _QUERY_HARD_CAP}).mappings().all()
+        rows = [dict(row) for row in batch]
+        if len(rows) >= _QUERY_HARD_CAP:
+            logger.warning("lexical index capped at %d rows for table %s",
+                           _QUERY_HARD_CAP, self.table)
+        return rows
+
+    def _lexical_rows(self) -> tuple[LexicalIndex, dict]:
+        """(BM25 索引, {chunk key: 行})。指纹没动就复用缓存，否则重建。"""
+        try:
+            fingerprint = self._lexical_fingerprint()
+            with _ready_lock:
+                cached = _lexical_indexes.get(self.table)
+                if cached is not None and cached[0] == fingerprint:
+                    return cached[1], cached[2]
+            rows = self._fetch_all_chunk_rows()
+            chunks = [
+                {"key": (row["source"], row["page"], row["chunk_index"]),
+                 "text": row["text"] or ""}
+                for row in rows
+            ]
+            index = LexicalIndex(chunks)
+            by_key = {
+                (row["source"], row["page"], row["chunk_index"]): row
+                for row in rows
+            }
+            with _ready_lock:
+                _lexical_indexes[self.table] = (fingerprint, index, by_key)
+            return index, by_key
+        except (ValidationError, ServiceUnavailableError):
+            raise
+        except Exception as e:
+            logger.error("lexical index build failed", exc_info=True)
+            raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
+
+    def search_sparse(self, query: str, limit: int) -> list[dict]:
+        """BM25 词法臂：对表里全部 chunk 文本打分，取前 limit 条。
+
+        与门禁词法重放同一套打分，因此重放的数就是这条臂的数。返回形状
+        与 search_dense 一致（id / distance=BM25 分 / entity），供 RRF 融合。
+        """
         limit = int(limit)
         if limit <= 0:
             return []
-        ratio = settings.DROP_RATIO_SEARCH if drop_ratio is None else float(drop_ratio)
-        weights = apply_drop_ratio(as_sparse_dict(sparse_vec), ratio)
-        return self._ann_query(
-            sparse_search_sql(self.table),
-            {"q": format_sparse(weights), "lim": limit},
-            ef_search=None,
-        )
+        try:
+            index, by_key = self._lexical_rows()
+            ranked = index.rank_with_scores(query)[:limit]
+        except (ValidationError, ServiceUnavailableError):
+            raise
+        except Exception as e:
+            logger.error("lexical search failed", exc_info=True)
+            raise ServiceUnavailableError("检索服务异常，请稍后重试") from e
+        hits = []
+        for key, score in ranked:
+            row = by_key.get(key)
+            if row is None:
+                continue
+            hit_row = dict(row)
+            hit_row["score"] = float(score)
+            hits.append(_row_to_hit(hit_row))
+        return hits
 
-    def search_hybrid(self, dense_vec, sparse_vec, limit: int) -> list[dict]:
-        """稠密、稀疏各取 limit 条，再用 RRF 融合到 limit 条。"""
+    def search_hybrid(self, dense_vec, query: str, limit: int) -> list[dict]:
+        """稠密、BM25 各取 limit 条，再用 RRF 融合到 limit 条。"""
         dense_hits = self.search_dense(dense_vec, limit)
-        sparse_hits = self.search_sparse(sparse_vec, limit)
+        sparse_hits = self.search_sparse(query, limit)
         return fuse_hits(
             dense_hits,
             sparse_hits,
@@ -586,6 +643,7 @@ def reset_vector_store_cache() -> None:
     """切换 VECTOR_TABLE 后调用，让下次 init 重新检查那张表。"""
     with _ready_lock:
         _ready_tables.clear()
+        _lexical_indexes.clear()
 
 
 def init_vector_store() -> PgVectorStore | None:

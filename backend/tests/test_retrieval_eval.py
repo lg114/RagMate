@@ -39,11 +39,11 @@ class _FakeClient:
         self.calls.append(("dense", limit))
         return self._hits
 
-    def search_sparse(self, sparse_vec, limit):
+    def search_sparse(self, query, limit):
         self.calls.append(("sparse", limit))
         return self._hits
 
-    def search_hybrid(self, dense_vec, sparse_vec, limit):
+    def search_hybrid(self, dense_vec, query, limit):
         self.calls.append(("hybrid", limit))
         return self._hits
 
@@ -63,7 +63,7 @@ def test_extract_stage_records_keeps_triple_rank_score():
     assert records[0]["text_preview"] == "first chunk text"
 
 
-def test_run_stages_dense_sparse_fused_use_same_vectors(monkeypatch):
+def test_run_stages_encode_once_per_question(monkeypatch):
     encoded = []
     monkeypatch.setattr("backend.eval.retrieval_eval.encode_query",
                         lambda q: encoded.append(q) or ([0.1], "sparse-vec"))
@@ -79,7 +79,7 @@ def test_do_search_always_uses_hybrid():
     from backend.core.retriever import _do_search
 
     client = _FakeClient(HITS)
-    results = _do_search(client, [0.1], {1: 0.2}, over_fetch=10)
+    results = _do_search(client, [0.1], "q", over_fetch=10)
     assert results == [HITS]
     assert [kind for kind, _ in client.calls] == ["hybrid"]
 

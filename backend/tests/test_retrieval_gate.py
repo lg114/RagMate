@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from backend.eval.lexical_retrieval import LexicalIndex, tokenize
+from backend.core.lexical import LexicalIndex, tokenize
 from backend.eval.retrieval_gate import (
     ALLOWANCE,
     GATED_METRICS,

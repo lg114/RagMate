@@ -2,7 +2,7 @@
 
 四个阶段（P0-3 消融臂）：
   dense    —— 仅稠密向量检索；
-  sparse   —— 仅稀疏向量检索；
+  sparse   —— 仅 BM25 词法检索（与门禁重放同口径）；
   fused    —— 混合检索 + RRF 融合（即 `_do_search`），不重排；
   reranked —— fused 的候选经 reranker 打分排序，不做阈值过滤/去重/父展开。
 
@@ -34,7 +34,7 @@ STAGES = ("dense", "sparse", "fused", "reranked")
 
 SCORE_KINDS = {
     "dense": "pgvector inner product on dense vector",
-    "sparse": "pgvector inner product on sparsevec",
+    "sparse": "BM25 over chunk text (same scoring as the lexical replay)",
     "fused": "RRF fusion score (default k=60) of dense and sparse ranks",
     "reranked": "reranker sigmoid probability on child chunk text",
 }
@@ -79,13 +79,13 @@ def _search_dense(store, dense_vec, over_fetch):
     return [store.search_dense(dense_vec, over_fetch)]
 
 
-def _search_sparse(store, sparse_vec, over_fetch):
-    return [store.search_sparse(sparse_vec, over_fetch)]
+def _search_sparse(store, question, over_fetch):
+    return [store.search_sparse(question, over_fetch)]
 
 
-def _search_fused(store, dense_vec, sparse_vec, over_fetch):
+def _search_fused(store, dense_vec, question, over_fetch):
     """混合检索 + RRF：与 retriever._do_search 同一行为。"""
-    return [store.search_hybrid(dense_vec, sparse_vec, over_fetch)]
+    return [store.search_hybrid(dense_vec, question, over_fetch)]
 
 
 def run_stages(client, question: str, stages, over_fetch: int, timings: dict | None = None) -> dict:
@@ -100,7 +100,8 @@ def run_stages(client, question: str, stages, over_fetch: int, timings: dict | N
     if unknown:
         raise ValueError(f"Unknown stage(s): {unknown}, expected one of {STAGES}")
     t0 = time.perf_counter()
-    dense_vec, sparse_vec = encode_query(question)
+    # 查询的 sparse 向量不再用于检索（sparse 臂已解耦为 BM25），只取 dense。
+    dense_vec, _ = encode_query(question)
     if timings is not None:
         timings["encode"] = time.perf_counter() - t0
     out = {}
@@ -112,12 +113,12 @@ def run_stages(client, question: str, stages, over_fetch: int, timings: dict | N
             timings["dense"] = time.perf_counter() - t0
     if "sparse" in stages:
         t0 = time.perf_counter()
-        out["sparse"] = _extract_stage_records(_search_sparse(client, sparse_vec, over_fetch))
+        out["sparse"] = _extract_stage_records(_search_sparse(client, question, over_fetch))
         if timings is not None:
             timings["sparse"] = time.perf_counter() - t0
     if "fused" in stages or "reranked" in stages:
         t0 = time.perf_counter()
-        fused_records = _extract_stage_records(_search_fused(client, dense_vec, sparse_vec, over_fetch))
+        fused_records = _extract_stage_records(_search_fused(client, dense_vec, question, over_fetch))
         if timings is not None:
             timings["fused"] = time.perf_counter() - t0
     if "fused" in stages:

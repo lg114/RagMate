@@ -39,7 +39,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, XLSX, TXT, and Ma
 
 ## Highlights
 
-- **Hybrid retrieval** — dense + sparse search fused with RRF (k=60) in pgvector. Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
+- **Hybrid retrieval** — dense + BM25 search fused with RRF (k=60). Embeddings come from an OpenAI-compatible API by default; in-process BGE-M3 is opt-in.
 - **Reranked, filtered context** — remote reranking by default, plus dynamic score thresholds, per-source deduplication, score-gap truncation, and sentence-level contextual compression. A local cross-encoder is opt-in.
 - **Title-path chunking** — markdown chunks carry an `H1 > H2 > H3` path for retrieval; the larger parent passage is still what the LLM sees. That strategy is frozen.
 - **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call. Deep Agents is off unless `DEEP_AGENTS_ENABLED=true`.
@@ -210,7 +210,7 @@ flowchart LR
 
 **Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader, Excel to Markdown) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense + sparse encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
-**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus exact sparse inner product, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
+**Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus BM25 over chunk text, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (on by default). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
 
 Simple greetings and other non-RAG messages are routed straight to the LLM, skipping the agent entirely.
 
@@ -301,11 +301,11 @@ Settings are read from `backend/.env` (see [`backend/.env.example`](backend/.env
 
 ### Retrieval (frozen)
 
-One retrieval config is validated. It is hybrid dense + sparse search, fused with RRF, then reranked. The fused-stage numbers are pinned in [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json). Leave the defaults below unless you re-run `ragmate-eval retrieval` on that 98-question set and replace the floors in [`eval/README.md`](eval/README.md) and `backend/tests/test_retrieval_gate.py`.
+One retrieval config is validated. It is hybrid dense + BM25 search, fused with RRF, then reranked. The fused-stage numbers are pinned in [`eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json`](eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json). Leave the defaults below unless you re-run `ragmate-eval retrieval` on that 98-question set and replace the floors in [`eval/README.md`](eval/README.md) and `backend/tests/test_retrieval_gate.py`.
 
 | Piece | Frozen value |
 |---|---|
-| Hybrid dense + sparse | always on |
+| Hybrid dense + BM25 | always on |
 | Fusion | RRF with `RRF_K=60` |
 | Chunking | `CHUNKING_STRATEGY=title_path`, `CHUNK_SIZE=1000`, overlap `200`, parent `2500` / `300` |
 | Rerank then filter | `RERANK_CANDIDATES=30`, `RERANK_SCORE_THRESHOLD=0.3`, `FINAL_CONTEXT_K=15` |
@@ -324,7 +324,7 @@ The 98-question report was collected with in-process BGE-M3 and a local cross-en
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 
-**Filter and compression** — frozen literals: dynamic threshold `0.5`×top score, per-source cap `4` (min `2`), dominance `0.9`×`1.5`, score-gap `0.15`, high-score ratio `0.6`; compression threshold `0.4`, min `300` chars. `QUERY_CONTEXTUALIZE` (`true`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`true`), `DROP_RATIO_SEARCH` (`0.2`).
+**Filter and compression** — frozen literals: dynamic threshold `0.5`×top score, per-source cap `4` (min `2`), dominance `0.9`×`1.5`, score-gap `0.15`, high-score ratio `0.6`; compression threshold `0.4`, min `300` chars. `QUERY_CONTEXTUALIZE` (`true`, follow-up rewrite only when first-pass retrieval confidence is low, not multi-query), `QUERY_ROUTING_ENABLED` (`true`).
 
 **Embedding** — `EMBEDDING_PROVIDER` (`remote`), `EMBEDDING_MODEL` (`BAAI/bge-m3`), `EMBEDDING_NORMALIZE` (`true`), `HF_TOKEN`, `EMBEDDING_API_KEY` (optional), `EMBEDDING_API_BASE_URL` (required for `remote` / `openai`), `EMBEDDING_API_TIMEOUT` (`60`).
 
@@ -417,7 +417,7 @@ The API user must be allowed to run `CREATE EXTENSION vector`. The Compose `post
 - **Ingest runs on one worker at a time.** Status, the lock, progress, the cancel flag, and the failure reason live in one Postgres row (`ingest_control`), so any uvicorn worker can read progress and request cancellation. Only the worker that holds the lock writes progress and the terminal state. It refreshes a heartbeat (`INGEST_HEARTBEAT_INTERVAL`, default 5s). If that process dies, the next status read marks the job `interrupted` after `INGEST_HEARTBEAT_STALE` seconds (default 30s) and releases the lock. The row is not expired, so a failed or interrupted job is still there after a restart.
 - **No authentication or multi-tenancy.** Every session and document is visible to anyone who can reach the API.
 - **Vector schema changes need a manual rebuild.** If the pgvector table is missing columns or the `vector` / `sparsevec` types, startup raises a validation error instead of altering those columns. Drop the table and re-ingest.
-- **Sparse search is exact.** Dense search uses an HNSW index (inner product). Sparse search is an exact inner product over `sparsevec`, because this pgvector version has no sparse ANN index. Query-side `DROP_RATIO_SEARCH` (default 0.2) still drops the smallest sparse weights before that scan. RRF stays at k=60.
+- **Sparse search is BM25.** Dense search uses an HNSW index (inner product). The sparse arm scores chunk text with BM25 (same scoring as the lexical replay in the eval harness) and no longer reads the `sparsevec` column; the column is still written at ingest and kept for rollback. RRF stays at k=60.
 - **No migration tool.** Schema changes are applied with `create_all` plus a small hand-written column-migration list in `infrastructure/database.py`.
 - **In-process embedding and rerank are opt-in, and CPU inference is slow.** The default calls the remote embeddings and `/rerank` APIs and does not load torch. Set `EMBEDDING_PROVIDER=huggingface` and `RERANKER_PROVIDER=local` only when this process should load BGE-M3 and the cross-encoder.
 

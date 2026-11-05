@@ -100,7 +100,6 @@ class Settings(BaseSettings):
     RERANK_CANDIDATES: int = Field(default=30, gt=0)
     FINAL_CONTEXT_K: int = Field(default=15, gt=0)
     RERANK_SCORE_THRESHOLD: float = Field(default=0.3, gt=0.0, lt=1.0)
-    DROP_RATIO_SEARCH: float = Field(default=0.2, ge=0.0, lt=1.0)
 
     # 忠诚度校验（默认开启，但只在检索置信度低时跑：证据扎实时跳过这次 LLM 调用；失败时放行，不阻断回答；false 则全关）
     FAITHFULNESS_CHECK: bool = True
