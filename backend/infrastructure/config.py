@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     CHUNK_SIZE_PARENT: int = Field(default=2500, gt=0)
     CHUNK_OVERLAP_PARENT: int = Field(default=300, ge=0)
 
-    # Chunking strategy for markdown. Frozen at title_path (98q fused baseline).
+    # Chunking strategy for markdown. Frozen at title_path (130q fused baseline).
     #   title_path   — 按 CHUNK_SIZE 切子块，并把「H1 > H2 > H3」写入子块正文
     #   parent_child — 同切块边界，但不把标题路径写入检索正文，只放进 parent_text
     # parent_child 只是环境变量，不是第二套策略。改它之前重跑确定性基线。

@@ -36,7 +36,7 @@ def parse_gold_spec(spec: str) -> dict:
     """解析 ``source:chunk_index``，如 ``01-docker-compose.md:2``。
 
     gold 三元组的 page 恒为 None（清单校验只认 source + chunk_index，
-    与已入库的 98 题一致）。source 只认文件名，不认路径。
+    与已入库的 130 题一致）。source 只认文件名，不认路径。
     """
     text = spec.strip()
     parts = text.split(":")

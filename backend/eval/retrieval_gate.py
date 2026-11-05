@@ -1,4 +1,4 @@
-"""检索质量 CI 门禁：词法重放 98 题，对照已入库的 fused 基线。
+"""检索质量 CI 门禁：词法重放 130 题，对照已入库的 fused 基线。
 
 线上 `ragmate-eval retrieval` 要嵌入模型、pgvector 和 reranker，不适合
 ubuntu-latest 每次 PR 都跑。这里改走三条已有、可复现的链路：
@@ -9,7 +9,7 @@ ubuntu-latest 每次 PR 都跑。这里改走三条已有、可复现的链路�
 
 阈值不是另写一套“看起来很高”的数字。它们等于基线报告 fused 阶段的
 Recall@k / nDCG 减去固定余量 `ALLOWANCE`。余量只覆盖词法重放和
-BGE 混合检索之间大约一题的差距（91 道可答题里 1 题约占 0.011）。
+Jina 混合检索之间大约一题的差距（121 道可答题里 1 题约占 0.0083）。
 """
 from __future__ import annotations
 
@@ -25,9 +25,9 @@ from .retrieval_eval import (
 )
 from .utils import resolve_path
 
-# 当前默认切块（title_path）下的 98 题混合检索重跑。reranked 依赖
+# 当前默认切块（title_path）下的 130 题 Jina 远程混合检索重跑。reranked 依赖
 # cross-encoder，CI 的词法重放对不齐那一臂，所以钉 fused。
-DEFAULT_BASELINE = "eval/reports/baseline/retrieval-baseline-98q-titlepath-rerun.json"
+DEFAULT_BASELINE = "eval/reports/baseline/retrieval-baseline-130q-jina-rerun.json"
 DEFAULT_TESTSET = "eval/testsets/sample/testset.json"
 DEFAULT_CORPUS = "eval/testsets/sample/corpus"
 BASELINE_STAGE = "fused"
