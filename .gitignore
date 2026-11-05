@@ -40,6 +40,8 @@ backend/documents/
 documents/
 volumes/
 eval/testsets/*.json
+# BEIR 生成集（corpus 5,183 文件 + 题集），本地生成、不入仓，见 eval/README.md
+eval/testsets/scifact/
 eval/reports/*.json
 # 例外：精选小测试集与基线报告入仓（见 eval/README.md）
 !eval/testsets/sample/*.json

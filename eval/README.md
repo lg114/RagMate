@@ -20,6 +20,7 @@
 |---|---|---|
 | `eval/testsets/*.json` | 否 | 本地生成的测试集，体积和内容因人而异 |
 | `eval/testsets/sample/` | 是 | 精选的小测试集，与基线报告配套，供复现和回归 |
+| `eval/testsets/scifact/` | 否 | BEIR SciFact 生成集（5,183 文档 / 10,416 块 / 300 题），脚本可复现 |
 | `eval/reports/*.json` | 否 | 本地评测的原始报告 |
 | `eval/reports/baseline/` | 是 | 已确认的基线结果（附环境与样本说明），改动检索链路后应与之对比 |
 
@@ -55,6 +56,60 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json
 供重算指标时复用，不重跑检索）。reranked 阶段只取排序，不做阈值过滤、
 去重、父展开——那些是生成侧的取舍，不应污染检索基线。unanswerable 题
 不计入均值，单独计数。
+
+## 大语料验证：BEIR SciFact
+
+130 题手标集在 67 块语料上已经顶满（reranked 1.00），分不出检索臂的好坏。
+SciFact 是第一个大语料验证集：BEIR 的英文科学文献摘要集，
+**5,183 篇文档 → 10,416 块，300 道 test 题**。分数只在同集内前后对比，
+不跟 130 题集比——两边的 gold 标准不同（见下）。
+
+### 转换（BEIR zip → 语料 + 题集）
+
+```bash
+# 下载：https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip
+python -m backend.eval.convert_beir --zip scifact.zip --out-dir eval/testsets/scifact
+```
+
+输出 `eval/testsets/scifact/`：`corpus/<doc_id>.md`（一篇文档一个文件，
+`# 标题` + 摘要）、`testset.json`（300 题）、`testset-10q.json`（前 10 题，
+供先跑计时探针）。生成文件不入仓，脚本可复现。
+
+转换规则：BEIR 只给文档级 gold（query → 相关文档），RagMate 要 chunk 级
+gold——一篇 gold 文档的全部 chunk 都算 gold，标准比人工逐块标 gold 宽松。
+BEIR 没有参考答案：`reference` 取 gold 文档标题、`expected_claims` 取原
+claim 文本，仅为满足 schema，检索打分只看 `gold_chunks`。转换时用生产
+切分复现 chunk 清单并校验 schema 与 gold 存在性，不通过即报错。
+
+### 词法参考值（BM25 重放，VM 已验）
+
+| 指标 | recall@5 | nDCG@5 | recall@10 | nDCG@10 | recall@20 | nDCG@20 | MRR | hit@20 |
+|---|---|---|---|---|---|---|---|---|
+| BM25 | 0.5435 | 0.5207 | 0.6251 | 0.5542 | 0.6841 | 0.5746 | 0.5938 | 0.8067 |
+
+这是词法下限，不是门禁门槛：集子没有顶满，dense / fused / reranked
+有上升空间。`ragmate-eval retrieval-gate` 的门槛仍只钉 130 题集，不要
+拿这套数去当 SciFact 的门槛。
+
+### 入库与评测（本机跑）
+
+SciFact 必须进**单独的库**，别跟主库的 8 篇文档混在一起，否则以后
+130 题的基线重跑会检索到 SciFact 的块：
+
+```powershell
+# 1. 建库（容器名 ragmate-postgres）
+docker exec ragmate-postgres psql -U postgres -c "CREATE DATABASE ragmate_scifact;"
+# 2. 入库（直调 pipeline，不用起 API；表和 vector 扩展由 ensure_schema 建）
+$env:DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate_scifact'
+.\backend\.venv\Scripts\python.exe -c "from backend.application.ingest.pipeline import ingest_documents; print(ingest_documents(directory='eval/testsets/scifact/corpus'))"
+# 3. 先跑 10 题计时探针，确认单题耗时后再全量
+.\backend\.venv\Scripts\ragmate-eval.exe retrieval --testset eval/testsets/scifact/testset-10q.json --report eval/reports/scifact-10q-probe.json --delay-seconds 6
+# 4. 全量 300 题（--delay-seconds 6 是 Jina 限流下的经验值；300 题约 45 分钟，探针为准）
+.\backend\.venv\Scripts\ragmate-eval.exe retrieval --testset eval/testsets/scifact/testset.json --report eval/reports/baseline/retrieval-baseline-scifact-jina.json --delay-seconds 6
+```
+
+跑完后把 `retrieval-baseline-scifact-jina.json` 当作 SciFact 的钉住基线
+（可入仓），以后的改动（sparse 解耦、换 embedding）都在这套题上前后对比。
 
 ## CI 检索质量门禁
 
