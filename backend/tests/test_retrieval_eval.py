@@ -268,9 +268,9 @@ def test_run_retrieval_eval_collects_timings(monkeypatch, tmp_path):
 def test_shipped_golden_set_passes_schema_and_inventory():
     testset_path = resolve_path("eval/testsets/sample/testset.json")
     cases = load_golden_testset(testset_path)
-    assert len(cases) == 98
-    assert sum(1 for c in cases if c["gold_chunks"]) == 91
-    assert sum(1 for c in cases if not c["gold_chunks"]) == 7
+    assert len(cases) == 130
+    assert sum(1 for c in cases if c["gold_chunks"]) == 121
+    assert sum(1 for c in cases if not c["gold_chunks"]) == 9
     from backend.eval.retrieval_eval import build_chunk_inventory, verify_gold_in_inventory
     inventory = build_chunk_inventory(resolve_path("eval/testsets/sample/corpus"))
     assert len(inventory) == 67
