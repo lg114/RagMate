@@ -125,6 +125,15 @@ def _get_text_splitter(ext: str):
         ".pdf": (settings.CHUNK_SIZE_PDF, settings.CHUNK_OVERLAP_PDF),
         ".docx": (settings.CHUNK_SIZE_DOCX, settings.CHUNK_OVERLAP_DOCX),
         ".txt": (settings.CHUNK_SIZE_TXT, settings.CHUNK_OVERLAP_TXT),
+        ".pptx": (settings.CHUNK_SIZE_PPTX, settings.CHUNK_OVERLAP_PPTX),
+        ".xlsx": (settings.CHUNK_SIZE_XLSX, settings.CHUNK_OVERLAP_XLSX),
+        ".csv": (settings.CHUNK_SIZE_CSV, settings.CHUNK_OVERLAP_CSV),
+        ".html": (settings.CHUNK_SIZE_HTML, settings.CHUNK_OVERLAP_HTML),
+        ".htm": (settings.CHUNK_SIZE_HTML, settings.CHUNK_OVERLAP_HTML),
+        ".rtf": (settings.CHUNK_SIZE_RTF, settings.CHUNK_OVERLAP_RTF),
+        ".json": (settings.CHUNK_SIZE_JSON, settings.CHUNK_OVERLAP_JSON),
+        ".xml": (settings.CHUNK_SIZE_XML, settings.CHUNK_OVERLAP_XML),
+        ".epub": (settings.CHUNK_SIZE_EPUB, settings.CHUNK_OVERLAP_EPUB),
     }.get(ext, (settings.CHUNK_SIZE, settings.CHUNK_OVERLAP))
     return RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=overlap)
 

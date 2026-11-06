@@ -74,6 +74,22 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_DOCX: int = Field(default=150, ge=0)
     CHUNK_SIZE_TXT: int = Field(default=1000, gt=0)
     CHUNK_OVERLAP_TXT: int = Field(default=200, ge=0)
+    CHUNK_SIZE_PPTX: int = Field(default=800, gt=0)
+    CHUNK_OVERLAP_PPTX: int = Field(default=150, ge=0)
+    CHUNK_SIZE_XLSX: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_XLSX: int = Field(default=200, ge=0)
+    CHUNK_SIZE_CSV: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_CSV: int = Field(default=200, ge=0)
+    CHUNK_SIZE_HTML: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_HTML: int = Field(default=200, ge=0)
+    CHUNK_SIZE_RTF: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_RTF: int = Field(default=200, ge=0)
+    CHUNK_SIZE_JSON: int = Field(default=1200, gt=0)
+    CHUNK_OVERLAP_JSON: int = Field(default=200, ge=0)
+    CHUNK_SIZE_XML: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_XML: int = Field(default=200, ge=0)
+    CHUNK_SIZE_EPUB: int = Field(default=1000, gt=0)
+    CHUNK_OVERLAP_EPUB: int = Field(default=200, ge=0)
 
     # Parent-child chunking (small-to-big)
     CHUNK_SIZE_PARENT: int = Field(default=2500, gt=0)
@@ -171,6 +187,14 @@ class Settings(BaseSettings):
             ("CHUNK_SIZE_PDF", "CHUNK_OVERLAP_PDF"),
             ("CHUNK_SIZE_DOCX", "CHUNK_OVERLAP_DOCX"),
             ("CHUNK_SIZE_TXT", "CHUNK_OVERLAP_TXT"),
+            ("CHUNK_SIZE_PPTX", "CHUNK_OVERLAP_PPTX"),
+            ("CHUNK_SIZE_XLSX", "CHUNK_OVERLAP_XLSX"),
+            ("CHUNK_SIZE_CSV", "CHUNK_OVERLAP_CSV"),
+            ("CHUNK_SIZE_HTML", "CHUNK_OVERLAP_HTML"),
+            ("CHUNK_SIZE_RTF", "CHUNK_OVERLAP_RTF"),
+            ("CHUNK_SIZE_JSON", "CHUNK_OVERLAP_JSON"),
+            ("CHUNK_SIZE_XML", "CHUNK_OVERLAP_XML"),
+            ("CHUNK_SIZE_EPUB", "CHUNK_OVERLAP_EPUB"),
             ("CHUNK_SIZE_PARENT", "CHUNK_OVERLAP_PARENT"),
         ]
         

@@ -15,7 +15,7 @@
 
 ---
 
-RagMate is a self-hosted RAG application that turns PDF, DOCX, TXT, and Markdown files into a searchable knowledge base. It combines hybrid vector search, cross-encoder reranking, streaming responses, and optional faithfulness checks — while keeping your data and infrastructure under your own control.
+RagMate is a self-hosted RAG application that turns documents into a searchable knowledge base. Supported formats include PDF, DOCX, PPTX, XLSX, CSV, HTML, RTF, JSON, XML, EPUB, TXT, and Markdown. It combines hybrid vector search, cross-encoder reranking, streaming responses, and optional faithfulness checks — while keeping your data and infrastructure under your own control.
 
 ## Contents
 
@@ -154,7 +154,7 @@ Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive 
 
 The UI is a single-view app: the zero-build page at `frontend/index.html` plus one `js/shell.js`, served at `/`. No frontend build step. The interface is bilingual (English/中文, toggle in the top bar). The sidebar navigates three views — Chat, Documents, Settings — with conversation history under Chat. Each answer carries a collapsed **检索详情** section fed by the retrieval trace (`"debug": true`); the trace shows the kept passages with scores — it is the transparency view, not a dev-only switch. Retrieval knobs are not in the page — they are the frozen server defaults below.
 
-Supported formats: `.pdf`, `.docx`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
+Supported formats: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.csv`, `.html`, `.htm`, `.rtf`, `.json`, `.xml`, `.epub`, `.txt`, `.md`. Uploads are limited to 50 MB per file by default.
 
 ---
 
@@ -202,7 +202,7 @@ flowchart LR
     A --> O[Answer with citations]
 ```
 
-**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, TextLoader) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
+**Ingestion path** — file discovery with mtime-based change detection → format-specific loader (PyPDF, Docx2txt, python-pptx, openpyxl, csv, BeautifulSoup, striprtf, ebooklib, or plain text) → heading-aware chunking with optional title-path prefixes → content-hash deduplication against the pgvector table → dense encoding through the embeddings API (in-process FlagEmbedding only when you opt in) → insert new vectors → delete the previous vectors for that source → sync the `documents` table.
 
 **Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus BM25 over chunk text, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (off by default; when enabled, checked only when retrieval confidence is low). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
 
@@ -312,7 +312,7 @@ The 130-question report was collected with remote Jina embeddings (`jina-embeddi
 <details>
 <summary><strong>Frozen env overrides</strong> — listed so a deployment can see them, not so they get tuned in place</summary>
 
-**Chunking** — `CHUNK_SIZE` (`1000`), `CHUNK_OVERLAP` (`200`), `CHUNK_SIZE_PDF` (`600`), `CHUNK_OVERLAP_PDF` (`100`), `CHUNK_SIZE_DOCX` (`800`), `CHUNK_OVERLAP_DOCX` (`150`), `CHUNK_SIZE_TXT` (`1000`), `CHUNK_OVERLAP_TXT` (`200`), `CHUNK_SIZE_TABLE` (`1500`), `CHUNK_SIZE_PARENT` (`2500`), `CHUNK_OVERLAP_PARENT` (`300`), `CHUNKING_STRATEGY` (`title_path`).
+**Chunking** — `CHUNK_SIZE` (`1000`), `CHUNK_OVERLAP` (`200`), `CHUNK_SIZE_PDF` (`600`), `CHUNK_OVERLAP_PDF` (`100`), `CHUNK_SIZE_DOCX` (`800`), `CHUNK_OVERLAP_DOCX` (`150`), `CHUNK_SIZE_TXT` (`1000`), `CHUNK_OVERLAP_TXT` (`200`), `CHUNK_SIZE_PPTX` (`800`), `CHUNK_OVERLAP_PPTX` (`150`), `CHUNK_SIZE_XLSX` (`1000`), `CHUNK_OVERLAP_XLSX` (`200`), `CHUNK_SIZE_CSV` (`1000`), `CHUNK_OVERLAP_CSV` (`200`), `CHUNK_SIZE_HTML` (`1000`), `CHUNK_OVERLAP_HTML` (`200`), `CHUNK_SIZE_RTF` (`1000`), `CHUNK_OVERLAP_RTF` (`200`), `CHUNK_SIZE_JSON` (`1200`), `CHUNK_OVERLAP_JSON` (`200`), `CHUNK_SIZE_XML` (`1000`), `CHUNK_OVERLAP_XML` (`200`), `CHUNK_SIZE_EPUB` (`1000`), `CHUNK_OVERLAP_EPUB` (`200`), `CHUNK_SIZE_TABLE` (`1500`), `CHUNK_SIZE_PARENT` (`2500`), `CHUNK_OVERLAP_PARENT` (`300`), `CHUNKING_STRATEGY` (`title_path`).
 
 Overlap must be smaller than its chunk size, otherwise startup fails with a validation error.
 

@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## [0.8.0] — Unreleased
 
+### Added
+- 文档格式支持扩展：新增 PPTX、XLSX、CSV、HTML、RTF、JSON、XML、EPUB 八种格式加载器，总计支持 13 种文档格式。新增依赖 `python-pptx`、`openpyxl`、`beautifulsoup4`、`striprtf`、`ebooklib`。
+
 ### Changed
 - 向量库从 Milvus 迁移到同一 Postgres 实例上的 pgvector。稠密 `vector(1024)` 走 HNSW 内积，稀疏 `sparsevec` 走精确内积，仍按 RRF k=60 融合后再重排。`DROP_RATIO_SEARCH` 只作用在查询稀疏向量上。
 - `docker compose up` 默认只起 Postgres（`pgvector/pgvector:0.8.7-pg15`）。etcd、MinIO、Milvus、Attu、Redis 从默认栈移除。
