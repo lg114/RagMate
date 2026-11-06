@@ -6,16 +6,19 @@ All notable changes to this project are documented here.
 
 ### Changed
 - 向量库从 Milvus 迁移到同一 Postgres 实例上的 pgvector。稠密 `vector(1024)` 走 HNSW 内积，稀疏 `sparsevec` 走精确内积，仍按 RRF k=60 融合后再重排。`DROP_RATIO_SEARCH` 只作用在查询稀疏向量上。
-- `docker compose up` 默认只起 Postgres（`pgvector/pgvector:0.8.7-pg15`）。etcd、MinIO、Milvus、Attu 从默认栈移除。
+- `docker compose up` 默认只起 Postgres（`pgvector/pgvector:0.8.7-pg15`）。etcd、MinIO、Milvus、Attu、Redis 从默认栈移除。
 - 嵌入与 rerank 默认改为远程 HTTP：`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`。API 进程默认不再 import torch、FlagEmbedding 或 sentence-transformers。本地 BGE-M3 / CrossEncoder 改为显式 opt-in（`EMBEDDING_PROVIDER=huggingface` + `RERANKER_PROVIDER=local`）。
 - 检索默认配置冻结：hybrid + RRF（`RRF_K=60`）+ rerank、`CHUNKING_STRATEGY=title_path`、`MULTI_QUERY_ENABLED=false`。不新增融合臂或切块策略。回归门禁只认 `ragmate-eval retrieval-gate`。
-- 入库控制面从 Redis 迁移到 Postgres 的 `ingest_control` 表。状态、锁、心跳、取消标志和失败原因持久化到数据库，不再被 TTL 清掉。`REDIS_URL` 留空即可跑通入库和对话。
+- 入库控制面从 Redis 迁移到 Postgres 的 `ingest_control` 表。状态、锁、心跳、取消标志和失败原因持久化到数据库，不再被 TTL 清掉。
+- 限流改为纯进程内内存计数，删除 Redis 依赖。单进程部署够用，不再支持多 worker 共享限流。
 - 删除文档时仍先确认向量删干净，才提交 `documents` 行。`/ready` 检查 PostgreSQL 和 pgvector。
 - 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩移到展开之后，作用在交付给 LLM 的文本上。
 - `application/chat.py` — 默认对话改为一次检索、一次生成、再 `apply_grounding`。检索没有留下片段时直接拒答，不调用回答模型。
 - 删除 `get_embeddings()` 函数及 `model_factory.py` 中的嵌入客户端抽象层。
 - 删除 `rrf_fuse_rank_lists()`（`core/fusion.py`），仅保留 `rrf_contribution()`。
 - 删除 `extract_text()` 和 `rrf_fuse_rank_lists()` 的死函数。
+- 切块策略只保留 `title_path`，删除 `parent_child` 分支及 `_reconstruct_with_headers()` 函数。
+- 前端移除示例问题芯片，改为空状态提示。
 
 ### Fixed
 - `core/retriever.py` — 修复父子分块（small-to-big）在检索侧完全失效。`parent_text` 一直由入库逻辑写入向量库，但 `_do_search` 的 `output_fields` 从未请求它，`_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到小片段。现在 `_do_search` 显式请求 `parent_text`；`_extract_candidates` 分别保存打分文本（`text`）与交付文本（`context`）；新增 `_expand_to_parent()` 在过滤后完成展开。rerank 与阈值判断仍使用小片段，既有校准不受影响。
@@ -30,10 +33,13 @@ All notable changes to this project are documented here.
 - Deep Agents 系统（`DEEP_AGENTS_ENABLED`、agent 循环、工具规划）
 - RAGAS 评测代码与依赖（`ragas>=0.2.0`、`EvalLLM`、`eval/metrics.py` 中的 RAGAS 集成）
 - Milvus 相关代码（`infrastructure/milvus.py`、`pymilvus` 依赖）
+- Redis 限流（`infrastructure/redis_client.py`、`redis` 依赖、`REDIS_URL` 配置、docker-compose redis 服务）
 - 寒暄路由（`_is_simple_query()`、`_direct_llm_reply()`、`QUERY_ROUTING_ENABLED`）
 - `backend/core/prompts/researcher.md`（引用不存在工具的系统提示）
 - `get_embeddings()` 与 `langchain-huggingface` 依赖
 - `extract_text()`、`rrf_fuse_rank_lists()` 死函数
+- `parent_child` 切块策略及 `_reconstruct_with_headers()` 函数
+- 前端示例问题芯片
 - `tests/test_chat_routing.py`（测试已删除的路由逻辑）
 
 ## Prototype 12 — 2026-05-18

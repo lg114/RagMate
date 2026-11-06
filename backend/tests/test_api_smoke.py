@@ -21,15 +21,9 @@ class _AsyncSessionCM:
 def mock_infrastructure():
     """Mock 所有基础设施依赖。"""
     with patch("backend.app.init_db", new_callable=AsyncMock) as mock_init_db, \
-         patch("backend.infrastructure.redis_client.get_redis", new_callable=AsyncMock) as mock_redis, \
          patch("backend.infrastructure.database.async_session") as mock_session, \
          patch("backend.api.documents.async_session") as mock_documents_session, \
          patch("backend.infrastructure.vector_store.check_vector_store_available") as mock_vectors:
-
-        # Redis mock
-        redis_instance = AsyncMock()
-        redis_instance.exists = AsyncMock(return_value=False)
-        mock_redis.return_value = redis_instance
 
         # Database session mock（路由层用 `async with`，需异步上下文协议）
         # 默认查询结果为空列表：service 用 result.scalars().all() 取数，
@@ -49,7 +43,6 @@ def mock_infrastructure():
 
         yield {
             "init_db": mock_init_db,
-            "redis": mock_redis,
             "session": mock_session,
             "pgvector": mock_vectors,
         }
@@ -171,10 +164,6 @@ class TestRateLimiting:
 
     def test_rate_limit_header(self, client, mock_infrastructure):
         """请求应经过限流中间件。"""
-        # Mock Redis 限流检查通过
-        mock_redis = mock_infrastructure["redis"].return_value
-        mock_redis.eval = AsyncMock(return_value=1)  # 1 = 允许
-
         response = client.get("/documents")
         # 应该正常通过
         assert response.status_code == 200

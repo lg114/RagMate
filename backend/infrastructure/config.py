@@ -58,8 +58,6 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = ""
-    # 留空则不连接 Redis。入库和会话都在 PostgreSQL；限流退回本进程内存。
-    REDIS_URL: str = ""
 
     # pgvector 表，建在 DATABASE_URL 的同一个 Postgres 里。
     # 留空则用 ragmate_docs。

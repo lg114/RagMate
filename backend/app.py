@@ -44,7 +44,6 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from backend.infrastructure.redis_client import close_redis
     from backend.application.ingest_manager import cancel_ingest, reconcile_stale_ingest
 
     try:
@@ -89,10 +88,6 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await cancel_ingest()
-        try:
-            await close_redis()
-        except Exception:
-            logger.debug("Failed to close async Redis on shutdown", exc_info=True)
         try:
             await engine.dispose()
         except Exception:

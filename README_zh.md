@@ -46,7 +46,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、TXT 和 Markdown 文
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认关闭（开启后只在检索置信度低时校验），标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
 - **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 130 题样本。确定性检索指标是 CI 门禁，没有 LLM judge 打分。
-- **自托管设计** — 一套带 pgvector 的 Postgres 存放文档、会话和向量。Redis 可选，只用于多进程共享限流。
+- **自托管设计** — 一套带 pgvector 的 Postgres 存放文档、会话和向量。
 
 ---
 
@@ -57,7 +57,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、TXT 和 Markdown 文
 - Python 3.12+
 - Docker Desktop，或支持 Compose v2 的 Docker Engine
 - 一个 OpenAI 兼容的 LLM 接口及 API Key
-- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 启动带 pgvector 的 Postgres，不负责这两个模型服务。默认不启动 Redis。
+- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 启动带 pgvector 的 Postgres，不负责这两个模型服务。
 - 本地 FlagEmbedding 是可选项。这条路径在 CPU 上大约需要 8 GB 内存；知识库较大时建议使用 GPU。
 
 ### 1. 启动基础设施
@@ -69,13 +69,9 @@ docker compose up -d
 docker compose ps
 ```
 
-服务端口：PostgreSQL `5432`（含 pgvector）。这条默认路径不含 Redis。开发时应用本身运行在宿主机上。应用第一次启动时会执行 `CREATE EXTENSION vector` 并建好向量表。
+服务端口：PostgreSQL `5432`（含 pgvector）。开发时应用本身运行在宿主机上。应用第一次启动时会执行 `CREATE EXTENSION vector` 并建好向量表。
 
-入库状态、锁、取消标志和失败原因都在 PostgreSQL。会话历史也在 PostgreSQL。`REDIS_URL` 留空即可。限流这时用进程内计数，单进程够用。要在多个 worker 之间共享计数，设置 `REDIS_URL=redis://localhost:6379/0` 并启动可选服务：
-
-```bash
-docker compose --profile redis up -d
-```
+入库状态、锁、取消标志和失败原因都在 PostgreSQL。会话历史也在 PostgreSQL。限流用进程内计数，单进程够用。
 
 停止服务但保留数据：
 
@@ -132,7 +128,7 @@ RERANKER_PROVIDER=api
 RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-默认数据库地址与 Docker Compose 保持一致。向量写在同一个库的 `VECTOR_TABLE`（默认 `ragmate_docs`）。没有启用 Redis profile 时 `REDIS_URL` 留空。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
+默认数据库地址与 Docker Compose 保持一致。向量写在同一个库的 `VECTOR_TABLE`（默认 `ragmate_docs`）。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
 
 ### 4. 启动 RagMate
 
@@ -166,7 +162,7 @@ uvicorn backend.app:app --reload --port 8000
 
 ```
 RagMate/
-├── docker-compose.yml      # Postgres + pgvector；Redis 在 profile "redis"
+├── docker-compose.yml      # Postgres + pgvector
 ├── backend/
 │   ├── app.py              # 应用工厂：中间件、异常处理、静态文件挂载
 │   ├── api/                # HTTP 路由：chat、documents、ingest、health
@@ -192,7 +188,7 @@ RagMate/
 | 应用层 | `application/` | 用例编排：对话流程、文档 CRUD、入库生命周期 |
 | 核心层 | `core/` | RAG 领域逻辑：检索管线、系统提示词 |
 | 领域层 | `domain/` | ORM 模型、Pydantic schema、`AppError` 体系 |
-| 基础设施层 | `infrastructure/` | 外部系统：PostgreSQL + pgvector、可选 Redis、模型、配置 |
+| 基础设施层 | `infrastructure/` | 外部系统：PostgreSQL + pgvector、模型、配置 |
 
 ```mermaid
 flowchart LR
@@ -230,7 +226,7 @@ flowchart LR
 | POST | `/ingest/cancel` | 请求持锁 worker 停止入库 |
 | GET | `/ingest/status` | 查询入库状态与进度（进程重启后仍然可读） |
 | GET | `/health` | 存活探针 |
-| GET | `/ready` | 就绪探针（PostgreSQL、pgvector；仅当设置了 `REDIS_URL` 时才检查 Redis） |
+| GET | `/ready` | 就绪探针（PostgreSQL、pgvector） |
 
 ### 对话请求体
 
@@ -373,7 +369,7 @@ pytest -v
 
 ## 数据、备份与安全
 
-Docker 数据卷写入 `volumes/`，包含 PostgreSQL 的数据（向量表也在里面；若启用了 Redis profile，还有 Redis）。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。`volumes/etcd`、`volumes/minio`、`volumes/milvus` 是旧栈留下的，不再使用。
+Docker 数据卷写入 `volumes/`，包含 PostgreSQL 的数据（向量表也在里面）。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。`volumes/etcd`、`volumes/minio`、`volumes/milvus` 是旧栈留下的，不再使用。
 
 如果要从 localhost 暴露到外部网络：
 

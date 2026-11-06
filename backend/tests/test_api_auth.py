@@ -13,10 +13,8 @@ from backend.infrastructure.config import settings
 
 @pytest.fixture
 def client():
-    """与 test_api_smoke 相同的 mock 基础设施，避免依赖真实 DB/Redis。"""
+    """与 test_api_smoke 相同的 mock 基础设施，避免依赖真实 DB。"""
     with patch("backend.app.init_db", new_callable=AsyncMock), patch(
-        "backend.infrastructure.redis_client.get_redis", new_callable=AsyncMock
-    ) as mock_redis, patch(
         "backend.infrastructure.database.async_session"
     ) as mock_session, patch(
         "backend.infrastructure.vector_store.check_vector_store_available", return_value=True
@@ -27,10 +25,6 @@ def client():
     ), patch(
         "backend.application.chat._persist_messages", new=AsyncMock()
     ):
-        redis_instance = AsyncMock()
-        redis_instance.exists = AsyncMock(return_value=False)
-        mock_redis.return_value = redis_instance
-
         session_instance = MagicMock()
         session_instance.__enter__ = MagicMock(return_value=session_instance)
         session_instance.__exit__ = MagicMock(return_value=None)

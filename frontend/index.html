@@ -100,14 +100,6 @@
   .scroll { flex: 1; overflow-y: auto; }
   .scroll-inner { max-width: 760px; margin: 0 auto; padding: 28px 20px 40px; }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
-  .chip {
-    border: 1px solid var(--line-strong); background: var(--bg-elev);
-    color: var(--ink-soft); border-radius: 999px; padding: 7px 14px;
-    font-size: 14px; cursor: pointer; text-align: left;
-  }
-  .chip:hover { border-color: var(--accent); color: var(--accent); }
-
   .msg { margin-bottom: 22px; }
   .msg-user { display: flex; justify-content: flex-end; }
   .bubble-user {
@@ -268,13 +260,8 @@
     <div class="view" id="view-chat">
       <div class="scroll" id="scroll">
         <div class="scroll-inner">
-          <div class="chips" id="chips">
-            <button type="button" class="chip" data-q="一个查询里有三个排序节点、work_mem 保持默认 4MB 时，最多能用多少内存？64MB 配 100 个并发连接时理论峰值是多少？" data-i18n="chip1">work_mem 能用多少内存？</button>
-            <button type="button" class="chip" data-q="RagMate 本地开发环境的 Docker Compose 编排文件在仓库的什么位置？用什么命令启动整套基础设施？" data-i18n="chip2">Compose 文件在哪，怎么启动？</button>
-            <button type="button" class="chip" data-q="web 服务的启动命令是什么？接口文档在哪个地址打开？" data-i18n="chip3">web 服务怎么启动，文档在哪？</button>
-          </div>
           <div id="thread">
-            <p class="hint" id="empty-hint" data-i18n="emptyHint">还没有提问。点上面一道试试，或直接在下面输入。</p>
+            <p class="hint" id="empty-hint" data-i18n="emptyHint">还没有提问。直接在下面输入问题。</p>
           </div>
         </div>
       </div>

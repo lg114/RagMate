@@ -16,9 +16,7 @@ const I18N = {
 zh: {
 navChat: "对话", navDocuments: "文档", navSettings: "设置",
 newChat: "新对话", history: "历史对话", historyEmpty: "暂无历史对话",
-emptyHint: "还没有提问。点上面一道试试，或直接在下面输入。",
-chip1: "work_mem 能用多少内存？", chip2: "Compose 文件在哪，怎么启动？",
-chip3: "web 服务怎么启动，文档在哪？",
+emptyHint: "还没有提问。直接在下面输入。",
 placeholder: "基于已入库的文档提问", send: "发送", stop: "停止",
 docsTitle: "已入库的文档", docsEmpty: "还没有入库的文档，先上传一份。",
 dropzone: "拖入文件或点这里上传新文档",
@@ -50,9 +48,7 @@ docIngested: "已入库", docUploaded: "待入库", docIngesting: "入库中", d
 en: {
 navChat: "Chat", navDocuments: "Documents", navSettings: "Settings",
 newChat: "New chat", history: "History", historyEmpty: "No conversations yet",
-emptyHint: "No questions yet. Try one above, or type below.",
-chip1: "How much memory can work_mem use?", chip2: "Where is the Compose file, and how do I start it?",
-chip3: "How do I start the web service, and where are the docs?",
+emptyHint: "No questions yet. Type below to ask.",
 placeholder: "Ask about your indexed documents", send: "Send", stop: "Stop",
 docsTitle: "Documents", docsEmpty: "No documents yet — upload one to begin.",
 dropzone: "Drop files here or click to upload",
@@ -671,10 +667,6 @@ if (name === "settings") loadReady();
 function closeSidebar() { $("sidebar").classList.remove("open");}
 
 /* ---- 接线 ---- */
-$("chips").addEventListener("click", (e) => {
-const chip = e.target.closest(".chip");
-if (chip &&!streaming) ask(chip.dataset.q);
-});
 sendBtn.addEventListener("click", () => {
 if (streaming) { aborter?.abort(); return;}
 ask();

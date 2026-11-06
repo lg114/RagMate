@@ -46,7 +46,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, TXT, and Markdown
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (off by default; when enabled, checked only when retrieval confidence is low) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
 - **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 130-question sample with deterministic BM25. Deterministic retrieval metrics are the CI gate; there is no LLM-judge scoring.
-- **Self-hosted by design** — one Postgres with pgvector holds documents, chat, and vectors. Redis is optional and only used for shared rate limits.
+- **Self-hosted by design** — one Postgres with pgvector holds documents, chat, and vectors.
 
 ---
 
@@ -57,7 +57,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, TXT, and Markdown
 - Python 3.12+
 - Docker Desktop, or Docker Engine with Compose v2
 - An OpenAI-compatible LLM endpoint and API key
-- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose runs Postgres with pgvector; it does not serve these models. Redis is not started unless you opt in.
+- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose runs Postgres with pgvector; it does not serve these models.
 - Local FlagEmbedding is optional. That path needs about 8 GB of RAM for CPU inference, and a GPU helps on larger collections.
 
 ### 1. Start the infrastructure
@@ -69,13 +69,9 @@ docker compose up -d
 docker compose ps
 ```
 
-The stack exposes PostgreSQL (`5432`) with the pgvector extension. Redis is not part of this default path. The application itself runs on your host during development. On first start the API runs `CREATE EXTENSION vector` and creates the chunk table.
+The stack exposes PostgreSQL (`5432`) with the pgvector extension. The application itself runs on your host during development. On first start the API runs `CREATE EXTENSION vector` and creates the chunk table.
 
-Ingest status, the lock, cancel, and failure reasons live in PostgreSQL. Chat history does too. Leave `REDIS_URL` empty. Rate limits then use an in-process counter, which is enough for one uvicorn process. To share that counter across workers, set `REDIS_URL=redis://localhost:6379/0` and start the optional service:
-
-```bash
-docker compose --profile redis up -d
-```
+Ingest status, the lock, cancel, and failure reasons live in PostgreSQL. Chat history does too. Rate limits use an in-process counter, which is enough for one uvicorn process.
 
 To stop services without deleting data:
 
@@ -132,7 +128,7 @@ RERANKER_PROVIDER=api
 RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 ```
 
-The default database URL matches the Docker Compose stack. Vectors live in that same database (`VECTOR_TABLE`, default `ragmate_docs`). `REDIS_URL` is empty unless you opted into the Redis profile. See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
+The default database URL matches the Docker Compose stack. Vectors live in that same database (`VECTOR_TABLE`, default `ragmate_docs`). See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
 
 ### 4. Run RagMate
 
@@ -166,15 +162,15 @@ Supported formats: `.pdf`, `.docx`, `.txt`, `.md`. Uploads are limited to 50 MB 
 
 ```
 RagMate/
-├── docker-compose.yml      # Postgres + pgvector; Redis is profile "redis"
+├── docker-compose.yml      # Postgres + pgvector
 ├── backend/
 │   ├── app.py              # App factory: middleware, exception handlers, static mount
 │   ├── api/                # HTTP routes: chat, documents, ingest, health
 │   ├── application/        # Use-case orchestration
 │   │   └── ingest/         # pipeline (load → chunk → dedupe → encode), loaders, db_sync
-│   ├── core/               # RAG core: retriever, prompts/researcher.md
+│   ├── core/               # RAG core: retriever, prompts
 │   ├── domain/             # ORM models, Pydantic schemas, error types
-│   ├── infrastructure/     # config, database, pgvector, optional redis, encoding, model_factory
+│   ├── infrastructure/     # config, database, pgvector, encoding, model_factory
 │   ├── eval/               # retrieval-gate and deterministic retrieval evaluation
 │   └── tests/
 └── frontend/               # Zero-build UI (single-view app: sidebar nav across chat / documents / settings), served by FastAPI at /
@@ -192,7 +188,7 @@ The backend is strictly layered — each layer only calls downward:
 | Application | `application/` | Use-case orchestration: chat flow, document CRUD, ingestion lifecycle |
 | Core | `core/` | RAG domain logic: retrieval pipeline, system prompts |
 | Domain | `domain/` | ORM models, Pydantic schemas, `AppError` hierarchy |
-| Infrastructure | `infrastructure/` | External systems: PostgreSQL + pgvector, optional Redis, models, config |
+| Infrastructure | `infrastructure/` | External systems: PostgreSQL + pgvector, models, config |
 
 ```mermaid
 flowchart LR
@@ -230,7 +226,7 @@ Simple greetings and other non-RAG messages are routed straight to the LLM, skip
 | POST | `/ingest/cancel` | Ask the worker that holds the ingest lock to stop |
 | GET | `/ingest/status` | Current ingestion status and progress (survives restarts) |
 | GET | `/health` | Liveness probe |
-| GET | `/ready` | Readiness probe for PostgreSQL and pgvector. Redis is checked only when `REDIS_URL` is set |
+| GET | `/ready` | Readiness probe for PostgreSQL and pgvector |
 
 ### Chat request body
 
@@ -373,14 +369,14 @@ Every blocking call — model inference, vector I/O, ingestion — is pushed to 
 
 ## Data, backup, and security
 
-Docker volumes are written to `volumes/` and hold PostgreSQL data, including the pgvector table (plus Redis if that profile is running). For a consistent backup, stop the stack, copy the directory, then restart it. `volumes/etcd`, `volumes/minio`, and `volumes/milvus` are leftovers from the old stack and are not used.
+Docker volumes are written to `volumes/` and hold PostgreSQL data, including the pgvector table. For a consistent backup, stop the stack, copy the directory, then restart it. `volumes/etcd`, `volumes/minio`, and `volumes/milvus` are leftovers from the old stack and are not used.
 
 Before exposing the service beyond localhost:
 
 - Set `CORS_ORIGINS` to your real origin.
 - Replace the default infrastructure credentials in `docker-compose.yml`.
 - Put an authentication layer in front of the API.
-- Review upload and rate-limit settings — currently 30 requests per IP per minute on chat, upload, delete, and ingest. Without `REDIS_URL` that counter is per process.
+- Review upload and rate-limit settings — currently 30 requests per IP per minute on chat, upload, delete, and ingest.
 
 RagMate validates requests — filename allowlist, magic-byte checks, path-traversal rejection, parameterized vector filters, and a 50 MB upload cap — but it is not a complete internet-facing security boundary on its own.
 
