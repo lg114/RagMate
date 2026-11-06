@@ -1,4 +1,5 @@
 """title_path 切块：路径拼装、前缀剥离、_split_markdown_section 行为。"""
+import pytest
 from langchain_core.documents import Document
 
 from backend.application.ingest.pipeline import (
@@ -57,6 +58,5 @@ def test_split_markdown_section_rejects_unknown_strategy(monkeypatch):
     monkeypatch.setattr(settings, "CHUNKING_STRATEGY", "unknown_strategy")
     section = Document(page_content="内容", metadata={"source": "demo.md"})
 
-    import pytest
     with pytest.raises(ValueError, match="Unknown CHUNKING_STRATEGY"):
         _split_markdown_section(section, ".md")
