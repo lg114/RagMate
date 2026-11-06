@@ -5,28 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="RagMate: ask questions over your own documents, with cited answers.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <title>RagMate</title>
 <style>
   :root {
-    --bg: #ffffff; --bg-elev: #ffffff; --bg-nav: #fafafa; --bg-sunken: #f5f5f4;
-    --ink: #111111; --ink-soft: #404040; --muted: #8a8a8a;
-    --line: #e8e8e8; --line-strong: #d4d4d4;
-    --accent: #111111; --accent-ink: #ffffff; --accent-soft: #f5f5f4;
-    --ok: #404040; --ok-soft: #f5f5f4;
+    --bg: #171717; --bg-elev: #1e1e1e; --bg-nav: #0f0f0f; --bg-sunken: #262626;
+    --ink: #ececec; --ink-soft: #a0a0a0; --muted: #6b6b6b;
+    --line: #2a2a2a; --line-strong: #3a3a3a;
+    --accent: #f0f0f0; --accent-ink: #0f0f0f; --accent-soft: #2a2a2a;
+    --ok: #a0a0a0; --ok-soft: #262626;
     --shadow: none;
     --font: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
     --radius: 12px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #101010; --bg-elev: #171717; --bg-nav: #141414; --bg-sunken: #262626;
-      --ink: #f5f5f5; --ink-soft: #d4d4d4; --muted: #9ca3af;
-      --line: #262626; --line-strong: #3f3f3f;
-      --accent: #f5f5f5; --accent-ink: #111111; --accent-soft: #262626;
-      --ok: #d4d4d4; --ok-soft: #262626;
-      --shadow: none;
-    }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -40,15 +31,43 @@
   .sidebar {
     width: 260px; flex: none; display: flex; flex-direction: column;
     background: var(--bg-nav); border-right: 1px solid var(--line);
+    transition: width 0.2s ease;
   }
-  .side-nav { padding: 6px 8px 0; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar.collapsed { width: 0; overflow: hidden; border-right: 0; }
+  .sidebar-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 10px;
+  }
+  .sidebar-logo { flex: none; }
+  .sidebar-brand {
+    flex: 1; font-weight: 700; font-size: 15px; color: var(--ink);
+    white-space: nowrap; overflow: hidden;
+  }
+  .sidebar-collapse {
+    flex: none; border: 0; background: none; color: var(--ink-soft);
+    cursor: pointer; padding: 4px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sidebar-collapse:hover { background: var(--bg-sunken); color: var(--ink); }
+  .side-actions { padding: 10px 12px 6px; }
+  .side-actions .side-new {
+    width: 100%; padding: 9px 14px; text-align: left;
+    background: var(--bg-elev); color: var(--ink);
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    font-weight: 600; font-size: 14px; cursor: pointer;
+  }
+  .side-actions .side-new:hover { border-color: var(--accent); }
+  .side-nav { padding: 4px 8px 0; display: flex; flex-direction: column; gap: 2px; }
   .side-nav button {
     border: 0; background: none; color: var(--ink-soft); cursor: pointer;
-    padding: 9px 12px; border-radius: 8px; font-size: 14px; text-align: left;
+    padding: 8px 12px; border-radius: 8px; font-size: 14px; text-align: left;
+    display: flex; align-items: center; gap: 10px;
   }
+  .nav-icon { flex: none; opacity: 0.7; }
   .side-nav button:hover { background: var(--bg-sunken); }
   .side-nav button.is-active { background: var(--bg-sunken); color: var(--ink); font-weight: 600; }
   .history-block[hidden] { display: none; }
+  .history-block { padding: 0 8px; }
   .side-new {
     margin: 10px 12px 6px; padding: 9px 14px; text-align: left;
     background: var(--bg-elev); color: var(--ink);
@@ -57,45 +76,80 @@
   }
   .side-new:hover { border-color: var(--accent); }
   .side-label {
-    padding: 10px 20px 6px; font-size: 12.5px; font-weight: 600; color: var(--muted);
+    padding: 10px 12px 6px; font-size: 14px; font-weight: 600; color: var(--muted);
+    cursor: pointer; user-select: none;
+    display: flex; align-items: center; justify-content: space-between;
   }
+  .side-label:hover { color: var(--ink-soft); }
+  .toggle-icon { transition: transform 0.2s; flex: none; transform: rotate(90deg); }
+  .side-label.collapsed .toggle-icon { transform: rotate(0deg); }
+  .pinned-block { padding: 0 8px; }
+  .pinned-block[hidden] { display: none; }
+  .pinned-toggle {
+    padding: 6px 12px 6px 12px; font-size: 13px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .pinned-toggle .toggle-icon { transform: rotate(90deg); }
+  .pinned-toggle.collapsed .toggle-icon { transform: rotate(0deg); }
+  .pinned-content {
+    overflow: hidden; transition: max-height 0.2s ease;
+  }
+  .pinned-content.collapsed { max-height: 0 !important; }
+  .history-content { overflow: hidden; transition: max-height 0.2s ease; }
+  .history-content.collapsed { max-height: 0 !important; }
   .history-list { list-style: none; margin: 0; padding: 0 8px; overflow-y: auto; flex: 1; }
   .history-list li {
+    position: relative;
     display: flex; align-items: center; gap: 6px;
-    padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px;
+    padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 14px;
   }
   .history-list li:hover { background: var(--bg-sunken); }
   .history-list li.is-active { background: var(--bg-sunken); font-weight: 600; }
   .history-list .h-title {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
   }
-  .history-list .h-del {
+  .pin-icon { flex: none; color: var(--muted); }
+  .history-list .h-more {
     flex: none; border: 0; background: none; color: var(--muted);
-    font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 4px; visibility: hidden;
+    cursor: pointer; padding: 4px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    visibility: hidden;
   }
-  .history-list li:hover .h-del { visibility: visible; }
-  .history-list .h-del:hover { color: var(--ink); }
-  .history-empty { padding: 4px 20px; color: var(--muted); font-size: 13.5px; }
+  .history-list li:hover .h-more { visibility: visible; }
+  .history-list .h-more:hover { background: var(--bg-sunken); color: var(--ink); }
+  .h-menu {
+    position: fixed; z-index: 100;
+    background: #2a2a2a; border: 1px solid #3a3a3a;
+    border-radius: 8px; padding: 4px; min-width: 180px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    display: none;
+  }
+  .h-menu.show { display: block; }
+  .h-menu-item {
+    width: 100%; border: 0; background: none; color: #d4d4d4;
+    padding: 8px 12px; border-radius: 6px; font-size: 13px;
+    cursor: pointer; text-align: left;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .h-menu-item:hover { background: #3a3a3a; color: #fff; }
+  .h-menu-item.danger { color: #ef4444; }
+  .h-menu-item.danger:hover { background: #3a3a3a; color: #ef4444; }
+  .h-menu-shortcut { color: #888; font-size: 12px; }
+  .history-empty { padding: 4px 12px; color: var(--muted); font-size: 14px; }
 
   /* ---- 主栏：三视图（对话 / 文档 / 设置） ---- */
-  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+  .sidebar-expand {
+    position: absolute; top: 12px; left: 12px; z-index: 5;
+    border: 1px solid var(--line-strong); background: var(--bg-elev);
+    color: var(--ink-soft); border-radius: 8px; padding: 6px;
+    cursor: pointer; display: none; align-items: center; justify-content: center;
+  }
+  .sidebar-expand:hover { background: var(--bg-sunken); color: var(--ink); }
+  .sidebar.collapsed ~ .main .sidebar-expand { display: flex; }
   .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .view[hidden] { display: none; }
-  .topbar {
-    flex: none; display: flex; align-items: center; gap: 10px;
-    padding: 12px 20px; background: var(--bg-elev); border-bottom: 1px solid var(--line);
-  }
-  .brand-name { font-weight: 700; font-size: 17px; }
-  .icon-btn {
-    border: 0; background: none; color: var(--ink-soft); cursor: pointer;
-    font-size: 18px; line-height: 1; padding: 4px 6px; display: none;
-  }
-  .lang-btn {
-    margin-left: auto; border: 1px solid var(--line-strong); background: var(--bg);
-    color: var(--ink-soft); border-radius: 999px; padding: 4px 12px;
-    font-size: 13px; font-weight: 600; cursor: pointer;
-  }
-  .lang-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   .scroll { flex: 1; overflow-y: auto; }
   .scroll-inner { max-width: 760px; margin: 0 auto; padding: 28px 20px 40px; }
@@ -224,6 +278,37 @@
   .toast.show { opacity: 1; }
   .hint { color: var(--muted); font-size: 14px; }
 
+  /* ---- Modal 弹窗 ---- */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal {
+    background: var(--bg-elev); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); padding: 24px;
+    max-width: 400px; width: 90vw;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+  .modal-message {
+    margin: 0 0 20px; font-size: 15px; color: var(--ink); line-height: 1.5;
+  }
+  .modal-actions {
+    display: flex; gap: 10px; justify-content: flex-end;
+  }
+  .modal-btn {
+    padding: 8px 18px; border-radius: 8px; font-size: 14px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--line-strong);
+    background: var(--bg); color: var(--ink-soft);
+  }
+  .modal-btn:hover { background: var(--bg-sunken); }
+  .modal-btn-confirm {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  .modal-btn-confirm:hover { opacity: 0.9; }
+
   @media (max-width: 860px) {
     .sidebar {
       position: fixed; top: 0; bottom: 0; left: 0; z-index: 20;
@@ -237,26 +322,55 @@
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <svg class="sidebar-logo" width="22" height="22" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="100" rx="18" fill="#fff" stroke="#111" stroke-width="4"/>
+        <text x="50" y="66" font-family="system-ui, -apple-system, sans-serif" font-size="44" font-weight="700" fill="#111" text-anchor="middle" letter-spacing="-1">RM</text>
+      </svg>
+      <span class="sidebar-brand">RagMate</span>
+      <button type="button" class="sidebar-collapse" id="sidebar-collapse" aria-label="Collapse sidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+    </div>
     <nav class="side-nav" id="side-nav" aria-label="Views">
-      <button type="button" data-view="chat" class="is-active" data-i18n="navChat">对话</button>
-      <button type="button" data-view="documents" data-i18n="navDocuments">文档</button>
-      <button type="button" data-view="settings" data-i18n="navSettings">设置</button>
+      <button type="button" data-view="chat">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        New Chat
+      </button>
+      <button type="button" data-view="documents">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Documents
+      </button>
+      <button type="button" data-view="settings">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
     </nav>
+    <div class="pinned-block" id="pinned-block" hidden>
+      <div class="side-label pinned-toggle" id="pinned-toggle">
+        <span>Pinned</span>
+        <svg class="toggle-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="pinned-content" id="pinned-content">
+        <ul class="history-list" id="pinned-list"></ul>
+      </div>
+    </div>
     <div class="history-block" id="history-block">
-      <button type="button" class="side-new" id="new-chat">＋ <span data-i18n="newChat">新对话</span></button>
-      <div class="side-label" data-i18n="history">历史对话</div>
-      <ul class="history-list" id="history-list"></ul>
-      <p class="history-empty" id="history-empty" data-i18n="historyEmpty">暂无历史对话</p>
+      <div class="side-label" id="chats-toggle">
+        <span>Chats</span>
+        <svg class="toggle-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="history-content" id="history-content">
+        <ul class="history-list" id="history-list"></ul>
+        <p class="history-empty" id="history-empty">No conversations yet</p>
+      </div>
     </div>
   </aside>
 
   <div class="main">
-    <header class="topbar">
-      <button type="button" class="icon-btn" id="menu" aria-label="Menu">☰</button>
-      <span class="brand-name">RagMate</span>
-      <button type="button" class="lang-btn" id="lang-toggle">EN</button>
-    </header>
-
+    <button type="button" class="sidebar-expand" id="sidebar-expand" aria-label="Expand sidebar">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     <div class="view" id="view-chat">
       <div class="scroll" id="scroll">
         <div class="scroll-inner">
@@ -308,6 +422,15 @@
   </div>
 </div>
 <div class="toast" id="toast" role="status"></div>
+<div class="modal-overlay" id="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <p class="modal-message" id="modal-message"></p>
+    <div class="modal-actions">
+      <button type="button" class="modal-btn modal-btn-cancel" id="modal-cancel">Cancel</button>
+      <button type="button" class="modal-btn modal-btn-confirm" id="modal-confirm">Confirm</button>
+    </div>
+  </div>
+</div>
 <script src="/js/shell.js" defer></script>
 </body>
 </html>

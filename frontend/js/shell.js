@@ -94,7 +94,6 @@ function applyI18n() {
 document.documentElement.lang = LANG === "zh"? "zh-CN": "en";
 document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n);});
 document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh);});
-$("lang-toggle").textContent = LANG === "zh"? "EN": "中文";
 setSendMode(streaming? "streaming": "idle");
 }
 
@@ -116,6 +115,25 @@ toastEl.textContent = text;
 toastEl.classList.add("show");
 clearTimeout(toastTimer);
 toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3000);
+}
+function confirm(message) {
+return new Promise((resolve) => {
+  const overlay = $("modal-overlay");
+  const msgEl = $("modal-message");
+  const cancelBtn = $("modal-cancel");
+  const confirmBtn = $("modal-confirm");
+  msgEl.textContent = message;
+  overlay.hidden = false;
+  const cleanup = () => {
+    overlay.hidden = true;
+    cancelBtn.removeEventListener("click", onCancel);
+    confirmBtn.removeEventListener("click", onConfirm);
+  };
+  const onCancel = () => { cleanup(); resolve(false); };
+  const onConfirm = () => { cleanup(); resolve(true); };
+  cancelBtn.addEventListener("click", onCancel);
+  confirmBtn.addEventListener("click", onConfirm);
+});
 }
 function esc(s) {
 return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -432,36 +450,87 @@ loadSessions();
 }
 
 /* ---- 历史对话 ---- */
-function renderHistory() {
-const list = $("history-list");
-list.replaceChildren();
-$("history-empty").hidden = lastSessions.length > 0;
-const current = peekSessionId();
-lastSessions.forEach((s) => {
+const PINNED_KEY = "ragmate_pinned_sessions";
+function getPinned() {
+  try { return JSON.parse(localStorage.getItem(PINNED_KEY) || "[]"); } catch { return []; }
+}
+function setPinned(ids) {
+  try { localStorage.setItem(PINNED_KEY, JSON.stringify(ids)); } catch {}
+}
+function renderHistoryItem(s, list, pinned) {
 const li = document.createElement("li");
+const current = peekSessionId();
 if (s.session_id === current) li.classList.add("is-active");
 const title = document.createElement("span");
 title.className = "h-title";
+const isPinned = pinned.includes(s.session_id);
 title.textContent = s.first_message || s.session_id.slice(0, 8);
 title.title = s.first_message || s.session_id;
-const del = document.createElement("button");
-del.type = "button";
-del.className = "h-del";
-del.textContent = "×";
-del.setAttribute("aria-label", t("deleteSessionConfirm"));
-del.addEventListener("click", async (e) => {
-e.stopPropagation();
-if (!window.confirm(t("deleteSessionConfirm"))) return;
-try {
-await request("DELETE", `/chat/sessions/${encodeURIComponent(s.session_id)}`);
-if (peekSessionId() === s.session_id) startNewChat();
-await loadSessions();
-} catch (err) { toast(err.message);}
+const moreBtn = document.createElement("button");
+moreBtn.type = "button";
+moreBtn.className = "h-more";
+moreBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
+moreBtn.setAttribute("aria-label", "More options");
+moreBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  document.querySelectorAll(".h-menu.show").forEach((m) => m.classList.remove("show"));
+  const menu = li.querySelector(".h-menu");
+  const rect = moreBtn.getBoundingClientRect();
+  menu.style.right = (window.innerWidth - rect.right) + "px";
+  menu.style.top = (rect.bottom + 4) + "px";
+  menu.classList.add("show");
+  const onKey = (ev) => {
+    if (ev.key === "Escape") { menu.classList.remove("show"); document.removeEventListener("keydown", onKey); return; }
+    if (ev.key.toLowerCase() === "p") { menu.querySelector(".h-menu-item").click(); document.removeEventListener("keydown", onKey); }
+    if (ev.key.toLowerCase() === "r") { menu.querySelectorAll(".h-menu-item")[1].click(); document.removeEventListener("keydown", onKey); }
+    if (ev.key.toLowerCase() === "d") { menu.querySelectorAll(".h-menu-item")[2].click(); document.removeEventListener("keydown", onKey); }
+  };
+  document.addEventListener("keydown", onKey);
 });
-li.append(title, del);
+const menu = document.createElement("div");
+menu.className = "h-menu";
+const makeItem = (label, shortcut, cls, handler) => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "h-menu-item" + (cls ? " " + cls : "");
+  btn.innerHTML = `<span>${label}</span><span class="h-menu-shortcut">${shortcut}</span>`;
+  btn.addEventListener("click", (e) => { e.stopPropagation(); menu.classList.remove("show"); handler(e); });
+  return btn;
+};
+menu.appendChild(makeItem(isPinned ? "Unpin" : "Pin", "P", "", () => {
+  const pinned = getPinned();
+  if (pinned.includes(s.session_id)) {
+    setPinned(pinned.filter(id => id !== s.session_id));
+  } else {
+    setPinned([...pinned, s.session_id]);
+  }
+  renderHistory();
+}));
+menu.appendChild(makeItem("Rename", "R", "", () => {}));
+menu.appendChild(makeItem("Delete", "D", "danger", async () => {
+  if (!await confirm(t("deleteSessionConfirm"))) return;
+  try {
+    await request("DELETE", `/chat/sessions/${encodeURIComponent(s.session_id)}`);
+    if (peekSessionId() === s.session_id) startNewChat();
+    await loadSessions();
+  } catch (err) { toast(err.message);}
+}));
+li.append(title, moreBtn, menu);
 li.addEventListener("click", () => loadSession(s.session_id));
 list.appendChild(li);
-});
+}
+function renderHistory() {
+const list = $("history-list");
+const pinnedList = $("pinned-list");
+list.replaceChildren();
+pinnedList.replaceChildren();
+$("history-empty").hidden = lastSessions.length > 0;
+const pinned = getPinned();
+const pinnedSessions = lastSessions.filter(s => pinned.includes(s.session_id));
+const unpinnedSessions = lastSessions.filter(s => !pinned.includes(s.session_id));
+$("pinned-block").hidden = pinnedSessions.length === 0;
+pinnedSessions.forEach((s) => renderHistoryItem(s, pinnedList, pinned));
+unpinnedSessions.forEach((s) => renderHistoryItem(s, list, pinned));
 }
 async function loadSessions() {
 try {
@@ -526,7 +595,7 @@ del.className = "doc-del";
 del.textContent = "×";
 del.setAttribute("aria-label", t("deleteDocConfirm", { name: d.filename}));
 del.addEventListener("click", async () => {
-if (!window.confirm(t("deleteDocConfirm", { name: d.filename}))) return;
+if (!await confirm(t("deleteDocConfirm", { name: d.filename}))) return;
 try {
 await request("DELETE", `/documents/${encodeURIComponent(d.filename)}`);
 await loadDocuments();
@@ -590,7 +659,7 @@ const dropzone = $("dropzone");
 const docs = await loadDocuments();
 for (const file of files) {
 if (docs.some((d) => d.filename === file.name)) {
-if (!window.confirm(t("replaceConfirm", { name: file.name }))) continue;
+if (!await confirm(t("replaceConfirm", { name: file.name }))) continue;
 // 覆盖上传：先删后传（与旧工作台一致）
 try { await request("DELETE", `/documents/${encodeURIComponent(file.name)}`); } catch (err) { toast(err.message); continue; }
 }
@@ -678,19 +747,24 @@ input.addEventListener("input", () => {
 input.style.height = "auto";
 input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
 });
-$("menu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
 $("side-nav").addEventListener("click", (e) => {
 const btn = e.target.closest("button[data-view]");
-if (btn) setView(btn.dataset.view);
+if (!btn) return;
+if (btn.dataset.view === "chat") startNewChat();
+else setView(btn.dataset.view);
 });
-$("new-chat").addEventListener("click", startNewChat);
-$("lang-toggle").addEventListener("click", () => {
-LANG = LANG === "zh"? "en": "zh";
-try { localStorage.setItem(LANG_KEY, LANG);} catch { /* ignore */}
-applyI18n();
-renderDocs();
-renderHistory();
-loadReady();
+$("sidebar-collapse").addEventListener("click", () => $("sidebar").classList.toggle("collapsed"));
+$("sidebar-expand").addEventListener("click", () => $("sidebar").classList.remove("collapsed"));
+$("chats-toggle").addEventListener("click", () => {
+  $("chats-toggle").classList.toggle("collapsed");
+  $("history-content").classList.toggle("collapsed");
+});
+$("pinned-toggle").addEventListener("click", () => {
+  $("pinned-toggle").classList.toggle("collapsed");
+  $("pinned-content").classList.toggle("collapsed");
+});
+document.addEventListener("click", () => {
+  document.querySelectorAll(".h-menu.show").forEach((m) => m.classList.remove("show"));
 });
 const dropzone = $("dropzone");
 const fileInput = $("file-input");
