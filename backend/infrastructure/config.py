@@ -30,9 +30,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore")
 
     # LLM
-    LLM_MODEL: str = "gpt-4o"
+    # 必填：留空时 /ready 不返回模型名（前端不显示），提问会失败。
+    # 不给默认值是有意的——猜一个 "gpt-4o" 会让界面显示一个根本没在用的模型。
+    LLM_MODEL: str = ""
     LLM_API_KEY: str = ""
     LLM_API_BASE_URL: str = ""
+    # 模型部署在本地还是远程 API。留空则按 LLM_API_BASE_URL 的 host 推断
+    # （localhost / 127.0.0.1 / host.docker.internal 视为本地）。
+    # 局域网或容器内自建的 Ollama / vLLM 推断不出来时显式指定。
+    LLM_IS_LOCAL: bool | None = None
     LLM_TEMPERATURE: float = Field(default=0.01, ge=0.0, le=2.0)
     # 思考型模型（本地 Qwen3 等）默认把推理过程写进 reasoning 字段、让 content 为空，
     # 导致上层拿到空回复。设为 "none" 可关闭思考。留空则不传该参数，

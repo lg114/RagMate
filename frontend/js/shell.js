@@ -25,6 +25,13 @@ settingsTitle: "设置", tokenPlaceholder: "API 令牌（默认空，不用填�
 tokenSave: "保存", tokenNote: "令牌只保存在本浏览器，用于 API 鉴权；服务端默认不设鉴权，不用填。",
 tokenSaved: "令牌已保存（仅本浏览器）", tokenSaveFail: "浏览器不允许保存",
 readinessTitle: "服务状态", readyOk: "就绪", readyBad: "异常", readyUnknown: "未连接",
+modelLabel: "模型", deployLabel: "部署", modelMissing: "未配置",
+deployLocal: "本地 · 文档不出本机", deployRemote: "远程 API · 检索片段会发给服务商",
+llmCheck: "模型服务",
+llmNotConfigured: "没有配置模型（LLM_MODEL 为空）",
+llmUnreachable: "连不上模型端点，确认服务已启动",
+llmHttpError: "模型端点返回错误，检查 API Key 与地址",
+llmModelMissing: "端点在线，但该模型没有拉取或不存在",
 sourceTitle: "来源", retrievalTitle: "检索详情",
 retrievalSummary: "{candidates} 个候选，{returned} 个留下",
 retrievalMeta: "最高分 {top} · 阈值 {threshold}",
@@ -57,6 +64,13 @@ settingsTitle: "Settings", tokenPlaceholder: "API token (optional, empty by defa
 tokenSave: "Save", tokenNote: "The token is stored only in this browser, for API auth. The server sets no auth by default — leave it empty.",
 tokenSaved: "Token saved (this browser only)", tokenSaveFail: "Browser refused to save",
 readinessTitle: "Service status", readyOk: "Ready", readyBad: "Unavailable", readyUnknown: "Not connected",
+modelLabel: "Model", deployLabel: "Deployment", modelMissing: "Not configured",
+deployLocal: "Local · documents stay on this machine", deployRemote: "Remote API · retrieved passages are sent to the provider",
+llmCheck: "Model service",
+llmNotConfigured: "No model configured (LLM_MODEL is empty)",
+llmUnreachable: "Model endpoint unreachable — is the service running?",
+llmHttpError: "Model endpoint returned an error — check the API key and base URL",
+llmModelMissing: "Endpoint is up, but the model is not available there",
 sourceTitle: "Sources", retrievalTitle: "Retrieval details",
 retrievalSummary: "{candidates} candidates, {returned} kept",
 retrievalMeta: "Top score {top} · threshold {threshold}",
@@ -227,6 +241,7 @@ b.textContent = text;
 div.appendChild(b);
 thread.appendChild(div);
 scrollToBottom();
+syncEmptyState();
 }
 function renderSources(cites, anchor) {
 const box = document.createElement("div");
@@ -350,13 +365,21 @@ body.appendChild(status);
 thread.appendChild(wrap);
 return wrap;
 }
+const ICON_SEND = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`;
+const ICON_STOP = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>`;
+/* 圆钮是图标按钮，没有可见文字，所以 i18n 落在 aria-label / title 上。
+   空闲态下输入框为空就置灰——没有内容可发，不该让按钮看起来可点。 */
 function setSendMode(mode) {
 if (mode === "streaming") {
-sendBtn.textContent = t("stop");
+sendBtn.innerHTML = ICON_STOP;
 sendBtn.disabled = false;
+sendBtn.setAttribute("aria-label", t("stop"));
+sendBtn.title = t("stop");
 } else {
-sendBtn.textContent = t("send");
-sendBtn.disabled = false;
+sendBtn.innerHTML = ICON_SEND;
+sendBtn.disabled = !input.value.trim();
+sendBtn.setAttribute("aria-label", t("send"));
+sendBtn.title = t("send");
 }
 }
 async function ask(question) {
@@ -553,6 +576,7 @@ if (m.role === "user") addUserMsg(m.content || "");
 else renderAssistant(m.content || "", null);
 });
 if (!data.messages ||!data.messages.length) showEmptyHint();
+syncEmptyState();
 setView("chat");
 renderHistory();
 closeSidebar();
@@ -566,6 +590,13 @@ p.className = "hint";
 p.id = "empty-hint";
 p.textContent = t("emptyHint");
 thread.appendChild(p);
+syncEmptyState();
+}
+/* 空态判定：线程里还挂着 #empty-hint 就说明一句都没问过。
+   空态时给 #view-chat 加 is-empty，hero 与输入框收成垂直居中的一整块；
+   一旦有消息，is-empty 摘掉，输入框回到常规的底部位置。 */
+function syncEmptyState() {
+$("view-chat").classList.toggle("is-empty", !!$("empty-hint"));
 }
 function startNewChat() {
 try { sessionStorage.removeItem(SESSION_KEY);} catch { /* ignore */}
@@ -684,12 +715,37 @@ await loadDocuments();
 }
 
 /* ---- 设置：令牌与服务状态 ---- */
+/* 后端 llm_detail 是原因码，映射到 i18n 键；未知码不显示提示，免得露出原始字符串。 */
+const LLM_HINTS = {
+not_configured: "llmNotConfigured",
+unreachable: "llmUnreachable",
+http_error: "llmHttpError",
+model_missing: "llmModelMissing",
+};
+function addReadyRow(list, label, value, cls, hint) {
+const li = document.createElement("li");
+const n = document.createElement("span");
+n.textContent = label;
+const v = document.createElement("span");
+v.className = cls;
+v.textContent = value;
+if (hint) { li.title = hint; v.title = hint; }
+li.append(n, v);
+list.appendChild(li);
+}
 async function loadReady() {
 const list = $("ready-list");
 try {
 const res = await fetch("/ready", { headers: authHeaders()});
 const data = await res.json().catch(() => ({}));
 lastReady = data;
+/* 模型名没配置就整块隐藏——宁可空着，也不显示一个没在用的模型。 */
+const chip = $("model-chip");
+if (data.model) {
+chip.textContent = data.model;
+chip.title = data.model;
+chip.hidden = false;
+}
 const checks = data.checks || {};
 list.replaceChildren();
 const title = document.createElement("li");
@@ -701,15 +757,19 @@ tv.textContent = res.ok && data.status === "ready"? t("readyOk"): t("readyBad");
 title.append(tn, tv);
 list.appendChild(title);
 Object.entries(checks).forEach(([name, ok]) => {
-const li = document.createElement("li");
-const n = document.createElement("span");
-n.textContent = name;
-const v = document.createElement("span");
-v.className = ok? "ok": "bad";
-v.textContent = ok? t("readyOk"): t("readyBad");
-li.append(n, v);
-list.appendChild(li);
+const label = name === "llm"? t("llmCheck"): name;
+const hintKey = name === "llm" && !ok? LLM_HINTS[data.llm_detail]: null;
+addReadyRow(list, label, ok? t("readyOk"): t("readyBad"), ok? "ok": "bad", hintKey? t(hintKey): "");
 });
+/* 模型名与部署位置放在服务状态里，而不是塞进输入框的 chip——
+   输入框保持安静，需要判断"数据会不会出本机"时到这里看。 */
+if (data.model) {
+addReadyRow(list, t("modelLabel"), data.model, "ok");
+const local = data.model_source === "local";
+addReadyRow(list, t("deployLabel"), local? t("deployLocal"): t("deployRemote"), "ok");
+} else {
+addReadyRow(list, t("modelLabel"), t("modelMissing"), "bad");
+}
 } catch {
 lastReady = null;
 list.replaceChildren();
@@ -760,6 +820,7 @@ if (e.key === "Enter" &&!e.shiftKey) { e.preventDefault(); if (!streaming) ask()
 input.addEventListener("input", () => {
 input.style.height = "auto";
 input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+if (!streaming) sendBtn.disabled = !input.value.trim();
 });
 $("side-nav").addEventListener("click", (e) => {
 const btn = e.target.closest("button[data-view]");
@@ -809,6 +870,7 @@ toast(t("tokenSaveFail"));
 
 /* ---- 启动 ---- */
 applyI18n();
+syncEmptyState();
 loadReady();
 loadDocuments();
 loadSessions();
