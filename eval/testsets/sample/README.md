@@ -8,10 +8,10 @@
 
 | 文件 | 说明 |
 |---|---|
-| `testset.json` | 98 道问答，v1.1 标注：`user_input` / `reference` / `gold_chunks` / `expected_claims` / `question_type` / `source_doc` |
+| `testset.json` | 130 道问答，v1.1 标注：`user_input` / `reference` / `gold_chunks` / `expected_claims` / `question_type` / `source_doc` |
 | `corpus/*.md` | 8 篇中文技术文档，约 24,000 字：Docker Compose、PostgreSQL 索引、Redis 缓存、Python asyncio、HTTP 缓存与 CDN、JWT/OAuth、Linux 进程与信号、Git 内部原理 |
 
-### 题型分布（98 题）
+### 题型分布（130 题）
 
 | 题型 | 数量 | 作用 |
 |---|---|---|
@@ -50,6 +50,6 @@ ragmate-eval retrieval --testset eval/testsets/sample/testset.json --repeat 3
 
 ## 局限
 
-- 98 题仍偏小，结论只适用于回归与配置间比较，不外推为普遍效果；
+- 130 题仍偏小，结论只适用于回归与配置间比较，不外推为普遍效果；
 - 语料仍是人工干净技术文，难度低于真实杂乱文档；paraphrase/ambiguous/
   multi-hop 用来在**同一语料**上拉开检索差距，不是模拟脏数据。

@@ -206,7 +206,7 @@ def test_local_model_deps_live_in_local_extra():
 
     main = names(project["dependencies"])
     local = names(project["optional-dependencies"]["local"])
-    heavy = {"torch", "sentence-transformers", "FlagEmbedding", "langchain-huggingface"}
+    heavy = {"torch", "sentence-transformers", "FlagEmbedding"}
     assert heavy <= local
     assert heavy.isdisjoint(main)
 
@@ -219,7 +219,6 @@ def test_local_paths_point_at_local_extra_when_packages_missing(monkeypatch, ove
 
     import backend.core.retriever as retriever_module
     from backend.infrastructure.encoding import get_bge_m3
-    from backend.infrastructure.model_factory import get_embeddings
 
     real_import = builtins.__import__
 
@@ -231,15 +230,12 @@ def test_local_paths_point_at_local_extra_when_packages_missing(monkeypatch, ove
     monkeypatch.setattr(builtins, "__import__", blocked_import)
     monkeypatch.setattr(retriever_module, "_reranker", None)
     get_bge_m3.cache_clear()
-    get_embeddings.cache_clear()
     override_settings(EMBEDDING_PROVIDER="huggingface")
 
     with pytest.raises(ImportError, match=r"\[local\]"):
         get_bge_m3()
     with pytest.raises(ImportError, match=r"\[local\]"):
         retriever_module.get_reranker()
-    with pytest.raises(ImportError, match=r"\[local\]"):
-        get_embeddings()
 
 def _http_error_429(retry_after=None):
     from email.message import Message

@@ -38,7 +38,6 @@ local = [
     "torch>=2.0.0,<3.0.0",
     "sentence-transformers>=2.2.0",
     "FlagEmbedding>=0.1.0",
-    "langchain-huggingface>=1.0.0,<2.0.0",
 ]
 test = [
     "pytest>=8.0",
@@ -69,6 +68,3 @@ packages = [
 
 [tool.setuptools.package-dir]
 backend = "."
-
-[tool.setuptools.package-data]
-backend = ["core/prompts/*.md"]

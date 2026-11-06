@@ -160,9 +160,9 @@ def _split_markdown_section(section, ext: str) -> list:
         return small_chunks
 
     if strategy != "parent_child":
-        logger.warning(
-            "Unknown CHUNKING_STRATEGY=%r, falling back to parent_child",
-            settings.CHUNKING_STRATEGY,
+        raise ValueError(
+            f"Unknown CHUNKING_STRATEGY={settings.CHUNKING_STRATEGY!r}. "
+            f"Must be 'title_path' or 'parent_child'."
         )
     small_chunks = splitter.split_documents([section])
     parent_text = _reconstruct_with_headers(section)

@@ -104,8 +104,6 @@ class Settings(BaseSettings):
 
     # Query processing
     QUERY_CONTEXTUALIZE: bool = False  # 追问改写：先用原问题检索，置信度低时才用 LLM 改写为自包含 query 再检一次；false 则从不改写
-    # 冻结为关。多查询扩展不是默认；打开前先重跑 ragmate-eval retrieval 并更新门槛。
-    QUERY_ROUTING_ENABLED: bool = False  # 简单查询跳过检索，直接回复寒暄
 
 
     # 超时

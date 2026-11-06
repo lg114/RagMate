@@ -45,7 +45,7 @@ RagMate 是一个自托管 RAG 应用，可将 PDF、DOCX、TXT 和 Markdown 文
 - **接地对话** — 一次检索、一次回答，再附引用。没有留下片段就直接拒答，不调用回答模型。
 - **回答质量信号** — 每次 RAG 回答都带检索置信度（`high` / `medium` / `low`）和真实引用；置信度低时拒答或明确保留；忠实度校验默认关闭（开启后只在检索置信度低时校验），标记缺乏依据的声明。
 - **增量入库** — 基于 mtime 的变更检测、content-hash 去重，以及"先插新向量再删旧向量"的崩溃安全策略。
-- **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 98 题样本。确定性检索指标是 CI 门禁，没有 LLM judge 打分。
+- **检索回归门禁** — `ragmate-eval retrieval-gate` 用确定性 BM25 重放 130 题样本。确定性检索指标是 CI 门禁，没有 LLM judge 打分。
 - **自托管设计** — 一套带 pgvector 的 Postgres 存放文档、会话和向量。Redis 可选，只用于多进程共享限流。
 
 ---
@@ -311,7 +311,7 @@ data: {"error": "..."}                               // 终止性错误
 
 `CHUNKING_STRATEGY=parent_child` 只是环境变量，和基线一起冻结。折叠区里的过滤与压缩常量是写死在代码里的字面值。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要再加切块策略。
 
-那份 98 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
+那份 130 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
 
 `FAITHFULNESS_CHECK` 保持 `false`（默认关闭；开启后只在检索置信度低时校验）。
 

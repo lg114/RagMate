@@ -37,11 +37,8 @@ from backend.application.chat_history import (
     _trim_history,
 )
 from backend.application.chat_llm import (
-    _direct_llm_reply,
     _invoke_answer,
-    _is_simple_query,
     _iter_answer_tokens,
-    extract_text,
 )
 from backend.application.chat_retrieval import (
     _generation_messages,
@@ -59,7 +56,6 @@ __all__ = [
     "normalize_citations",
     "note_unsupported_claims",
     "public_citations",
-    "extract_text",
     "_ERROR_SENTINEL",
     "_classify_error",
     "_error_from_exception",
@@ -71,9 +67,7 @@ __all__ = [
     "_persist_messages",
     "_strip_last_turn",
     "_trim_history",
-    "_direct_llm_reply",
     "_invoke_answer",
-    "_is_simple_query",
     "_iter_answer_tokens",
     "_generation_messages",
     "_refusal_from_bundle",
@@ -246,31 +240,6 @@ async def chat(message: str, session_id: str | None = None, replace_last: bool =
     # 3. 追加用户消息
     history.append({"role": "user", "content": message})
 
-    # 3.5 查询路由：简单查询直接回复
-    from backend.infrastructure.config import settings
-    if settings.QUERY_ROUTING_ENABLED and _is_simple_query(message):
-        t0 = time.monotonic()
-        try:
-            response_text = await asyncio.to_thread(_direct_llm_reply, history)
-            response_text = normalize_citations(response_text)
-        except Exception as e:
-            response_text = _classify_error(e)
-        elapsed = time.monotonic() - t0
-
-        is_error = _is_error_response(response_text)
-        if is_error:
-            logger.warning(f"chat route error: session={session_id[:8]} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
-        else:
-            history.append({"role": "assistant", "content": response_text})
-            logger.info(f"chat route ok: session={session_id[:8]} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
-        await save_session(session_id, history)
-
-        msgs = [("user", message)]
-        if not is_error:
-            msgs.append(("assistant", response_text))
-        await _persist_messages(session_id, msgs)
-        return {"response": _strip_error_sentinel(response_text), "session_id": session_id}
-
     # 4. 默认链路：一次检索、一次生成、再接地。
     return await _chat_single(message, session_id, history, debug)
 
@@ -292,32 +261,6 @@ async def chat_stream(message: str, session_id: str | None = None, replace_last:
 
     history = _trim_history(history)
     history.append({"role": "user", "content": message})
-
-    # 查询路由：简单查询直接回复
-    from backend.infrastructure.config import settings
-    if settings.QUERY_ROUTING_ENABLED and _is_simple_query(message):
-        t0 = time.monotonic()
-        try:
-            response_text = await asyncio.to_thread(_direct_llm_reply, history)
-            response_text = normalize_citations(response_text)
-        except Exception as e:
-            response_text = _classify_error(e)
-        elapsed = time.monotonic() - t0
-
-        is_error = _is_error_response(response_text)
-        if is_error:
-            logger.warning(f"chat_stream route error: session={session_id[:8]} elapsed={elapsed:.1f}s err={_strip_error_sentinel(response_text)}")
-            await save_session(session_id, history)
-            yield {"error": _strip_error_sentinel(response_text)}
-            return
-
-        history.append({"role": "assistant", "content": response_text})
-        logger.info(f"chat_stream route ok: session={session_id[:8]} resp_len={len(response_text)} elapsed={elapsed:.1f}s")
-        await save_session(session_id, history)
-        await _persist_messages(session_id, [("user", message), ("assistant", response_text)])
-        yield {"token": response_text}
-        yield {"done": True, "session_id": session_id}
-        return
 
     # 默认流式链路。
     async for event in _chat_stream_single(message, session_id, history, debug, t0):

@@ -26,8 +26,6 @@ def client():
         "backend.application.chat.save_session", new=AsyncMock()
     ), patch(
         "backend.application.chat._persist_messages", new=AsyncMock()
-    ), patch(
-        "backend.application.chat._direct_llm_reply", return_value="ok"
     ):
         redis_instance = AsyncMock()
         redis_instance.exists = AsyncMock(return_value=False)

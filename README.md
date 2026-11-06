@@ -45,7 +45,7 @@ RagMate is a self-hosted RAG application that turns PDF, DOCX, TXT, and Markdown
 - **Grounded chat** — one retrieval, one answer, then citations. Nothing kept means a hard refusal and no answer-model call.
 - **Answer quality signals** — retrieval confidence (`high` / `medium` / `low`) on every RAG answer, citations taken from the chunks that were actually retrieved, a refusal or hedge when confidence is low, and faithfulness verification (off by default; when enabled, checked only when retrieval confidence is low) that flags unsupported claims.
 - **Incremental ingestion** — mtime-based change detection, content-hash deduplication, and crash-safe "insert new vectors before deleting old ones".
-- **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 98-question sample with deterministic BM25. Deterministic retrieval metrics are the CI gate; there is no LLM-judge scoring.
+- **Retrieval regression guard** — `ragmate-eval retrieval-gate` replays the 130-question sample with deterministic BM25. Deterministic retrieval metrics are the CI gate; there is no LLM-judge scoring.
 - **Self-hosted by design** — one Postgres with pgvector holds documents, chat, and vectors. Redis is optional and only used for shared rate limits.
 
 ---
@@ -311,7 +311,7 @@ One retrieval config is validated. It is hybrid dense + BM25 search, fused with 
 
 `CHUNKING_STRATEGY=parent_child` is an environment variable only, frozen with that baseline. The filter and compression constants in the details are frozen literals in code. Changing one without a new deterministic baseline does not create a supported config. Do not add another fusion arm or a chunking strategy.
 
-The 98-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
+The 130-question report was collected with in-process BGE-M3 and a local cross-encoder. The algorithm above is what is frozen. Calling those models over HTTP (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) is the deployment default and does not change fusion or chunking.
 
 `FAITHFULNESS_CHECK` stays `false` (off by default; when enabled, checked only when retrieval confidence is low).
 
