@@ -109,6 +109,7 @@ let aborter = null;
 let lastDocs = [];
 let lastSessions = [];
 let lastReady = null;
+let currentView = "chat";
 
 function toast(text) {
 toastEl.textContent = text;
@@ -531,6 +532,7 @@ const unpinnedSessions = lastSessions.filter(s => !pinned.includes(s.session_id)
 $("pinned-block").hidden = pinnedSessions.length === 0;
 pinnedSessions.forEach((s) => renderHistoryItem(s, pinnedList, pinned));
 unpinnedSessions.forEach((s) => renderHistoryItem(s, list, pinned));
+syncNavActive();
 }
 async function loadSessions() {
 try {
@@ -551,6 +553,7 @@ if (m.role === "user") addUserMsg(m.content || "");
 else renderAssistant(m.content || "", null);
 });
 if (!data.messages ||!data.messages.length) showEmptyHint();
+setView("chat");
 renderHistory();
 closeSidebar();
 scrollToBottom();
@@ -566,6 +569,7 @@ thread.appendChild(p);
 }
 function startNewChat() {
 try { sessionStorage.removeItem(SESSION_KEY);} catch { /* ignore */}
+setView("chat");
 thread.replaceChildren();
 showEmptyHint();
 renderHistory();
@@ -721,12 +725,22 @@ list.appendChild(li);
 }
 
 /* ---- 视图切换：侧栏导航（对话 / 文档 / 设置） ---- */
-let currentView = "chat";
+/* 侧栏的历史对话列表在所有视图下都常驻——用户要能从文档页 / 设置页直接点回某段对话，
+   点了会由 loadSession() 切回对话视图。只有 Pinned 区块按“是否有内容”显隐。 */
+/* 「New Chat」是动作按钮，不是视图标签页：当前已经打开着某段会话时它不点亮，
+   否则会和历史列表里的选中项重复高亮，看起来像是刚被点了 New Chat。
+   高亮状态由「当前视图 + 是否已选中会话」推导，任何一处改了这两个值都要重算。 */
+function syncNavActive() {
+const hasSession = !!peekSessionId();
+document.querySelectorAll("#side-nav button").forEach((b) => {
+const view = b.dataset.view;
+b.classList.toggle("is-active", view === currentView && !(view === "chat" && hasSession));
+});
+}
 function setView(name) {
 currentView = name;
 ["chat", "documents", "settings"].forEach((v) => { $(`view-${v}`).hidden = v !== name;});
-document.querySelectorAll("#side-nav button").forEach((b) => b.classList.toggle("is-active", b.dataset.view === name));
-$("history-block").hidden = name !== "chat";
+syncNavActive();
 closeSidebar();
 if (name === "documents") loadDocuments();
 if (name === "settings") loadReady();
