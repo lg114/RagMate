@@ -206,8 +206,6 @@ flowchart LR
 
 **Query path** — optional query contextualization (rewrites follow-ups into standalone queries) → dense HNSW plus BM25 over chunk text, fused with RRF (k=60) → reranking (`POST /rerank` by default; a local cross-encoder converts logits with sigmoid) → sentence-level contextual compression → dynamic threshold, per-source deduplication, and score-gap truncation → one answer, then citation normalization → faithfulness check (off by default; when enabled, checked only when retrieval confidence is low). RAG answers always include the retrieved sources and a confidence level. If retrieval kept no chunks, the answer is replaced with a refusal; a low score with some chunks is prefixed with an explicit hedge. There is no multi-query expansion: one query, one retrieval pass.
 
-Simple greetings and other non-RAG messages are routed straight to the LLM, skipping retrieval entirely.
-
 ---
 
 ## API reference
@@ -267,7 +265,7 @@ data: {"error": "..."}                                 // terminal error
 
 Idle connections receive a `:heartbeat` comment every 15 seconds. `confidence`, `citations`, `grounding`, and `unsupported_claims` appear only on the `done` event. `response` on that event is the text after grounding (refusal, hedge, and the real source line) — clients should replace the streamed tokens with it. When retrieval keeps no chunks, the stream does not emit tokens first; the refusal arrives only on `done`. `unsupported_claims` is present when faithfulness checking flagged a claim. `grounding` is `refused`, `hedged`, `grounded`, or omitted when no retrieval ran.
 
-The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place — for example, a greeting routed straight to the LLM.
+The non-streaming `POST /chat` returns the same fields. `confidence` and `citations` are `null` when no retrieval took place.
 
 `retrieval_debug` is a dev-mode trace. It is omitted unless the request sets `"debug": true`. Each entry is one retrieval call: reranked candidates with score, a short preview, and `dropped_by` of `threshold`, `per_source`, `score_gap`, or `top_k` when the chunk was not kept. The UI requests `"debug": true` so every answer can show its retrieval trace (collapsed by default). Previews are excerpts of your documents.
 
@@ -307,7 +305,7 @@ One retrieval config is validated. It is hybrid dense + BM25 search, fused with 
 
 `CHUNKING_STRATEGY` is frozen at `title_path`. The filter and compression constants in the details are frozen literals in code. Changing one without a new deterministic baseline does not create a supported config. Do not add another fusion arm or a chunking strategy.
 
-The 130-question report was collected with remote Jina embeddings (`jina-embeddings-v3`) and reranker (`jina-reranker-v3.5`). The algorithm above is what is frozen. The deployment default (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`) matches the baseline configuration.
+The 130-question report was collected with remote Jina embeddings (`jina-embeddings-v3`) and reranker (`jina-reranker-v3.5`). The algorithm above is what is frozen. The deployment default uses remote providers (`EMBEDDING_PROVIDER=remote`, `RERANKER_PROVIDER=api`); the baseline used Jina, but any OpenAI-compatible endpoint works — set `EMBEDDING_MODEL` and `RERANKER_MODEL` to match your provider.
 
 `FAITHFULNESS_CHECK` stays `false` (off by default; when enabled, checked only when retrieval confidence is low).
 

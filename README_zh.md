@@ -206,8 +206,6 @@ flowchart LR
 
 **查询链路** — 可选的查询上下文化（把追问改写为独立 query）→ 稠密 HNSW 加 BM25 词法检索，再用 RRF（k=60）融合 → 重排序（默认 `POST /rerank`；本地交叉编码器才把 logits 经 sigmoid 转为概率）→ 句子级上下文压缩 → 动态阈值、同源去重、分数断崖截断 → 一次回答 → 引用规整 → 忠实度校验（默认关闭；开启后只在检索置信度低时校验）。RAG 回答总会带上检索来源和置信度：一个片段都没留下时改为拒答；分数低但仍有片段时，在答案前加上明确的保留说明。没有多查询扩展：一个查询、一次检索。
 
-简单的寒暄类问题会绕过检索，直接路由到 LLM。
-
 ---
 
 ## API 参考
@@ -267,7 +265,7 @@ data: {"error": "..."}                               // 终止性错误
 
 空闲连接每 15 秒会收到一个 `:heartbeat` 注释行。`confidence`、`citations`、`grounding` 和 `unsupported_claims` 只出现在 `done` 事件中。该事件里的 `response` 是落地后的文本（拒答、低置信保留、以及真实来源行），客户端应用它替换已经流出的 token。检索没有留下片段时，流里不会先吐 token，拒答只出现在 `done`。`unsupported_claims` 在忠实度校验发现无依据声明时出现。`grounding` 取值为 `refused`、`hedged`、`grounded`；没有发生检索时省略。
 
-非流式的 `POST /chat` 返回同样的字段。未发生检索时（例如寒暄类问题直连 LLM）`confidence` 与 `citations` 为 `null`。
+非流式的 `POST /chat` 返回同样的字段。未发生检索时 `confidence` 与 `citations` 为 `null`。
 
 `retrieval_debug` 是开发模式轨迹，只有请求带 `"debug": true` 时才返回。每次检索一条记录，里面是重排后的候选：分数、截断后的 preview，以及没被留下时的 `dropped_by`（`threshold`、`per_source`、`score_gap`、`top_k`）。界面会发送 `"debug": true`，以便每个回答都能展开检索轨迹（默认折叠）；preview 是文档原文片段。
 
@@ -307,7 +305,7 @@ data: {"error": "..."}                               // 终止性错误
 
 `CHUNKING_STRATEGY` 冻结为 `title_path`。折叠区里的过滤与压缩常量是写死在代码里的字面值。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要再加切块策略。
 
-那份 130 题报告是用远程 Jina 嵌入（`jina-embeddings-v3`）和重排（`jina-reranker-v3.5`）采的。冻结的是上面这套算法。部署默认（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）与基线配置一致。
+那份 130 题报告是用远程 Jina 嵌入（`jina-embeddings-v3`）和重排（`jina-reranker-v3.5`）采的。冻结的是上面这套算法。部署默认走远程（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）；基线用的是 Jina，但任何 OpenAI 兼容接口都可以——把 `EMBEDDING_MODEL` 和 `RERANKER_MODEL` 改成你的服务商对应的模型名即可。
 
 `FAITHFULNESS_CHECK` 保持 `false`（默认关闭；开启后只在检索置信度低时校验）。
 

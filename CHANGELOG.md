@@ -15,19 +15,17 @@ All notable changes to this project are documented here.
 - 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩移到展开之后，作用在交付给 LLM 的文本上。
 - `application/chat.py` — 默认对话改为一次检索、一次生成、再 `apply_grounding`。检索没有留下片段时直接拒答，不调用回答模型。
 - 删除 `get_embeddings()` 函数及 `model_factory.py` 中的嵌入客户端抽象层。
-- 删除 `rrf_fuse_rank_lists()`（`core/fusion.py`），仅保留 `rrf_contribution()`。
-- 删除 `extract_text()` 和 `rrf_fuse_rank_lists()` 的死函数。
+- 删除 `rrf_fuse_rank_lists()` 和 `extract_text()` 死函数。
 - 切块策略只保留 `title_path`，删除 `parent_child` 分支及 `_reconstruct_with_headers()` 函数。
 - 前端移除示例问题芯片，改为空状态提示。
 
 ### Fixed
-- `core/retriever.py` — 修复父子分块（small-to-big）在检索侧完全失效。`parent_text` 一直由入库逻辑写入向量库，但 `_do_search` 的 `output_fields` 从未请求它，`_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到小片段。现在 `_do_search` 显式请求 `parent_text`；`_extract_candidates` 分别保存打分文本（`text`）与交付文本（`context`）；新增 `_expand_to_parent()` 在过滤后完成展开。rerank 与阈值判断仍使用小片段，既有校准不受影响。
+- `core/retriever.py` — 修复父子分块（small-to-big）在检索侧完全失效。`parent_text` 一直由入库逻辑写入向量库，但检索时未请求该字段，`_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到小片段。现在检索显式请求 `parent_text`；`_extract_candidates` 分别保存打分文本（`text`）与交付文本（`context`）；新增 `_expand_to_parent()` 在过滤后完成展开。rerank 与阈值判断仍使用小片段，既有校准不受影响。
 - `core/retriever.py` — `retrieve()` 在入口调用 `reset_retrieval_metrics()` 清空本线程的检索指标。此前 "collection 不存在 / 无候选 / 过滤后为空" 三条提前 return 分支不会覆盖 `_metrics.last`，而 `asyncio.to_thread` 会复用线程池中的线程，导致下一次无结果的检索读到上一次的分数，confidence 虚报为 high。
 - `application/chat.py` — 非流式 `chat()` 此前完全不做忠实度校验，开启 `FAITHFULNESS_CHECK` 时只有流式链路会返回 `unsupported_claims`。现在两条链路共用 `_pop_retrieval_signals()`，行为一致。
 - `domain/schemas.py` + `api/chat.py` — `ChatResponse` 增加 `confidence` 与 `unsupported_claims` 字段并透传。此前非流式 `POST /chat` 已经算出置信度，却被 Pydantic 的响应模型静默丢弃。
 - `infrastructure/config.py` + `infrastructure/streaming_llm.py` — 新增 `LLM_REASONING_EFFORT` 配置项，在 `ChatOpenAICompatible.__init__` 中统一注入 `reasoning_effort`。Qwen3 等思考型模型把推理过程写入 `reasoning` 字段、让 `content` 保持为空，而 `extract_text_content()` 只读 `content`，上层会拿到空回复。实测只有 `reasoning_effort: "none"` 能通过 OpenAI 协议关闭思考。默认留空不传该参数，对不支持它的服务商无影响。
-- `pyproject.toml` — 修正过时的 LangChain 依赖约束。`langchain-community` 钉在 `>=0.3.31,<0.4.0`（0.4.0 移除了 `ragas` 依赖的模块），其余 langchain 包放开到 1.x 上限。
-- `.gitignore` — 补上 `/.workbuddy-ai/`，与实际目录名匹配。
+- `pyproject.toml` — 修正过时的 LangChain 依赖约束，放开到 1.x 上限。
 
 ### Removed
 - Deep Agents 系统（`DEEP_AGENTS_ENABLED`、agent 循环、工具规划）
