@@ -2,67 +2,39 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [0.8.0] — Unreleased
 
 ### Changed
-- 向量库从 Milvus 换成同一个 Postgres 上的 pgvector。稠密 `vector(1024)` 走 HNSW 内积，稀疏 `sparsevec` 走精确内积，仍按 RRF k=60 融合后再重排。`DROP_RATIO_SEARCH` 只作用在查询稀疏向量上。多查询仍默认关闭。
-- `docker compose up` 只起 Postgres（`pgvector/pgvector:0.8.7-pg15`）和可选的 Redis。etcd、MinIO、Milvus、Attu 从默认栈去掉。
-- 删除文档仍要先确认向量删干净，才提交 `documents` 行。`/ready` 检查 PostgreSQL 和 pgvector。
+- 向量库从 Milvus 迁移到同一 Postgres 实例上的 pgvector。稠密 `vector(1024)` 走 HNSW 内积，稀疏 `sparsevec` 走精确内积，仍按 RRF k=60 融合后再重排。`DROP_RATIO_SEARCH` 只作用在查询稀疏向量上。
+- `docker compose up` 默认只起 Postgres（`pgvector/pgvector:0.8.7-pg15`）。etcd、MinIO、Milvus、Attu 从默认栈移除。
+- 嵌入与 rerank 默认改为远程 HTTP：`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`。API 进程默认不再 import torch、FlagEmbedding 或 sentence-transformers。本地 BGE-M3 / CrossEncoder 改为显式 opt-in（`EMBEDDING_PROVIDER=huggingface` + `RERANKER_PROVIDER=local`）。
+- 检索默认配置冻结：hybrid + RRF（`RRF_K=60`）+ rerank、`CHUNKING_STRATEGY=title_path`、`MULTI_QUERY_ENABLED=false`。不新增融合臂或切块策略。回归门禁只认 `ragmate-eval retrieval-gate`。
+- 入库控制面从 Redis 迁移到 Postgres 的 `ingest_control` 表。状态、锁、心跳、取消标志和失败原因持久化到数据库，不再被 TTL 清掉。`REDIS_URL` 留空即可跑通入库和对话。
+- 删除文档时仍先确认向量删干净，才提交 `documents` 行。`/ready` 检查 PostgreSQL 和 pgvector。
+- 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩移到展开之后，作用在交付给 LLM 的文本上。
+- `application/chat.py` — 默认对话改为一次检索、一次生成、再 `apply_grounding`。检索没有留下片段时直接拒答，不调用回答模型。
+- 删除 `get_embeddings()` 函数及 `model_factory.py` 中的嵌入客户端抽象层。
+- 删除 `rrf_fuse_rank_lists()`（`core/fusion.py`），仅保留 `rrf_contribution()`。
+- 删除 `extract_text()` 和 `rrf_fuse_rank_lists()` 的死函数。
 
 ### Fixed
-- `chat.py` — 默认对话改为一次检索、一次生成、再 `apply_grounding`。检索没有留下片段时直接拒答，
-  不调用回答模型；流式响应也不会先吐出规划文本再替换。Deep Agents 仅在 `DEEP_AGENTS_ENABLED=true` 时启用。
-  工具规划 token 不再拼进最终保存的回答。
-- `infrastructure/config.py` + `infrastructure/streaming_llm.py` — 新增 `LLM_REASONING_EFFORT` 配置项，
-  在 `ChatOpenAICompatible.__init__` 中统一注入 `reasoning_effort`（所有 LLM 实例含 RAGAS 的 `EvalLLM`
-  都经过这里，改一处即覆盖全部调用方）。**背景**：Qwen3 等思考型模型把推理过程写入 `reasoning` 字段、
-  让 `content` 保持为空，而 `extract_text_content()` 只读 `content`，上层会拿到空回复。
-  实测 Ollama 的 OpenAI 兼容端点**不认** `think` 参数（只有原生 `/api/chat` 认），
-  prompt 里的 `/no_think` 软开关与 Modelfile 的 `PARAMETER think false`（`unknown parameter`）均无效，
-  **只有 `reasoning_effort: "none"` 能通过 OpenAI 协议关闭思考**。默认留空不传该参数，
-  对不支持它的服务商（如 OpenAI 官方）无影响。
-- `pyproject.toml` — **修正过时的 LangChain 依赖约束，此前按 README 执行 `pip install -e .` 必然失败**。
-  `deepagents>=0.5.0` 要求 `langchain-core>=1.2.27`，而原约束把五个 langchain 包全部锁在 `<1.0.0`
-  （core / openai / community / huggingface / text-splitters），两者不可调和，pip 直接报
-  `ResolutionImpossible`——任何首次搭建环境的人都会撞上。现已放开到 1.x 上限。
-  其中 `langchain-community` 例外地钉在 `>=0.3.31,<0.4.0`：0.4.0 起移除了
-  `langchain_community.chat_models.vertexai`，而 `ragas` 在 import 阶段硬依赖该模块（无 try/except 兜底）。
-  0.3.31 允许 `langchain-core>=0.3.78,<2.0.0`，与 deepagents 的要求兼容——这是同时满足
-  主应用与评测依赖的唯一版本区间。
-- `.gitignore` — 补上 `/.workbuddy-ai/`。原有规则是 `/.workbuddy`，少了 `-ai` 后缀，
-  与实际目录名不匹配，导致 agent 工作目录一直被 git 报为未跟踪文件。
-- `core/retriever.py` — **修复父子分块（small-to-big）在检索侧完全失效**。`parent_text` 一直由
-  `milvus.py::insert_chunks` 作为独立字段写入 Milvus，但 `_do_search` 的 `output_fields` 从未请求它，
-  `_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到
-  小片段——README 宣称的「用小片段检索，把更大的父片段交给 LLM」实际退化为纯小片段检索。
-  现在 `_do_search` 显式请求 `parent_text`；`_extract_candidates` 分别保存打分文本（`text`）与交付文本
-  （`context`）；新增 `_expand_to_parent()` 在过滤后完成展开。rerank 与阈值判断仍使用小片段，因此
-  `RERANK_SCORE_THRESHOLD` / `DYNAMIC_THRESHOLD_RATIO` / `SCORE_GAP_THRESHOLD` 的既有校准不受影响。
-  注意：修复后交给 LLM 的上下文会显著变长（`FINAL_CONTEXT_K=15` 时约 10k token），token 成本相应上升。
+- `core/retriever.py` — 修复父子分块（small-to-big）在检索侧完全失效。`parent_text` 一直由入库逻辑写入向量库，但 `_do_search` 的 `output_fields` 从未请求它，`_extract_candidates` 中的 `entity.get("parent_text") or entity["text"]` 因此恒为 `None` 并静默回退到小片段。现在 `_do_search` 显式请求 `parent_text`；`_extract_candidates` 分别保存打分文本（`text`）与交付文本（`context`）；新增 `_expand_to_parent()` 在过滤后完成展开。rerank 与阈值判断仍使用小片段，既有校准不受影响。
+- `core/retriever.py` — `retrieve()` 在入口调用 `reset_retrieval_metrics()` 清空本线程的检索指标。此前 "collection 不存在 / 无候选 / 过滤后为空" 三条提前 return 分支不会覆盖 `_metrics.last`，而 `asyncio.to_thread` 会复用线程池中的线程，导致下一次无结果的检索读到上一次的分数，confidence 虚报为 high。
 - `application/chat.py` — 非流式 `chat()` 此前完全不做忠实度校验，开启 `FAITHFULNESS_CHECK` 时只有流式链路会返回 `unsupported_claims`。现在两条链路共用 `_pop_retrieval_signals()`，行为一致。
-- `core/retriever.py` — `retrieve()` 在入口调用 `reset_retrieval_metrics()` 清空本线程的检索指标。此前 "collection 不存在 / 无候选 / 过滤后为空" 三条提前 return 分支不会覆盖 `_metrics.last`，而 `asyncio.to_thread` 会复用线程池中的线程，导致下一次无结果的检索读到上一次（可能是别的请求）的分数，confidence 虚报为 high。
 - `domain/schemas.py` + `api/chat.py` — `ChatResponse` 增加 `confidence` 与 `unsupported_claims` 字段并透传。此前非流式 `POST /chat` 已经算出置信度，却被 Pydantic 的响应模型静默丢弃。
-- `docker-compose.yml` — MinIO 镜像改用 `milvusdb/minio:RELEASE.2024-12-18T13-15-44Z`。MinIO 社区版已于
-  2026-09-11 从 Docker Hub 撤下（`minio/minio` 与 `minio/mc` 全部 tag 失效），quay.io 上的同名仓库随后
-  也不再支持匿名拉取——实测任何 tag 与 `tags/list` 均返回 401，而 quay 上 etcd / node-exporter 等仓库
-  返回 200，可确认是 MinIO 侧关闭而非 registry 故障。改用 Milvus 官方自托管的同源镜像，环境变量、端口与
-  启动命令与原配置一致；healthcheck 从 `curl` 改为镜像自带的 `mc ready local`（新版 MinIO 不再内置 curl）。
-  同一次失败中被中断的其他镜像（postgres / redis / milvus / attu）属级联现象，无需改动。
+- `infrastructure/config.py` + `infrastructure/streaming_llm.py` — 新增 `LLM_REASONING_EFFORT` 配置项，在 `ChatOpenAICompatible.__init__` 中统一注入 `reasoning_effort`。Qwen3 等思考型模型把推理过程写入 `reasoning` 字段、让 `content` 保持为空，而 `extract_text_content()` 只读 `content`，上层会拿到空回复。实测只有 `reasoning_effort: "none"` 能通过 OpenAI 协议关闭思考。默认留空不传该参数，对不支持它的服务商无影响。
+- `pyproject.toml` — 修正过时的 LangChain 依赖约束。`langchain-community` 钉在 `>=0.3.31,<0.4.0`（0.4.0 移除了 `ragas` 依赖的模块），其余 langchain 包放开到 1.x 上限。
+- `.gitignore` — 补上 `/.workbuddy-ai/`，与实际目录名匹配。
 
-### Changed
-- 检索默认配置冻结为 hybrid + RRF（`RRF_K=60`）+ rerank、`CHUNKING_STRATEGY=title_path`、`MULTI_QUERY_ENABLED=false`。加权融合、多查询、`parent_child` 仍是环境变量，改之前要重跑 `ragmate-eval retrieval` 并更新钉住的门槛。不新增融合臂或切块策略。RAGAS 代码保留，但从 README 和无参数 `ragmate-eval` 的主路径撤下；回归门禁只认 `ragmate-eval retrieval-gate`。不处理 Python 3.14 的 RAGAS 问题。前端仍是演示壳，检索调试标成开发模式轨迹。
-- 入库控制面从 Redis 挪到 Postgres 的 `ingest_control`（单行）：状态、锁、心跳、取消标志和失败原因都写在这里，重启还在，终态不再被 2 小时 TTL 清掉。持锁 worker 写进度，任意 worker 可读状态并请求取消。会话历史直接用已有的 `chat_history`，不再做 Redis 缓存。`REDIS_URL` 留空即可跑通入库和对话；限流退回本进程内存。配了 Redis 但连不上时，限流返回明确的 503。`docker compose up -d` 不再启动 Redis，需要多 worker 共享限流时用 `docker compose --profile redis up -d`。
-- `config.py` — 嵌入与重排默认改为远程 HTTP：`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`。
-  API 进程默认不再 import torch、FlagEmbedding 或 sentence-transformers。
-  `EMBEDDING_API_BASE_URL` 与 `RERANKER_API_BASE_URL` 在对应 provider 为远程时必填，缺失则启动失败；
-  两端密钥仍可选。本进程 BGE-M3 / CrossEncoder 改为显式 opt-in：
-  `EMBEDDING_PROVIDER=huggingface`（`local`、`flagembedding` 同义）且 `RERANKER_PROVIDER=local`。
-- `config.py` — 新增 `DEEP_AGENTS_ENABLED`，默认 `false`。
-- `core/retriever.py` — 检索管线顺序调整为 rerank → 过滤/去重 → 展开父片段 → 上下文压缩。压缩的目标是
-  「减少传给 LLM 的噪声」，此前作用在用于打分的小片段上，与展开后的交付内容不一致；改为在展开之后执行。
-  位置同时移到过滤之后，省掉了对必然被丢弃的候选的 reranker 调用。
-- `application/chat.py` — 抽出 `async _pop_retrieval_signals()`，统一负责取出 agent 检索数据、计算 confidence 与 unsupported_claims；`check_faithfulness` 改为 `asyncio.to_thread` 调用，避免同步 LLM 请求阻塞事件循环。
-- `core/retriever.py` — `_metrics` 改为带默认值的 `threading.local` 子类 `_MetricsLocal`，新线程无需先赋值即可安全读取；`get_retrieval_metrics()` 不再依赖 `getattr` 兜底。
+### Removed
+- Deep Agents 系统（`DEEP_AGENTS_ENABLED`、agent 循环、工具规划）
+- RAGAS 评测代码与依赖（`ragas>=0.2.0`、`EvalLLM`、`eval/metrics.py` 中的 RAGAS 集成）
+- Milvus 相关代码（`infrastructure/milvus.py`、`pymilvus` 依赖）
+- 寒暄路由（`_is_simple_query()`、`_direct_llm_reply()`、`QUERY_ROUTING_ENABLED`）
+- `backend/core/prompts/researcher.md`（引用不存在工具的系统提示）
+- `get_embeddings()` 与 `langchain-huggingface` 依赖
+- `extract_text()`、`rrf_fuse_rank_lists()` 死函数
+- `tests/test_chat_routing.py`（测试已删除的路由逻辑）
 
 ## Prototype 12 — 2026-05-18
 

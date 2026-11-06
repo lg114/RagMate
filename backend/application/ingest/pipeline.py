@@ -96,18 +96,6 @@ def _detect_new_files(docs_dir: str, all_files: list[str]) -> tuple[list[str], d
     return new_files, ingested_info
 
 
-def _reconstruct_with_headers(doc):
-    """从 MarkdownHeaderTextSplitter 的 metadata 中还原带标题的完整文本。"""
-    headers = []
-    for key in ["Header 1", "Header 2", "Header 3"]:
-        if key in doc.metadata:
-            level = int(key.split()[-1])
-            headers.append("#" * level + " " + doc.metadata[key])
-    if headers:
-        return "\n".join(headers) + "\n\n" + doc.page_content
-    return doc.page_content
-
-
 def _title_path_from_metadata(metadata: dict) -> str:
     """从 Header 1/2/3 metadata 拼出「H1 > H2 > H3」路径；无标题则空串。"""
     parts = [metadata[k] for k in ("Header 1", "Header 2", "Header 3") if metadata.get(k)]
@@ -145,30 +133,20 @@ def _split_markdown_section(section, ext: str) -> list:
     """按 CHUNKING_STRATEGY 切一个 markdown 章节，CHUNK_SIZE 两边对齐。"""
     splitter = _get_text_splitter(ext)
     strategy = (settings.CHUNKING_STRATEGY or "title_path").strip().lower()
-    if strategy == "title_path":
-        title_path = _title_path_from_metadata(section.metadata)
-        # 先按与 parent_child 相同的 CHUNK_SIZE 切正文，再给每个子块贴路径，
-        # 避免路径字符挤占额度导致两边切块边界对不齐。
-        small_chunks = splitter.split_documents([section])
-        parent_body = section.page_content
-        parent_text = _apply_title_path(parent_body, title_path)
-        for c in small_chunks:
-            c.page_content = _apply_title_path(c.page_content, title_path)
-            c.metadata["parent_text"] = parent_text
-            c.metadata["title_path"] = title_path
-            c.metadata["chunking_strategy"] = "title_path"
-        return small_chunks
-
-    if strategy != "parent_child":
+    if strategy != "title_path":
         raise ValueError(
             f"Unknown CHUNKING_STRATEGY={settings.CHUNKING_STRATEGY!r}. "
-            f"Must be 'title_path' or 'parent_child'."
+            f"Must be 'title_path'."
         )
+    title_path = _title_path_from_metadata(section.metadata)
     small_chunks = splitter.split_documents([section])
-    parent_text = _reconstruct_with_headers(section)
+    parent_body = section.page_content
+    parent_text = _apply_title_path(parent_body, title_path)
     for c in small_chunks:
+        c.page_content = _apply_title_path(c.page_content, title_path)
         c.metadata["parent_text"] = parent_text
-        c.metadata["chunking_strategy"] = "parent_child"
+        c.metadata["title_path"] = title_path
+        c.metadata["chunking_strategy"] = "title_path"
     return small_chunks
 
 

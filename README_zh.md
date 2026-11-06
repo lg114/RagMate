@@ -309,20 +309,20 @@ data: {"error": "..."}                               // 终止性错误
 | 重排后过滤 | `RERANK_CANDIDATES=30`，`RERANK_SCORE_THRESHOLD=0.3`，`FINAL_CONTEXT_K=15` |
 | 查询扩展 | 无（单查询） |
 
-`CHUNKING_STRATEGY=parent_child` 只是环境变量，和基线一起冻结。折叠区里的过滤与压缩常量是写死在代码里的字面值。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要再加切块策略。
+`CHUNKING_STRATEGY` 冻结为 `title_path`。折叠区里的过滤与压缩常量是写死在代码里的字面值。不重跑确定性基线就改其中一项，不会变成受支持的配置。不要新增融合臂、不要再加切块策略。
 
-那份 130 题报告是用进程内 BGE-M3 和本地交叉编码器采的。冻结的是上面这套算法。通过 HTTP 调用这些模型（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）是部署默认，不改变融合或分块。
+那份 130 题报告是用远程 Jina 嵌入（`jina-embeddings-v3`）和重排（`jina-reranker-v3.5`）采的。冻结的是上面这套算法。部署默认（`EMBEDDING_PROVIDER=remote`、`RERANKER_PROVIDER=api`）与基线配置一致。
 
 `FAITHFULNESS_CHECK` 保持 `false`（默认关闭；开启后只在检索置信度低时校验）。
 
 <details>
 <summary><strong>已冻结的环境变量</strong> — 列出来是为了部署时能看见，不是为了就地调参</summary>
 
-**分块** — `CHUNK_SIZE` (`1000`)、`CHUNK_OVERLAP` (`200`)、`CHUNK_SIZE_PDF` (`600`)、`CHUNK_OVERLAP_PDF` (`100`)、`CHUNK_SIZE_DOCX` (`800`)、`CHUNK_OVERLAP_DOCX` (`150`)、`CHUNK_SIZE_TXT` (`1000`)、`CHUNK_OVERLAP_TXT` (`200`)、`CHUNK_SIZE_TABLE` (`1500`)、`CHUNK_SIZE_PARENT` (`2500`)、`CHUNK_OVERLAP_PARENT` (`300`)、`CHUNKING_STRATEGY`（`title_path`）。`parent_child` 切块边界相同，只是标题路径不进检索正文。它不是第二套受支持的策略。
+**分块** — `CHUNK_SIZE`（`1000`）、`CHUNK_OVERLAP`（`200`）、`CHUNK_SIZE_PDF`（`600`）、`CHUNK_OVERLAP_PDF`（`100`）、`CHUNK_SIZE_DOCX`（`800`）、`CHUNK_OVERLAP_DOCX`（`150`）、`CHUNK_SIZE_TXT`（`1000`）、`CHUNK_OVERLAP_TXT`（`200`）、`CHUNK_SIZE_TABLE`（`1500`）、`CHUNK_SIZE_PARENT`（`2500`）、`CHUNK_OVERLAP_PARENT`（`300`）、`CHUNKING_STRATEGY`（`title_path`）。
 
 重叠长度必须小于对应分块大小，否则启动时会抛出校验错误。
 
-**过滤与压缩** — 冻结字面值：动态阈值 `0.5`×最高分、同源上限 `4`（最少 `2`）、主导度 `0.9`×`1.5`、断崖 `0.15`、高分比例 `0.6`；压缩阈值 `0.4`、最短 `300` 字符。`QUERY_CONTEXTUALIZE`（`false`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询）、`QUERY_ROUTING_ENABLED`（`false`）。
+**过滤与压缩** — 冻结字面值：动态阈值 `0.5`×最高分、同源上限 `4`（最少 `2`）、主导度 `0.9`×`1.5`、断崖 `0.15`、高分比例 `0.6`；压缩阈值 `0.4`、最短 `300` 字符。`QUERY_CONTEXTUALIZE`（`false`，先用原问题检索、置信度低时才把追问改写成一条查询再检一次，不是多查询）。
 
 **嵌入** — `EMBEDDING_PROVIDER`（`remote`）、`EMBEDDING_MODEL`（`BAAI/bge-m3`）、`EMBEDDING_NORMALIZE`（`true`）、`HF_TOKEN`、`EMBEDDING_API_KEY`（可选）、`EMBEDDING_API_BASE_URL`（`remote` / `openai` 时必填）、`EMBEDDING_API_TIMEOUT`（`60`）。
 

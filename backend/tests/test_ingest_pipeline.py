@@ -9,7 +9,6 @@ from backend.application.ingest.pipeline import (
     _detect_new_files,
     _discover_files,
     _get_text_splitter,
-    _reconstruct_with_headers,
     ingest_documents,
 )
 from backend.domain.errors import ServiceUnavailableError
@@ -99,50 +98,6 @@ class TestGetTextSplitter:
         assert splitter is not None
         assert splitter._chunk_size == 1000  # CHUNK_SIZE default
         assert splitter._chunk_overlap == 200  # CHUNK_OVERLAP default
-
-
-class TestReconstructWithHeaders:
-    """测试 _reconstruct_with_headers 函数。"""
-
-    def test_no_headers(self):
-        """无标题时直接返回原文。"""
-        doc = MagicMock()
-        doc.metadata = {}
-        doc.page_content = "这是内容"
-
-        result = _reconstruct_with_headers(doc)
-        assert result == "这是内容"
-
-    def test_single_header(self):
-        """单个标题应正确还原。"""
-        doc = MagicMock()
-        doc.metadata = {"Header 1": "第一章"}
-        doc.page_content = "这是内容"
-
-        result = _reconstruct_with_headers(doc)
-        assert result == "# 第一章\n\n这是内容"
-
-    def test_multiple_headers(self):
-        """多个标题应按层级还原。"""
-        doc = MagicMock()
-        doc.metadata = {
-            "Header 1": "第一章",
-            "Header 2": "第一节",
-            "Header 3": "小节",
-        }
-        doc.page_content = "这是内容"
-
-        result = _reconstruct_with_headers(doc)
-        assert result == "# 第一章\n## 第一节\n### 小节\n\n这是内容"
-
-    def test_partial_headers(self):
-        """部分标题应正确还原。"""
-        doc = MagicMock()
-        doc.metadata = {"Header 1": "第一章", "Header 3": "小节"}
-        doc.page_content = "这是内容"
-
-        result = _reconstruct_with_headers(doc)
-        assert result == "# 第一章\n### 小节\n\n这是内容"
 
 
 class TestDetectNewFiles:
