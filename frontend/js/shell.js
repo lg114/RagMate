@@ -714,6 +714,250 @@ await loadDocuments();
 }
 }
 
+
+/* ---- 设置管理 (Settings Management) ---- */
+let currentSettingsData = null;
+let configuredSecrets = new Set();
+
+const FIELD_DEFS = {
+  // text / password / select inputs
+  "LLM_MODEL": { type: "text", required: true },
+  "LLM_API_KEY": { type: "secret" },
+  "LLM_API_BASE_URL": { type: "text" },
+  "LLM_REASONING_EFFORT": { type: "select" },
+  "EMBEDDING_PROVIDER": { type: "select" },
+  "EMBEDDING_MODEL": { type: "text" },
+  "EMBEDDING_API_BASE_URL": { type: "text" },
+  "EMBEDDING_API_KEY": { type: "secret" },
+  "RERANKER_PROVIDER": { type: "select" },
+  "RERANKER_MODEL": { type: "text" },
+  "RERANKER_API_BASE_URL": { type: "text" },
+  "RERANKER_API_KEY": { type: "secret" },
+  "API_AUTH_TOKEN": { type: "secret" },
+  "CORS_ORIGINS": { type: "text" },
+  "LANGSMITH_API_KEY": { type: "secret" },
+  "LANGSMITH_PROJECT": { type: "text" },
+  "LANGSMITH_ENDPOINT": { type: "text" },
+  // numbers
+  "FINAL_CONTEXT_K": { type: "number", min: 1, max: 50 },
+  "RERANK_SCORE_THRESHOLD": { type: "number", min: 0, max: 1 },
+  "RERANK_CANDIDATES": { type: "number", min: 1, max: 200 },
+  "RRF_K": { type: "number", min: 1, max: 200 },
+  "LLM_TEMPERATURE": { type: "number", min: 0, max: 2 },
+  "MAX_HISTORY_TURNS": { type: "number", min: 1, max: 50 },
+  "AGENT_TIMEOUT": { type: "number", min: 5, max: 600 },
+  "RATE_LIMIT_MAX": { type: "number", min: 1, max: 1000 },
+  "RATE_LIMIT_WINDOW": { type: "number", min: 1, max: 3600 },
+  "CHUNK_SIZE": { type: "number", min: 50, max: 5000 },
+  "CHUNK_OVERLAP": { type: "number", min: 0, max: 2000 },
+  "CHUNK_SIZE_PARENT": { type: "number", min: 100, max: 10000 },
+  "CHUNK_OVERLAP_PARENT": { type: "number", min: 0, max: 3000 },
+  // booleans
+  "QUERY_CONTEXTUALIZE": { type: "boolean" },
+  "FAITHFULNESS_CHECK": { type: "boolean" },
+  "LANGSMITH_TRACING": { type: "boolean" },
+};
+
+function updateSettingsLinkage() {
+  const embProvider = $("cfg-EMBEDDING_PROVIDER")?.value || "remote";
+  const isEmbRemote = embProvider === "remote" || embProvider === "openai";
+  const wrapEmbUrl = $("wrap-EMBEDDING_API_BASE_URL");
+  const wrapEmbKey = $("wrap-EMBEDDING_API_KEY");
+  if (wrapEmbUrl) wrapEmbUrl.style.display = isEmbRemote ? "flex" : "none";
+  if (wrapEmbKey) wrapEmbKey.style.display = isEmbRemote ? "flex" : "none";
+
+  const rerankProvider = $("cfg-RERANKER_PROVIDER")?.value || "api";
+  const isRerankApi = rerankProvider === "api";
+  const wrapRerankUrl = $("wrap-RERANKER_API_BASE_URL");
+  const wrapRerankKey = $("wrap-RERANKER_API_KEY");
+  if (wrapRerankUrl) wrapRerankUrl.style.display = isRerankApi ? "flex" : "none";
+  if (wrapRerankKey) wrapRerankKey.style.display = isRerankApi ? "flex" : "none";
+
+  const tracingOn = $("cfg-LANGSMITH_TRACING")?.checked;
+  const wrapTracing = $("wrap-LANGSMITH_CONFIG");
+  if (wrapTracing) wrapTracing.style.opacity = tracingOn ? "1" : "0.4";
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/settings", { headers: authHeaders() });
+    if (!res.ok) {
+      console.warn("Settings API not available or error:", res.status);
+      return;
+    }
+    const data = await res.json();
+    currentSettingsData = data.settings || {};
+    configuredSecrets = new Set(data.secret_keys || []);
+
+    // Populate fields
+    for (const [key, def] of Object.entries(FIELD_DEFS)) {
+      const el = $(`cfg-${key}`);
+      if (!el) continue;
+      const val = currentSettingsData[key];
+
+      if (def.type === "boolean") {
+        el.checked = Boolean(val);
+      } else if (def.type === "secret") {
+        el.value = "";
+        const isConf = Boolean(currentSettingsData[key + "_configured"]);
+        const tag = $(`tag-${key}`);
+        if (isConf) {
+          el.placeholder = "Configured (enter new value to change)";
+          if (tag) {
+            tag.textContent = "Configured";
+            tag.classList.add("configured");
+          }
+        } else {
+          el.placeholder = "Not set";
+          if (tag) {
+            tag.textContent = "Not set";
+            tag.classList.remove("configured");
+          }
+        }
+      } else {
+        el.value = val !== undefined && val !== null ? String(val) : "";
+      }
+    }
+
+    // Special field: MAX_UPLOAD_SIZE (bytes to MB)
+    const uploadMbEl = $("cfg-MAX_UPLOAD_SIZE_MB");
+    if (uploadMbEl && currentSettingsData.MAX_UPLOAD_SIZE) {
+      const bytes = Number(currentSettingsData.MAX_UPLOAD_SIZE) || 0;
+      uploadMbEl.value = Math.round(bytes / (1024 * 1024));
+    }
+
+    updateSettingsLinkage();
+  } catch (err) {
+    console.error("Failed to load settings:", err);
+  }
+}
+
+async function saveAllSettings() {
+  const saveBtn = $("btn-save-settings");
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving...";
+  }
+
+  const updates = {};
+  let hasError = false;
+
+  // Clear previous errors
+  document.querySelectorAll(".field-error").forEach((el) => el.classList.remove("field-error"));
+
+  for (const [key, def] of Object.entries(FIELD_DEFS)) {
+    const el = $(`cfg-${key}`);
+    if (!el) continue;
+
+    if (def.type === "boolean") {
+      updates[key] = el.checked;
+    } else if (def.type === "secret") {
+      const val = el.value.trim();
+      if (val) {
+        updates[key] = val; // only send if newly entered
+      }
+    } else if (def.type === "number") {
+      const raw = el.value.trim();
+      if (raw === "") continue;
+      const num = Number(raw);
+      if (isNaN(num) || (def.min !== undefined && num < def.min) || (def.max !== undefined && num > def.max)) {
+        el.classList.add("field-error");
+        toast(`${key} is out of valid range (${def.min ?? "-"} ~ ${def.max ?? "-"})`);
+        hasError = true;
+        break;
+      }
+      updates[key] = num;
+    } else {
+      updates[key] = el.value.trim();
+    }
+  }
+
+  // Handle MAX_UPLOAD_SIZE_MB conversion
+  const uploadMbEl = $("cfg-MAX_UPLOAD_SIZE_MB");
+  if (uploadMbEl && uploadMbEl.value.trim() !== "") {
+    const mb = Number(uploadMbEl.value.trim());
+    if (mb > 0) updates["MAX_UPLOAD_SIZE"] = mb * 1024 * 1024;
+  }
+
+  if (hasError) {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Settings";
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch("/settings", {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ settings: updates }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || "保存失败");
+    }
+
+    const result = await res.json();
+    if (result.restart_required) {
+      const banner = $("settings-restart-banner");
+      if (banner) banner.hidden = false;
+      toast("Settings saved! A restart is required for changes to take effect.");
+    } else {
+      toast("Settings saved successfully!");
+    }
+
+    // Sync token to browser localStorage if API_AUTH_TOKEN was updated
+    if (updates["API_AUTH_TOKEN"]) {
+      try { localStorage.setItem(TOKEN_KEY, updates["API_AUTH_TOKEN"]); } catch {}
+    }
+
+    await loadSettings();
+    await loadReady();
+  } catch (err) {
+    toast(err.message || "Failed to save settings");
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Settings";
+    }
+  }
+}
+
+async function resetAllSettings() {
+  const ok = await confirm("Reset all settings to default values? (Existing DATABASE_URL will be preserved).");
+  if (!ok) return;
+
+  try {
+    const res = await fetch("/settings/reset", {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error("重置失败");
+    toast("Settings reset to defaults. A server restart is required.");
+    const banner = $("settings-restart-banner");
+    if (banner) banner.hidden = false;
+    await loadSettings();
+    await loadReady();
+  } catch (err) {
+    toast(err.message || "Failed to reset settings");
+  }
+}
+
+function initSettingsEvents() {
+  $("cfg-EMBEDDING_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
+  $("cfg-RERANKER_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
+  $("cfg-LANGSMITH_TRACING")?.addEventListener("change", updateSettingsLinkage);
+  $("btn-save-settings")?.addEventListener("click", saveAllSettings);
+  $("btn-reset-settings")?.addEventListener("click", resetAllSettings);
+  $("btn-refresh-ready")?.addEventListener("click", loadReady);
+  $("settings-restart-close")?.addEventListener("click", () => {
+    const banner = $("settings-restart-banner");
+    if (banner) banner.hidden = true;
+  });
+}
+
 /* ---- 设置：令牌与服务状态 ---- */
 /* 后端 llm_detail 是原因码，映射到 i18n 键；未知码不显示提示，免得露出原始字符串。 */
 const LLM_HINTS = {
@@ -803,7 +1047,7 @@ currentView = name;
 syncNavActive();
 closeSidebar();
 if (name === "documents") loadDocuments();
-if (name === "settings") loadReady();
+if (name === "settings") { loadReady(); loadSettings(); }
 }
 
 /* ---- 侧栏（移动端） ---- */
@@ -856,9 +1100,9 @@ fileInput.addEventListener("change", () => {
 if (fileInput.files.length) handleFiles([...fileInput.files]);
 fileInput.value = "";
 });
-$("token-input").value = getToken();
-$("token-save").addEventListener("click", () => {
-const value = $("token-input").value.trim();
+if ($("token-input")) $("token-input").value = getToken();
+$("token-save")?.addEventListener("click", () => {
+const value = $("token-input")?.value?.trim() || "";
 try {
 if (value) localStorage.setItem(TOKEN_KEY, value);
 else localStorage.removeItem(TOKEN_KEY);
@@ -872,6 +1116,8 @@ toast(t("tokenSaveFail"));
 applyI18n();
 syncEmptyState();
 loadReady();
+initSettingsEvents();
+loadSettings();
 loadDocuments();
 loadSessions();
 (async () => {

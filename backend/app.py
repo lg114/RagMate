@@ -195,8 +195,10 @@ def create_app() -> FastAPI:
     from backend.api.chat import router as chat_router
     from backend.api.documents import router as documents_router
     from backend.api.ingest import router as ingest_router
+    from backend.api.settings import router as settings_router
 
     app.include_router(health_router)
+    app.include_router(settings_router)
     app.include_router(chat_router)
     app.include_router(documents_router)
     app.include_router(ingest_router)
