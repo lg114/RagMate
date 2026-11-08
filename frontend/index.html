@@ -592,7 +592,7 @@
           <div class="settings-restart-banner" id="settings-restart-banner" hidden>
             <div class="settings-restart-content">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              <span>Settings updated and written to <code class="mono">.env</code>. Core changes (models, providers, base URLs, auth token) require a service restart to take effect.</span>
+              <span id="settings-restart-text">Settings updated and written to <code class="mono">.env</code>. Core changes (models, providers, base URLs, auth token) require a service restart to take effect.</span>
             </div>
             <button type="button" class="settings-restart-close" id="settings-restart-close" aria-label="Close notification">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -644,7 +644,7 @@
 
               <!-- Embedding -->
               <div class="settings-field">
-                <label for="cfg-EMBEDDING_PROVIDER">Embedding Provider <span class="field-tag">Required</span></label>
+                <label for="cfg-EMBEDDING_PROVIDER">Embedding Provider <span class="field-tag" id="tag-EMBEDDING_PROVIDER">Required</span></label>
                 <select id="cfg-EMBEDDING_PROVIDER">
                   <option value="remote">remote (Remote Embedding API)</option>
                   <option value="openai">openai (OpenAI-compatible endpoint)</option>
@@ -654,12 +654,12 @@
                 <span class="field-hint">Switching embedding provider requires re-indexing documents.</span>
               </div>
               <div class="settings-field">
-                <label for="cfg-EMBEDDING_MODEL">Embedding Model Name</label>
+                <label for="cfg-EMBEDDING_MODEL">Embedding Model Name <span class="field-tag" id="tag-EMBEDDING_MODEL">1024 dims</span></label>
                 <input id="cfg-EMBEDDING_MODEL" type="text" placeholder="BAAI/bge-m3">
                 <span class="field-hint">Default: BAAI/bge-m3 or text-embedding-3-small.</span>
               </div>
               <div class="settings-field" id="wrap-EMBEDDING_API_BASE_URL">
-                <label for="cfg-EMBEDDING_API_BASE_URL">Embedding Base URL</label>
+                <label for="cfg-EMBEDDING_API_BASE_URL">Embedding Base URL <span class="field-tag" id="tag-EMBEDDING_API_BASE_URL">URL</span></label>
                 <input id="cfg-EMBEDDING_API_BASE_URL" type="text" placeholder="e.g. https://api.openai.com/v1">
                 <span class="field-hint">Remote embedding endpoint (required for remote / openai).</span>
               </div>

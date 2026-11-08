@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import threading
+import time
 
 from sqlalchemy import text
 
@@ -24,6 +25,8 @@ from backend.core.lexical import LexicalIndex
 from backend.domain.errors import ServiceUnavailableError, ValidationError
 from backend.infrastructure.config import settings
 from backend.infrastructure.database import get_sync_engine
+
+_db_unreachable_until: float = 0.0
 
 logger = logging.getLogger("ragmate")
 
@@ -474,6 +477,95 @@ class PgVectorStore:
             ), {"source": source, "chunk_index": int(chunk_index)}).first()
         return row is not None
 
+    def get_index_metadata(self) -> dict | None:
+        global _db_unreachable_until
+        if time.time() < _db_unreachable_until:
+            return None
+        try:
+            with self._connect() as conn:
+                _db_unreachable_until = 0.0
+                check = conn.execute(text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = 'vector_index_meta'"
+                )).first()
+                if not check:
+                    return None
+                row = conn.execute(text(
+                    "SELECT table_name, embedding_provider, embedding_model, "
+                    "embedding_base_url, dimension, created_at, updated_at "
+                    "FROM vector_index_meta WHERE table_name = :t"
+                ), {"t": self.table}).mappings().first()
+                if not row:
+                    return None
+                return dict(row)
+        except Exception as e:
+            _db_unreachable_until = time.time() + 5.0
+            logger.debug("Failed to read vector index metadata for %s: %s", self.table, e)
+            return None
+
+    def count_chunks(self) -> int:
+        global _db_unreachable_until
+        if time.time() < _db_unreachable_until:
+            return 0
+        try:
+            ident = quote_ident(self.table)
+            with self._connect() as conn:
+                _db_unreachable_until = 0.0
+                exists = conn.execute(text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = :t"
+                ), {"t": self.table}).first()
+                if not exists:
+                    return 0
+                row = conn.execute(text(f"SELECT COUNT(*) FROM {ident}")).first()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            _db_unreachable_until = time.time() + 5.0
+            logger.debug("Failed to count chunks for %s: %s", self.table, e)
+            return 0
+
+    def record_index_metadata(
+        self,
+        provider: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        dimension: int = DENSE_DIM,
+    ) -> None:
+        target_provider = provider or settings.EMBEDDING_PROVIDER
+        target_model = model or settings.EMBEDDING_MODEL
+        target_url = base_url if base_url is not None else settings.EMBEDDING_API_BASE_URL
+        try:
+            with self._connect() as conn:
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS vector_index_meta ("
+                    "table_name VARCHAR(63) PRIMARY KEY, "
+                    "embedding_provider VARCHAR(50) NOT NULL, "
+                    "embedding_model VARCHAR(100) NOT NULL, "
+                    "embedding_base_url VARCHAR(255), "
+                    "dimension INTEGER NOT NULL DEFAULT 1024, "
+                    "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                    ")"
+                ))
+                conn.execute(text(
+                    "INSERT INTO vector_index_meta (table_name, embedding_provider, embedding_model, embedding_base_url, dimension, created_at, updated_at) "
+                    "VALUES (:t, :p, :m, :u, :d, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (table_name) DO UPDATE SET "
+                    "embedding_provider = EXCLUDED.embedding_provider, "
+                    "embedding_model = EXCLUDED.embedding_model, "
+                    "embedding_base_url = EXCLUDED.embedding_base_url, "
+                    "dimension = EXCLUDED.dimension, "
+                    "updated_at = CURRENT_TIMESTAMP"
+                ), {
+                    "t": self.table,
+                    "p": target_provider,
+                    "m": target_model,
+                    "u": target_url,
+                    "d": dimension,
+                })
+        except Exception as e:
+            logger.warning("Failed to record vector index metadata for %s: %s", self.table, e)
+
 
 def _require_extension(conn) -> None:
     conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -554,6 +646,17 @@ def ensure_schema_conn(conn, table: str | None = None) -> None:
         ))
     _validate_schema(conn, table)
     _create_indexes(conn, table)
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS vector_index_meta ("
+        "table_name VARCHAR(63) PRIMARY KEY, "
+        "embedding_provider VARCHAR(50) NOT NULL, "
+        "embedding_model VARCHAR(100) NOT NULL, "
+        "embedding_base_url VARCHAR(255), "
+        "dimension INTEGER NOT NULL DEFAULT 1024, "
+        "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ")"
+    ))
     with _ready_lock:
         _ready_tables.add(table)
 
@@ -572,6 +675,12 @@ def init_vector_store() -> PgVectorStore | None:
         if not store.table_exists():
             return None
         store.validate_schema()
+        count = store.count_chunks()
+        if count > 0:
+            ok, reason = validate_index_compatibility(store.table)
+            if not ok:
+                logger.error("Vector index compatibility check failed: %s", reason)
+                raise ValidationError(reason)
     except ValidationError:
         raise
     except Exception as e:
@@ -579,6 +688,82 @@ def init_vector_store() -> PgVectorStore | None:
     with _ready_lock:
         _ready_tables.add(store.table)
     return store
+
+def get_vector_index_metadata(table: str | None = None) -> dict | None:
+    return PgVectorStore(table).get_index_metadata()
+
+
+def get_indexed_chunks_count(table: str | None = None) -> int:
+    return PgVectorStore(table).count_chunks()
+
+
+def record_vector_index_metadata(
+    table: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    dimension: int = DENSE_DIM,
+) -> None:
+    PgVectorStore(table).record_index_metadata(provider, model, base_url, dimension)
+
+
+def validate_index_compatibility(
+    table: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> tuple[bool, str]:
+    store = PgVectorStore(table)
+    count = store.count_chunks()
+    if count == 0:
+        return True, "No indexed documents."
+
+    meta = store.get_index_metadata()
+    if not meta:
+        return False, (
+            f"Table '{store.table}' contains {count} chunks, but index metadata is missing. "
+            "Compatibility cannot be confirmed. Re-indexing is required."
+        )
+
+    target_provider = (provider or settings.EMBEDDING_PROVIDER).strip()
+    target_model = (model or settings.EMBEDDING_MODEL).strip()
+    target_url = (base_url if base_url is not None else settings.EMBEDDING_API_BASE_URL).strip()
+
+    if meta.get("dimension") != DENSE_DIM:
+        return False, (
+            f"Dimension mismatch: index was built with {meta.get('dimension')} dimensions, "
+            f"system expects {DENSE_DIM}."
+        )
+
+    from backend.infrastructure.config import LOCAL_EMBEDDING_PROVIDERS
+
+    meta_provider = str(meta.get("embedding_provider") or "").strip()
+    meta_model = str(meta.get("embedding_model") or "").strip()
+    meta_url = str(meta.get("embedding_base_url") or "").strip()
+
+    meta_is_local = meta_provider in LOCAL_EMBEDDING_PROVIDERS
+    curr_is_local = target_provider in LOCAL_EMBEDDING_PROVIDERS
+
+    if meta_is_local != curr_is_local or (not meta_is_local and meta_provider != target_provider):
+        return False, (
+            f"Embedding provider mismatch: index was built with '{meta_provider}', "
+            f"current configuration is '{target_provider}'. Re-indexing required."
+        )
+
+    if meta_model != target_model:
+        return False, (
+            f"Embedding model mismatch: index was built with '{meta_model}', "
+            f"current configuration is '{target_model}'. Re-indexing required."
+        )
+
+    if not curr_is_local and meta_url and target_url and meta_url != target_url:
+        return False, (
+            f"Embedding endpoint mismatch: index was built with endpoint '{meta_url}', "
+            f"current configuration is '{target_url}'. Re-indexing required."
+        )
+
+    return True, "Compatible"
+
 
 
 def check_vector_store_available() -> bool:
@@ -725,7 +910,17 @@ def insert_chunks(store, chunks, dense_vecs) -> dict[str, list[int]]:
             "ingest_batch_id": chunk.metadata.get("ingest_batch_id", ""),
         })
         sources.append(source)
+    if hasattr(store, "count_chunks"):
+        ok, reason = validate_index_compatibility(store.table)
+        if not ok:
+            raise ValidationError(f"Cannot ingest chunks: {reason}")
+
     ids = store.insert_rows(rows)
+
+    if hasattr(store, "get_index_metadata") and hasattr(store, "record_index_metadata"):
+        if not store.get_index_metadata():
+            store.record_index_metadata()
+
     ids_by_source: dict[str, list[int]] = {}
     for item_id, source in zip(ids, sources):
         ids_by_source.setdefault(source, []).append(item_id)

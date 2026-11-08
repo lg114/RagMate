@@ -26,6 +26,7 @@ def get_sync_engine():
         pool_size=2,
         max_overflow=2,
         pool_pre_ping=True,
+        connect_args={"connect_timeout": 1},
     )
 
 

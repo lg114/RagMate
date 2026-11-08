@@ -58,3 +58,17 @@ class IngestControl(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_ingest: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class VectorIndexMeta(Base):
+    """向量索引元数据：记录当前表中向量是由哪个嵌入模型/provider/维度写入的。"""
+
+    __tablename__ = "vector_index_meta"
+
+    table_name: Mapped[str] = mapped_column(String(63), primary_key=True)
+    embedding_provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(100), nullable=False)
+    embedding_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dimension: Mapped[int] = mapped_column(Integer, nullable=False, default=1024)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+

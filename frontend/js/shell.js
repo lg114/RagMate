@@ -841,6 +841,50 @@ async function loadSettings() {
       uploadMbEl.value = Math.round(bytes / (1024 * 1024));
     }
 
+    // 1. Mark deployment environment-managed fields
+    const sources = data.field_sources || {};
+    for (const [key, src] of Object.entries(sources)) {
+      if (src === "environment") {
+        const el = $(`cfg-${key}`);
+        if (el) el.disabled = true;
+        const tag = $(`tag-${key}`);
+        if (tag) {
+          tag.textContent = "Deployment Managed";
+          tag.classList.add("configured");
+        }
+      }
+    }
+
+    // 2. Lock embedding fields if documents are already indexed in vector store
+    const indexStatus = data.index_status || {};
+    if (indexStatus.has_indexed_docs) {
+      const lockedKeys = indexStatus.locked_keys || ["EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_API_BASE_URL"];
+      lockedKeys.forEach((key) => {
+        const el = $(`cfg-${key}`);
+        if (el) el.disabled = true;
+        const tag = $(`tag-${key}`);
+        if (tag) {
+          tag.textContent = "Locked (docs indexed)";
+          tag.classList.add("configured");
+        }
+      });
+    }
+
+    // 3. Display pending restart banner if there are unapplied changes on disk
+    const pending = data.pending_restart || [];
+    const restartBanner = $("settings-restart-banner");
+    const restartText = $("settings-restart-text");
+    if (restartBanner) {
+      if (pending.length > 0) {
+        restartBanner.hidden = false;
+        if (restartText) {
+          restartText.innerHTML = `Pending restart for: <strong>${pending.join(", ")}</strong>. Service restart is required to take effect.`;
+        }
+      } else {
+        restartBanner.hidden = true;
+      }
+    }
+
     updateSettingsLinkage();
   } catch (err) {
     console.error("Failed to load settings:", err);
@@ -915,11 +959,19 @@ async function saveAllSettings() {
     }
 
     const result = await res.json();
-    if (result.restart_required) {
-      const banner = $("settings-restart-banner");
-      if (banner) banner.hidden = false;
+    const pendingAfter = result.pending_restart || [];
+    const banner = $("settings-restart-banner");
+    const restartText = $("settings-restart-text");
+    if (result.restart_required || pendingAfter.length > 0) {
+      if (banner) {
+        banner.hidden = false;
+        if (restartText && pendingAfter.length > 0) {
+          restartText.innerHTML = `Settings saved! Pending restart for: <strong>${pendingAfter.join(", ")}</strong>. Core changes require service restart.`;
+        }
+      }
       toast("Settings saved! A restart is required for changes to take effect.");
     } else {
+      if (banner) banner.hidden = true;
       toast("Settings saved successfully!");
     }
 

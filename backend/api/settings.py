@@ -14,6 +14,10 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..infrastructure.vector_store import (
+    get_indexed_chunks_count,
+    get_vector_index_metadata,
+)
 from ..infrastructure.config import (
     LOCAL_EMBEDDING_PROVIDERS,
     REMOTE_EMBEDDING_PROVIDERS,
@@ -240,6 +244,49 @@ def _atomic_write_env(updates: Dict[str, str]) -> None:
         raise
 
 
+
+
+
+def _get_field_sources(env_dict: Dict[str, str]) -> Dict[str, str]:
+    """Detect whether each setting is managed by environment, .env file, or code default."""
+    deploy_managed = set(filter(None, [k.strip() for k in os.environ.get("DEPLOY_MANAGED_KEYS", "").split(",")]))
+    sources = {}
+    for k in Settings.model_fields:
+        if k not in EDITABLE_KEYS or k in deploy_managed:
+            sources[k] = "environment"
+        elif k not in env_dict and k in os.environ:
+            sources[k] = "environment"
+        elif k in env_dict:
+            sources[k] = "file"
+        else:
+            sources[k] = "default"
+    return sources
+
+def _calculate_pending_restart(env_dict: Dict[str, str]) -> list[str]:
+    """Identify keys whose saved values on disk differ from the active runtime configuration."""
+    pending = []
+    for k in EDITABLE_KEYS:
+        disk_val = env_dict.get(k)
+        if disk_val is None:
+            continue
+        running_val = getattr(current_settings, k, None)
+        if k in SECRET_KEYS:
+            if disk_val and disk_val != running_val:
+                pending.append(k)
+        elif isinstance(running_val, bool):
+            if (disk_val.strip().lower() == "true") != running_val:
+                pending.append(k)
+        elif isinstance(running_val, (int, float)):
+            try:
+                if float(disk_val) != float(running_val):
+                    pending.append(k)
+            except ValueError:
+                pending.append(k)
+        else:
+            if disk_val.strip() != (str(running_val) if running_val is not None else "").strip():
+                pending.append(k)
+    return sorted(pending)
+
 @router.get("/settings")
 def get_settings():
     """Return runtime configuration. Mask secrets completely and exclude DATABASE_URL."""
@@ -264,11 +311,40 @@ def get_settings():
         data[f"{k}_configured"] = is_configured
         data[k] = ""  # Never expose plaintext secret or mask placeholder to UI
 
+    # Source detection
+    field_sources = _get_field_sources(env_dict)
+
+    # Vector index metadata and locking status
+    try:
+        chunk_count = get_indexed_chunks_count(current_settings.VECTOR_TABLE)
+        meta = get_vector_index_metadata(current_settings.VECTOR_TABLE)
+        has_indexed = chunk_count > 0
+    except Exception:
+        chunk_count = 0
+        meta = None
+        has_indexed = False
+
+    index_status = {
+        "has_indexed_docs": has_indexed,
+        "chunk_count": chunk_count,
+        "embedding_provider": meta["embedding_provider"] if meta else (current_settings.EMBEDDING_PROVIDER if not has_indexed else None),
+        "embedding_model": meta["embedding_model"] if meta else (current_settings.EMBEDDING_MODEL if not has_indexed else None),
+        "embedding_base_url": meta["embedding_base_url"] if meta else (current_settings.EMBEDDING_API_BASE_URL if not has_indexed else None),
+        "dimension": meta["dimension"] if meta else 1024,
+        "compatibility_unconfirmed": has_indexed and (meta is None),
+        "locked_keys": sorted(["EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_API_BASE_URL"]) if has_indexed else [],
+    }
+
+    pending_restart = _calculate_pending_restart(env_dict)
+
     return {
         "settings": data,
         "editable_keys": sorted(list(EDITABLE_KEYS)),
         "secret_keys": sorted(list(SECRET_KEYS)),
         "restart_keys": sorted(list(RESTART_KEYS)),
+        "field_sources": field_sources,
+        "pending_restart": pending_restart,
+        "index_status": index_status,
         "version": _calculate_env_version(),
     }
 
@@ -291,6 +367,46 @@ def update_settings_bulk(payload: BulkSettingsUpdate):
 
     env_dict = _parse_env_dict()
     target_env = dict(env_dict)
+    # 1. Reject non-editable or unknown fields first
+    for key in payload.settings:
+        if key not in EDITABLE_KEYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Field '{key}' is not editable via the settings API.",
+            )
+
+    # 2. Environment source protection: do not allow modifying settings managed by deployment environment
+    sources = _get_field_sources(env_dict)
+    for key in payload.settings:
+        if sources.get(key) == "environment":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Field '{key}' is managed by the deployment environment and cannot be updated via the web interface.",
+            )
+
+    # 3. Vector index protection: prevent changing embedding model/provider/URL when indexed documents exist
+    LOCKED_INDEX_KEYS = {"EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_API_BASE_URL"}
+    locked_attempted = [k for k in payload.settings if k in LOCKED_INDEX_KEYS]
+    if locked_attempted:
+        try:
+            chunk_count = get_indexed_chunks_count(current_settings.VECTOR_TABLE)
+        except Exception:
+            chunk_count = 0
+        if chunk_count > 0:
+            meta = get_vector_index_metadata(current_settings.VECTOR_TABLE)
+            for k in locked_attempted:
+                new_val = str(payload.settings[k]).strip()
+                current_val = str(getattr(current_settings, k, "")).strip()
+                expected_val = (str(meta.get(k.lower()) or "")).strip() if meta else current_val
+                if new_val != expected_val and new_val != current_val:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Cannot modify '{k}' while indexed documents ({chunk_count} chunks) exist in the vector store. "
+                            "Changing the embedding model or endpoint requires re-indexing all documents."
+                        ),
+                    )
+
     updates_to_write: Dict[str, str] = {}
     restart_required = False
 
@@ -332,10 +448,14 @@ def update_settings_bulk(payload: BulkSettingsUpdate):
     if updates_to_write:
         _atomic_write_env(updates_to_write)
 
+    new_env = _parse_env_dict()
+    new_pending = _calculate_pending_restart(new_env)
+
     return {
         "success": True,
         "updated": list(updates_to_write.keys()),
-        "restart_required": restart_required,
+        "restart_required": restart_required or bool(new_pending),
+        "pending_restart": new_pending,
         "version": _calculate_env_version(),
     }
 

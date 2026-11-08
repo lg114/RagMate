@@ -187,3 +187,167 @@ def test_reset_endpoint_removed(client, monkeypatch):
 
     res = client.post("/settings/reset", headers=headers)
     assert res.status_code in (404, 405)
+
+
+def test_settings_returns_sources_and_index_status(client, monkeypatch):
+    """GET /settings must report field_sources, index_status, and pending_restart."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.get("/settings", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "field_sources" in data
+    assert "index_status" in data
+    assert "pending_restart" in data
+
+    sources = data["field_sources"]
+    assert sources.get("DATABASE_URL") == "environment"  # Non-editable is deployment managed
+
+    index_status = data["index_status"]
+    assert "has_indexed_docs" in index_status
+    assert "chunk_count" in index_status
+    assert index_status.get("dimension") == 1024
+
+
+def test_environment_managed_field_rejected(client, monkeypatch):
+    """Fields managed by the deployment environment cannot be updated via web API."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Simulate DEPLOY_MANAGED_KEYS protecting LLM_MODEL
+    monkeypatch.setenv("DEPLOY_MANAGED_KEYS", "LLM_MODEL")
+
+    res = client.put(
+        "/settings",
+        json={"settings": {"LLM_MODEL": "gpt-5-future"}},
+        headers=headers,
+    )
+    assert res.status_code == 400
+    assert "managed by the deployment environment" in res.json()["detail"].lower()
+
+
+def test_index_locking_prevents_changing_embedding_model(client, monkeypatch):
+    """When vector store contains indexed chunks, changing embedding model/provider is blocked."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Mock indexed documents exist
+    monkeypatch.setattr("backend.api.settings.get_indexed_chunks_count", lambda *args: 42)
+    monkeypatch.setattr(
+        "backend.api.settings.get_vector_index_metadata",
+        lambda *args: {
+            "embedding_provider": "remote",
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_base_url": "http://127.0.0.1:8081/v1",
+            "dimension": 1024,
+        },
+    )
+
+    # 1. Attempting to change EMBEDDING_MODEL must fail with 400
+    res = client.put(
+        "/settings",
+        json={"settings": {"EMBEDDING_MODEL": "text-embedding-3-small"}},
+        headers=headers,
+    )
+    assert res.status_code == 400
+    assert "cannot modify 'embedding_model'" in res.json()["detail"].lower()
+    assert "re-indexing" in res.json()["detail"].lower()
+
+    # 2. Attempting to change EMBEDDING_PROVIDER must fail with 400
+    res_prov = client.put(
+        "/settings",
+        json={"settings": {"EMBEDDING_PROVIDER": "huggingface"}},
+        headers=headers,
+    )
+    assert res_prov.status_code == 400
+    assert "cannot modify 'embedding_provider'" in res_prov.json()["detail"].lower()
+
+    # 3. But updating EMBEDDING_API_KEY (secret) is allowed
+    res_key = client.put(
+        "/settings",
+        json={"settings": {"EMBEDDING_API_KEY": "new-secret-key"}},
+        headers=headers,
+    )
+    assert res_key.status_code == 200
+    assert "EMBEDDING_API_KEY" in res_key.json()["updated"]
+
+
+def test_pending_restart_tracking(client, monkeypatch):
+    """Modifying a setting on disk indicates it is pending restart."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(settings, "LLM_TEMPERATURE", 0.01)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.put(
+        "/settings",
+        json={"settings": {"LLM_TEMPERATURE": 0.85}},
+        headers=headers,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "LLM_TEMPERATURE" in data["pending_restart"]
+
+
+def test_vector_index_compatibility_logic(monkeypatch):
+    """Test validate_index_compatibility function under various scenarios."""
+    from backend.infrastructure.vector_store import validate_index_compatibility
+
+    # Case 1: No indexed chunks
+    monkeypatch.setattr("backend.infrastructure.vector_store.PgVectorStore.count_chunks", lambda self: 0)
+    ok, reason = validate_index_compatibility("test_table")
+    assert ok is True
+
+    # Case 2: Indexed chunks exist but metadata missing -> unconfirmed
+    monkeypatch.setattr("backend.infrastructure.vector_store.PgVectorStore.count_chunks", lambda self: 100)
+    monkeypatch.setattr("backend.infrastructure.vector_store.PgVectorStore.get_index_metadata", lambda self: None)
+    ok, reason = validate_index_compatibility("test_table")
+    assert ok is False
+    assert "metadata is missing" in reason
+
+    # Case 3: Metadata dimension mismatch
+    monkeypatch.setattr(
+        "backend.infrastructure.vector_store.PgVectorStore.get_index_metadata",
+        lambda self: {
+            "embedding_provider": "remote",
+            "embedding_model": "BAAI/bge-m3",
+            "dimension": 512,
+        },
+    )
+    ok, reason = validate_index_compatibility("test_table")
+    assert ok is False
+    assert "dimension mismatch" in reason.lower()
+
+    # Case 4: Model mismatch
+    monkeypatch.setattr(
+        "backend.infrastructure.vector_store.PgVectorStore.get_index_metadata",
+        lambda self: {
+            "embedding_provider": "remote",
+            "embedding_model": "old-model",
+            "embedding_base_url": "",
+            "dimension": 1024,
+        },
+    )
+    ok, reason = validate_index_compatibility("test_table", model="new-model", provider="remote")
+    assert ok is False
+    assert "model mismatch" in reason.lower()
+
+    # Case 5: Fully compatible
+    monkeypatch.setattr(
+        "backend.infrastructure.vector_store.PgVectorStore.get_index_metadata",
+        lambda self: {
+            "embedding_provider": "remote",
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_base_url": "http://127.0.0.1:8081/v1",
+            "dimension": 1024,
+        },
+    )
+    ok, reason = validate_index_compatibility(
+        "test_table",
+        model="BAAI/bge-m3",
+        provider="remote",
+        base_url="http://127.0.0.1:8081/v1",
+    )
+    assert ok is True
+
