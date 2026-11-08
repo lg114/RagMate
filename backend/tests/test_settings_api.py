@@ -351,3 +351,55 @@ def test_vector_index_compatibility_logic(monkeypatch):
     )
     assert ok is True
 
+
+def test_test_endpoints_require_auth(client, monkeypatch):
+    """Connection test endpoints require authentication."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "test-token")
+
+    # 1. Without auth header -> 401
+    res = client.post("/settings/test/llm")
+    assert res.status_code == 401
+
+    # 2. When server token is empty -> 403 MANAGEMENT_DISABLED
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
+    res_disabled = client.post("/settings/test/llm")
+    assert res_disabled.status_code == 403
+    assert res_disabled.json()["code"] == "MANAGEMENT_DISABLED"
+
+
+def test_test_embedding_checks_1024_dimension(client, monkeypatch):
+    """Embedding test must reject endpoints returning anything other than 1024 dimensions."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+
+    class _MockResponse:
+        def __init__(self, status_code, data):
+            self.status_code = status_code
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    # Case A: returns 1536 dimensions (e.g. text-embedding-3-large)
+    async def mock_post_1536(self, *args, **kwargs):
+        return _MockResponse(200, {"data": [{"embedding": [0.0] * 1536}]})
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post_1536)
+    res = client.post("/settings/test/embedding", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is False
+    assert data["dimension"] == 1536
+    assert "incompatible dimension" in data["detail"].lower()
+
+    # Case B: returns exactly 1024 dimensions
+    async def mock_post_1024(self, *args, **kwargs):
+        return _MockResponse(200, {"data": [{"embedding": [0.0] * 1024}]})
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post_1024)
+    res_ok = client.post("/settings/test/embedding", headers=headers)
+    assert res_ok.status_code == 200
+    data_ok = res_ok.json()
+    assert data_ok["ok"] is True
+    assert data_ok["dimension"] == 1024
+

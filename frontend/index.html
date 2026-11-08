@@ -476,6 +476,41 @@
   }
   .btn-reset-all:hover { background: var(--bg-sunken); color: var(--ink); }
 
+
+  /* Model Blocks & Test Connection */
+  .settings-block { margin-bottom: 12px; }
+  .settings-block-title { font-size: 13.5px; font-weight: 600; color: var(--ink); margin: 0 0 10px; }
+  .settings-divider { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+  .test-conn-row {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+  }
+  .btn-test-conn {
+    background: var(--bg-sunken); color: var(--ink);
+    border: 1px solid var(--line-strong); border-radius: 6px;
+    padding: 5px 12px; font-size: 12.5px; font-weight: 500;
+    cursor: pointer; transition: all .15s ease;
+  }
+  .btn-test-conn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-test-conn:disabled { opacity: .5; cursor: not-allowed; }
+  .test-conn-result { font-size: 12px; color: var(--muted); }
+  .test-conn-result.ok { color: #10b981; font-weight: 500; }
+  .test-conn-result.bad { color: #ef4444; font-weight: 500; }
+
+  /* Spec Cards */
+  .spec-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px 14px; margin-top: 8px;
+  }
+  .spec-card {
+    background: var(--bg-sunken); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 14px; font-size: 12.5px;
+    line-height: 1.5; color: var(--ink-soft);
+  }
+  .spec-card code { font-family: var(--mono); font-size: 11.5px; }
+
+  .data-dest-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
 </style>
 </head>
 <body>
@@ -581,13 +616,22 @@
             <div class="view" id="view-settings" hidden>
       <div class="scroll">
         <div class="scroll-inner">
-                    <!-- Management Disabled Notice (when server API_AUTH_TOKEN is not configured) -->
+          <!-- Management Disabled Notice (when server API_AUTH_TOKEN is not configured) -->
           <div class="settings-restart-banner" id="settings-disabled-banner" style="background: #231b0e; border-color: #b45309; color: #fde68a;" hidden>
             <div class="settings-restart-content">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
               <span>Management API is disabled because <code class="mono">API_AUTH_TOKEN</code> is not set in the server environment. Configure it in deployment to enable settings editing.</span>
             </div>
           </div>
+
+          <!-- Token Required Notice (when browser lacks valid API token) -->
+          <div class="settings-restart-banner" id="settings-unauthorized-banner" style="background: #1e1b4b; border-color: #6366f1; color: #c7d2fe;" hidden>
+            <div class="settings-restart-content">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span>Authentication required: Enter your token under <a href="#token-input" style="color: #93c5fd; text-decoration: underline;">Access &amp; Limits</a> and click "Save to Browser" to view and edit settings.</span>
+            </div>
+          </div>
+
           <!-- Restart Notification Banner -->
           <div class="settings-restart-banner" id="settings-restart-banner" hidden>
             <div class="settings-restart-content">
@@ -599,267 +643,236 @@
             </button>
           </div>
 
-          <!-- Service Status Panel -->
+          <!-- 1. Model Connections (Default Open, Put First) -->
           <section class="panel" style="margin-bottom: 18px;">
             <div class="settings-section-title">
-              <span>Service Status</span>
+              <span>Model Connections</span>
+            </div>
+            <p class="settings-section-desc">Manage LLM, Embedding, and Reranker model configurations. Changes require a server restart to take effect.</p>
+
+            <!-- Block A: Chat Model -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">Chat Model</h3>
+              <div class="settings-grid">
+                <div class="settings-field">
+                  <label for="cfg-LLM_MODEL">Model Name <span class="field-tag" id="tag-LLM_MODEL">Required</span></label>
+                  <input id="cfg-LLM_MODEL" type="text" placeholder="e.g. gpt-4o, qwen3:8b, claude-3.5-sonnet">
+                  <span class="field-hint">LLM model used for synthesis and answering questions.</span>
+                </div>
+                <div class="settings-field">
+                  <label for="cfg-LLM_API_BASE_URL">Base URL</label>
+                  <input id="cfg-LLM_API_BASE_URL" type="text" placeholder="e.g. http://localhost:11434/v1">
+                  <span class="field-hint">Leave blank for provider default, or enter custom/local endpoint.</span>
+                </div>
+                <div class="settings-field full-width">
+                  <label for="cfg-LLM_API_KEY">API Key <span class="field-tag" id="tag-LLM_API_KEY">Secret</span></label>
+                  <input id="cfg-LLM_API_KEY" type="password" placeholder="Leave blank to keep current key">
+                  <span class="field-hint">API authorization key. Leave empty for unauthenticated local services.</span>
+                </div>
+              </div>
+
+              <details class="settings-details" style="margin-top: 8px;">
+                <summary>Advanced LLM Options (Temperature & Reasoning)</summary>
+                <div class="settings-grid" style="margin-top: 12px;">
+                  <div class="settings-field">
+                    <label for="cfg-LLM_TEMPERATURE">Temperature</label>
+                    <input id="cfg-LLM_TEMPERATURE" type="number" min="0.0" max="2.0" step="0.05" placeholder="0.01">
+                    <span class="field-hint">Sampling randomness (0.0 for strict facts, up to 2.0).</span>
+                  </div>
+                  <div class="settings-field">
+                    <label for="cfg-LLM_REASONING_EFFORT">Reasoning Effort (Thinking)</label>
+                    <select id="cfg-LLM_REASONING_EFFORT">
+                      <option value="">Default (do not pass parameter)</option>
+                      <option value="none">none (disable thinking, recommended for Qwen3)</option>
+                    </select>
+                    <span class="field-hint">Set to 'none' if models place all outputs into reasoning tokens.</span>
+                  </div>
+                </div>
+              </details>
+
+              <div class="test-conn-row">
+                <button type="button" class="btn-test-conn" id="btn-test-llm">Test Chat Model</button>
+                <span class="test-conn-result" id="res-test-llm"></span>
+              </div>
+            </div>
+
+            <hr class="settings-divider">
+
+            <!-- Block B: Embedding Model -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">Embedding Model</h3>
+              <div class="settings-grid">
+                <div class="settings-field">
+                  <label for="cfg-EMBEDDING_PROVIDER">Provider <span class="field-tag" id="tag-EMBEDDING_PROVIDER">Required</span></label>
+                  <select id="cfg-EMBEDDING_PROVIDER">
+                    <option value="remote">Remote (OpenAI-compatible HTTP API)</option>
+                    <option value="openai">OpenAI (Official / compatible)</option>
+                    <option value="huggingface">In-process BGE-M3 (FlagEmbedding)</option>
+                  </select>
+                  <span class="field-hint" id="hint-EMBEDDING_PROVIDER">In-process mode requires installing the local dependencies extra.</span>
+                </div>
+                <div class="settings-field">
+                  <label for="cfg-EMBEDDING_MODEL">Model Name <span class="field-tag" id="tag-EMBEDDING_MODEL">1024 dims</span></label>
+                  <input id="cfg-EMBEDDING_MODEL" type="text" placeholder="BAAI/bge-m3">
+                  <span class="field-hint" id="hint-EMBEDDING_MODEL">Must output dense vectors matching database 1024-dimension index.</span>
+                </div>
+                <div class="settings-field" id="wrap-EMBEDDING_API_BASE_URL">
+                  <label for="cfg-EMBEDDING_API_BASE_URL">Base URL <span class="field-tag" id="tag-EMBEDDING_API_BASE_URL">URL</span></label>
+                  <input id="cfg-EMBEDDING_API_BASE_URL" type="text" placeholder="e.g. https://api.openai.com/v1">
+                  <span class="field-hint">Base endpoint for POST /embeddings requests.</span>
+                </div>
+                <div class="settings-field" id="wrap-EMBEDDING_API_KEY">
+                  <label for="cfg-EMBEDDING_API_KEY">API Key <span class="field-tag" id="tag-EMBEDDING_API_KEY">Secret</span></label>
+                  <input id="cfg-EMBEDDING_API_KEY" type="password" placeholder="Leave blank to keep current key">
+                  <span class="field-hint">Remote embedding authentication key.</span>
+                </div>
+              </div>
+
+              <div class="test-conn-row">
+                <button type="button" class="btn-test-conn" id="btn-test-embedding">Test Embedding Model</button>
+                <span class="test-conn-result" id="res-test-embedding"></span>
+              </div>
+            </div>
+
+            <hr class="settings-divider">
+
+            <!-- Block C: Reranker Model -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">Reranker Model</h3>
+              <div class="settings-grid">
+                <div class="settings-field">
+                  <label for="cfg-RERANKER_PROVIDER">Provider <span class="field-tag" id="tag-RERANKER_PROVIDER">Provider</span></label>
+                  <select id="cfg-RERANKER_PROVIDER">
+                    <option value="api">Remote (HTTP /rerank API)</option>
+                    <option value="local">In-process CrossEncoder (SentenceTransformers)</option>
+                  </select>
+                  <span class="field-hint">Remote API recommended to conserve memory.</span>
+                </div>
+                <div class="settings-field">
+                  <label for="cfg-RERANKER_MODEL">Model Name <span class="field-tag" id="tag-RERANKER_MODEL">Model</span></label>
+                  <input id="cfg-RERANKER_MODEL" type="text" placeholder="BAAI/bge-reranker-v2-m3">
+                  <span class="field-hint">Target reranker model identifier.</span>
+                </div>
+                <div class="settings-field" id="wrap-RERANKER_API_BASE_URL">
+                  <label for="cfg-RERANKER_API_BASE_URL">Base URL <span class="field-tag" id="tag-RERANKER_API_BASE_URL">URL</span></label>
+                  <input id="cfg-RERANKER_API_BASE_URL" type="text" placeholder="e.g. https://api.jina.ai/v1">
+                  <span class="field-hint">Base endpoint for POST /rerank requests.</span>
+                </div>
+                <div class="settings-field" id="wrap-RERANKER_API_KEY">
+                  <label for="cfg-RERANKER_API_KEY">API Key <span class="field-tag" id="tag-RERANKER_API_KEY">Secret</span></label>
+                  <input id="cfg-RERANKER_API_KEY" type="password" placeholder="Leave blank to keep current key">
+                  <span class="field-hint">Remote reranker service key.</span>
+                </div>
+              </div>
+
+              <div class="test-conn-row">
+                <button type="button" class="btn-test-conn" id="btn-test-reranker">Test Reranker Model</button>
+                <span class="test-conn-result" id="res-test-reranker"></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 2. Service Status (Read-Only) -->
+          <section class="panel" style="margin-bottom: 18px;">
+            <div class="settings-section-title">
+              <span>Service Status & Data Destinations</span>
               <button type="button" class="btn-reset-all" id="btn-refresh-ready" style="padding: 3px 10px; font-size: 12px;">Refresh Status</button>
             </div>
-            <p class="settings-section-desc">Real-time health check for backend services, database, and models.</p>
+            <p class="settings-section-desc">Health verification and explicit data destination mapping for models and databases.</p>
             <ul class="ready-list" id="ready-list"></ul>
           </section>
 
-          <!-- 1. System Providers -->
+          <!-- 3. Access & Limits -->
           <section class="panel" style="margin-bottom: 18px;">
             <div class="settings-section-title">
-              <span>Model Providers & Infrastructure</span>
+              <span>Access & Limits</span>
             </div>
-            <p class="settings-section-desc">Configure LLM inference, embedding, and reranker providers and endpoints.</p>
+            <p class="settings-section-desc">Manage local browser authorization tokens and review server upload limits.</p>
 
             <div class="settings-grid">
-              <!-- LLM -->
               <div class="settings-field">
-                <label for="cfg-LLM_MODEL">LLM Model Name <span class="field-tag">Required</span></label>
-                <input id="cfg-LLM_MODEL" type="text" placeholder="e.g. gpt-4o, qwen3:8b, claude-3.5-sonnet">
-                <span class="field-hint">Mapped to LLM_MODEL. Required to answer questions.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-LLM_API_KEY">LLM API Key <span class="field-tag" id="tag-LLM_API_KEY">Secret</span></label>
-                <input id="cfg-LLM_API_KEY" type="password" placeholder="Leave blank to keep current key">
-                <span class="field-hint">Required for remote providers (OpenAI, Anthropic, etc.). Leave blank for local Ollama.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-LLM_API_BASE_URL">LLM Base URL</label>
-                <input id="cfg-LLM_API_BASE_URL" type="text" placeholder="e.g. http://localhost:11434/v1">
-                <span class="field-hint">Custom endpoint or local Ollama / vLLM base URL.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-LLM_REASONING_EFFORT">Reasoning Effort (Thinking)</label>
-                <select id="cfg-LLM_REASONING_EFFORT">
-                  <option value="">Default (do not pass parameter)</option>
-                  <option value="none">none (disable thinking, recommended for Qwen3)</option>
-                </select>
-                <span class="field-hint">Set to 'none' if reasoning-capable models place all answers in reasoning tokens.</span>
+                <label for="token-input">Browser API Token</label>
+                <div style="display: flex; gap: 8px;">
+                  <input type="password" id="token-input" placeholder="API token (optional, empty by default)" style="flex: 1;">
+                  <button type="button" class="btn-reset-all" id="token-save" style="padding: 0 14px; font-size: 13px;">Save</button>
+                </div>
+                <span class="field-hint">Stored only in this browser for API authorization. Leave blank if server auth is not set.</span>
               </div>
 
-              <!-- Embedding -->
               <div class="settings-field">
-                <label for="cfg-EMBEDDING_PROVIDER">Embedding Provider <span class="field-tag" id="tag-EMBEDDING_PROVIDER">Required</span></label>
-                <select id="cfg-EMBEDDING_PROVIDER">
-                  <option value="remote">remote (Remote Embedding API)</option>
-                  <option value="openai">openai (OpenAI-compatible endpoint)</option>
-                  <option value="huggingface">huggingface (In-process BGE-M3)</option>
-                  <option value="local">local (Local alias)</option>
-                </select>
-                <span class="field-hint">Switching embedding provider requires re-indexing documents.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-EMBEDDING_MODEL">Embedding Model Name <span class="field-tag" id="tag-EMBEDDING_MODEL">1024 dims</span></label>
-                <input id="cfg-EMBEDDING_MODEL" type="text" placeholder="BAAI/bge-m3">
-                <span class="field-hint">Default: BAAI/bge-m3 or text-embedding-3-small.</span>
-              </div>
-              <div class="settings-field" id="wrap-EMBEDDING_API_BASE_URL">
-                <label for="cfg-EMBEDDING_API_BASE_URL">Embedding Base URL <span class="field-tag" id="tag-EMBEDDING_API_BASE_URL">URL</span></label>
-                <input id="cfg-EMBEDDING_API_BASE_URL" type="text" placeholder="e.g. https://api.openai.com/v1">
-                <span class="field-hint">Remote embedding endpoint (required for remote / openai).</span>
-              </div>
-              <div class="settings-field" id="wrap-EMBEDDING_API_KEY">
-                <label for="cfg-EMBEDDING_API_KEY">Embedding API Key <span class="field-tag" id="tag-EMBEDDING_API_KEY">Secret</span></label>
-                <input id="cfg-EMBEDDING_API_KEY" type="password" placeholder="Leave blank to keep current key">
-                <span class="field-hint">Remote embedding key. Optional if self-hosted service has no auth.</span>
+                <label>Server Authentication Status</label>
+                <input type="text" id="status-server-auth" readonly value="Checking..." style="opacity: .85; cursor: default;">
+                <span class="field-hint">Controlled by server API_AUTH_TOKEN environment variable.</span>
               </div>
 
-              <!-- Reranker -->
               <div class="settings-field">
-                <label for="cfg-RERANKER_PROVIDER">Reranker Provider</label>
-                <select id="cfg-RERANKER_PROVIDER">
-                  <option value="api">api (Remote Reranker API)</option>
-                  <option value="local">local (Local CrossEncoder)</option>
-                </select>
-                <span class="field-hint">Defaults to remote API to keep memory footprint low.</span>
+                <label>Single File Upload Limit</label>
+                <input type="text" id="status-upload-limit" readonly value="50 MB" style="opacity: .85; cursor: default;">
+                <span class="field-hint">Configured via MAX_UPLOAD_SIZE in server deployment.</span>
               </div>
+
               <div class="settings-field">
-                <label for="cfg-RERANKER_MODEL">Reranker Model Name</label>
-                <input id="cfg-RERANKER_MODEL" type="text" placeholder="BAAI/bge-reranker-v2-m3">
-                <span class="field-hint">e.g. BAAI/bge-reranker-v2-m3, jina-reranker-v2.</span>
-              </div>
-              <div class="settings-field" id="wrap-RERANKER_API_BASE_URL">
-                <label for="cfg-RERANKER_API_BASE_URL">Reranker Base URL</label>
-                <input id="cfg-RERANKER_API_BASE_URL" type="text" placeholder="e.g. https://api.jina.ai/v1">
-                <span class="field-hint">POST {URL}/rerank endpoint address.</span>
-              </div>
-              <div class="settings-field" id="wrap-RERANKER_API_KEY">
-                <label for="cfg-RERANKER_API_KEY">Reranker API Key <span class="field-tag" id="tag-RERANKER_API_KEY">Secret</span></label>
-                <input id="cfg-RERANKER_API_KEY" type="password" placeholder="Leave blank to keep current key">
-                <span class="field-hint">Remote reranker key (e.g. Jina API Key).</span>
+                <label>Supported Document Types</label>
+                <input type="text" readonly value=".pdf, .docx, .txt, .pptx, .xlsx, .csv, .html, .rtf, .json, .xml, .epub" style="opacity: .85; cursor: default;">
+                <span class="field-hint">Parsed with structure-preserving section headers.</span>
               </div>
             </div>
+          </section>
 
-            <!-- Foldable: Security & Limits -->
-            <details class="settings-details">
-              <summary>Security & Resource Limits</summary>
-              <div class="settings-grid" style="margin-top: 12px;">
-                <div class="settings-field">
-                  <label for="cfg-API_AUTH_TOKEN">API Auth Token <span class="field-tag" id="tag-API_AUTH_TOKEN">Token</span></label>
-                  <input id="cfg-API_AUTH_TOKEN" type="password" placeholder="Leave empty to disable authentication">
-                  <span class="field-hint">When set, incoming API requests must include Bearer auth header.</span>
+          <!-- 4. Advanced Architecture (Read-Only Specs + Tracing) -->
+          <section class="panel" style="margin-bottom: 18px;">
+            <details class="settings-details" style="margin-top: 0; border-top: 0; padding-top: 0;">
+              <summary style="font-size: 14px; font-weight: 600; color: var(--ink);">Advanced Architecture & Retrieval Specs</summary>
+              <div style="margin-top: 14px;">
+                <p class="settings-section-desc" style="margin-bottom: 12px;">The retrieval pipeline is frozen and verified against the deterministic evaluation baseline.</p>
+                <div class="spec-grid">
+                  <div class="spec-card">
+                    <strong>Chunking:</strong> <code>title_path</code> with Small-to-Big parent expansion (parent 2500 chars, child 1000 chars).
+                  </div>
+                  <div class="spec-card">
+                    <strong>Hybrid Search:</strong> BM25 text rank fused with 1024-dim HNSW vector search via Reciprocal Rank Fusion (k=60).
+                  </div>
+                  <div class="spec-card">
+                    <strong>Re-ranking:</strong> Top 30 candidates re-scored via BAAI/bge-reranker-v2-m3; scores &lt; 0.3 filtered out; dynamic top 15 retained.
+                  </div>
+                  <div class="spec-card">
+                    <strong>Grounding & Low-Confidence Gating:</strong> Automatically hedges or refuses when retrieved passage evidence is insufficient.
+                  </div>
                 </div>
-                <div class="settings-field">
-                  <label for="cfg-CORS_ORIGINS">CORS Allowed Origins</label>
-                  <input id="cfg-CORS_ORIGINS" type="text" placeholder="http://localhost:8000,http://127.0.0.1:8000">
-                  <span class="field-hint">Comma-separated allowed origins for cross-origin web requests.</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-AGENT_TIMEOUT">Request Timeout (seconds)</label>
-                  <input id="cfg-AGENT_TIMEOUT" type="number" min="10" max="600" placeholder="120">
-                  <span class="field-hint">Global timeout for retrieval and response generation.</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-MAX_UPLOAD_SIZE_MB">Max Upload Size (MB)</label>
-                  <input id="cfg-MAX_UPLOAD_SIZE_MB" type="number" min="1" max="500" placeholder="50">
-                  <span class="field-hint">Maximum upload size per document in megabytes (default 50MB).</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-RATE_LIMIT_MAX">Rate Limit Max Requests</label>
-                  <input id="cfg-RATE_LIMIT_MAX" type="number" min="1" max="1000" placeholder="30">
-                  <span class="field-hint">Maximum number of requests permitted within the time window.</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-RATE_LIMIT_WINDOW">Rate Limit Window (seconds)</label>
-                  <input id="cfg-RATE_LIMIT_WINDOW" type="number" min="1" max="3600" placeholder="60">
-                  <span class="field-hint">Duration of rate limit window in seconds.</span>
+
+                <!-- Optional LangSmith Observability for Admins -->
+                <div style="margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px;">
+                  <div class="settings-switch-row" style="border: 0; padding: 0 0 10px 0;">
+                    <div class="settings-switch-info">
+                      <span class="settings-switch-title">LangSmith Tracing Telemetry</span>
+                      <span class="settings-switch-desc">Transmit retrieval spans and LLM call traces to LangSmith platform.</span>
+                    </div>
+                    <label class="switch">
+                      <input id="cfg-LANGSMITH_TRACING" type="checkbox">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="settings-grid" id="wrap-LANGSMITH_CONFIG" style="margin-top: 6px;">
+                    <div class="settings-field">
+                      <label for="cfg-LANGSMITH_API_KEY">LangSmith API Key <span class="field-tag" id="tag-LANGSMITH_API_KEY">Secret</span></label>
+                      <input id="cfg-LANGSMITH_API_KEY" type="password" placeholder="Leave blank to keep current key">
+                    </div>
+                    <div class="settings-field">
+                      <label for="cfg-LANGSMITH_PROJECT">Project Name</label>
+                      <input id="cfg-LANGSMITH_PROJECT" type="text" placeholder="ragmate">
+                    </div>
+                    <div class="settings-field full-width">
+                      <label for="cfg-LANGSMITH_ENDPOINT">Endpoint URL</label>
+                      <input id="cfg-LANGSMITH_ENDPOINT" type="text" placeholder="https://api.smith.langchain.com">
+                    </div>
+                  </div>
                 </div>
               </div>
             </details>
           </section>
 
-          <!-- 2. Workspace & Retrieval Settings -->
-          <section class="panel" style="margin-bottom: 18px;">
-            <div class="settings-section-title">
-              <span>Retrieval & Generation</span>
-            </div>
-            <p class="settings-section-desc">Parameters that directly control document recall quality and response accuracy.</p>
-
-            <div class="settings-grid">
-              <div class="settings-field">
-                <label for="cfg-FINAL_CONTEXT_K">Context Passages (Top N) <span class="field-tag">Primary</span></label>
-                <input id="cfg-FINAL_CONTEXT_K" type="number" min="1" max="50" step="1" placeholder="15">
-                <span class="field-hint">Maximum number of reranked passages passed to the LLM context.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-RERANK_SCORE_THRESHOLD">Rerank Score Threshold <span class="field-tag">Primary</span></label>
-                <input id="cfg-RERANK_SCORE_THRESHOLD" type="number" min="0.0" max="1.0" step="0.05" placeholder="0.3">
-                <span class="field-hint">Sigmoid threshold (0.0–1.0) to discard low-relevance candidates.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-RERANK_CANDIDATES">Rerank Candidates Pool</label>
-                <input id="cfg-RERANK_CANDIDATES" type="number" min="5" max="100" step="5" placeholder="30">
-                <span class="field-hint">Number of hybrid search candidates retrieved prior to reranking.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-RRF_K">RRF Fusion Constant (k)</label>
-                <input id="cfg-RRF_K" type="number" min="1" max="200" placeholder="60">
-                <span class="field-hint">Reciprocal Rank Fusion constant; lower values favor dual-ranked items.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-LLM_TEMPERATURE">Temperature (Randomness) <span class="field-tag">Primary</span></label>
-                <input id="cfg-LLM_TEMPERATURE" type="number" min="0.0" max="2.0" step="0.05" placeholder="0.01">
-                <span class="field-hint">0.0 for strict, deterministic answers; 0.7 for diverse responses.</span>
-              </div>
-              <div class="settings-field">
-                <label for="cfg-MAX_HISTORY_TURNS">History Turns Limit</label>
-                <input id="cfg-MAX_HISTORY_TURNS" type="number" min="1" max="50" placeholder="10">
-                <span class="field-hint">Number of recent chat turns included in context.</span>
-              </div>
-            </div>
-
-            <!-- Toggles -->
-            <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 6px;">
-              <div class="settings-switch-row">
-                <div class="settings-switch-info">
-                  <span class="settings-switch-title">Query Contextualization</span>
-                  <span class="settings-switch-desc">Automatically rewrite multi-turn follow-up queries when initial confidence is low.</span>
-                </div>
-                <label class="switch">
-                  <input id="cfg-QUERY_CONTEXTUALIZE" type="checkbox">
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="settings-switch-row">
-                <div class="settings-switch-info">
-                  <span class="settings-switch-title">Faithfulness Check</span>
-                  <span class="settings-switch-desc">Verify generated claims against retrieved passages to prevent hallucinations.</span>
-                </div>
-                <label class="switch">
-                  <input id="cfg-FAITHFULNESS_CHECK" type="checkbox">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-
-            <!-- Foldable: Chunking -->
-            <details class="settings-details">
-              <summary>Advanced Chunking Parameters</summary>
-              <div class="settings-grid" style="margin-top: 12px;">
-                <div class="settings-field">
-                  <label for="cfg-CHUNK_SIZE">Default Chunk Size</label>
-                  <input id="cfg-CHUNK_SIZE" type="number" min="100" max="4000" placeholder="1000">
-                  <span class="field-hint">Character count per text segment.</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-CHUNK_OVERLAP">Default Chunk Overlap</label>
-                  <input id="cfg-CHUNK_OVERLAP" type="number" min="0" max="1000" placeholder="200">
-                  <span class="field-hint">Overlapping characters between adjacent chunks.</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-CHUNK_SIZE_PARENT">Parent Chunk Size</label>
-                  <input id="cfg-CHUNK_SIZE_PARENT" type="number" min="500" max="8000" placeholder="2500">
-                  <span class="field-hint">Large context chunk size for Small-to-Big parent expansion.</span>
-                </div>
-                <div class="settings-field">
-                  <label for="cfg-CHUNK_OVERLAP_PARENT">Parent Chunk Overlap</label>
-                  <input id="cfg-CHUNK_OVERLAP_PARENT" type="number" min="0" max="2000" placeholder="300">
-                  <span class="field-hint">Overlapping characters between parent chunks.</span>
-                </div>
-              </div>
-            </details>
-          </section>
-
-          <!-- 3. Tracing & Observability -->
-          <section class="panel" style="margin-bottom: 18px;">
-            <div class="settings-section-title">
-              <span>Tracing & Observability</span>
-            </div>
-            <p class="settings-section-desc">LangSmith tracing telemetry for debugging retrieval pipelines and LLM calls.</p>
-
-            <div class="settings-switch-row" style="border: 0; padding-top: 0;">
-              <div class="settings-switch-info">
-                <span class="settings-switch-title">Enable LangSmith Tracing</span>
-                <span class="settings-switch-desc">Transmit execution spans and query traces to LangSmith platform.</span>
-              </div>
-              <label class="switch">
-                <input id="cfg-LANGSMITH_TRACING" type="checkbox">
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-grid" id="wrap-LANGSMITH_CONFIG" style="margin-top: 10px;">
-              <div class="settings-field">
-                <label for="cfg-LANGSMITH_API_KEY">LangSmith API Key <span class="field-tag" id="tag-LANGSMITH_API_KEY">Secret</span></label>
-                <input id="cfg-LANGSMITH_API_KEY" type="password" placeholder="Leave blank to keep current key">
-              </div>
-              <div class="settings-field">
-                <label for="cfg-LANGSMITH_PROJECT">Project Name</label>
-                <input id="cfg-LANGSMITH_PROJECT" type="text" placeholder="ragmate">
-              </div>
-              <div class="settings-field full-width">
-                <label for="cfg-LANGSMITH_ENDPOINT">Endpoint URL</label>
-                <input id="cfg-LANGSMITH_ENDPOINT" type="text" placeholder="https://api.smith.langchain.com">
-              </div>
-            </div>
-          </section>
-
-          <!-- 4. Actions -->
+          <!-- Actions Bar -->
           <div class="settings-actions">
             <button type="button" class="btn-reset-all" id="btn-discard-settings">Discard Changes</button>
             <button type="button" class="btn-save-all" id="btn-save-settings">Save Settings</button>

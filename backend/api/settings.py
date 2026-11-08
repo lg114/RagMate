@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
+import httpx
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -483,3 +485,175 @@ def update_single_setting(key: str, payload: SingleSettingUpdate):
         "restart_required": key in RESTART_KEYS,
         "version": res["version"],
     }
+
+
+def _sanitize_error(exc: Exception) -> str:
+    """Sanitize error messages so secrets or stack traces never leak to client."""
+    msg = str(exc)
+    msg = re.sub(r"Bearer\s+[A-Za-z0-9_\-\.]+", "Bearer [MASKED]", msg)
+    msg = re.sub(r"key=[A-Za-z0-9_\-\.]+", "key=[MASKED]", msg)
+    if len(msg) > 160:
+        msg = msg[:160] + "..."
+    return msg
+
+
+@router.post("/settings/test/llm")
+async def test_llm_connection():
+    """Test Chat Model connection with a short prompt. Timeout: 5 seconds."""
+    env_dict = _parse_env_dict()
+    model = env_dict.get("LLM_MODEL") or current_settings.LLM_MODEL
+    base_url = env_dict.get("LLM_API_BASE_URL") or current_settings.LLM_API_BASE_URL
+    api_key = env_dict.get("LLM_API_KEY") or current_settings.LLM_API_KEY
+
+    if not model:
+        return {"ok": False, "detail": "LLM_MODEL is not configured."}
+
+    start = time.perf_counter()
+    endpoint = f"{base_url.rstrip('/')}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 5,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(endpoint, json=payload, headers=headers)
+        latency = int((time.perf_counter() - start) * 1000)
+        if resp.status_code == 200:
+            return {"ok": True, "latency_ms": latency, "model": model, "detail": f"Success ({latency}ms)"}
+        return {
+            "ok": False,
+            "latency_ms": latency,
+            "model": model,
+            "detail": f"HTTP {resp.status_code}: {_sanitize_error(Exception(resp.text))}",
+        }
+    except Exception as e:
+        latency = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": _sanitize_error(e)}
+
+
+@router.post("/settings/test/embedding")
+async def test_embedding_connection():
+    """Test Embedding Model connection and verify 1024-dimension compatibility. Timeout: 5s."""
+    env_dict = _parse_env_dict()
+    provider = env_dict.get("EMBEDDING_PROVIDER") or current_settings.EMBEDDING_PROVIDER
+    model = env_dict.get("EMBEDDING_MODEL") or current_settings.EMBEDDING_MODEL
+    base_url = env_dict.get("EMBEDDING_API_BASE_URL") or current_settings.EMBEDDING_API_BASE_URL
+    api_key = env_dict.get("EMBEDDING_API_KEY") or current_settings.EMBEDDING_API_KEY
+
+    start = time.perf_counter()
+    if provider in LOCAL_EMBEDDING_PROVIDERS:
+        try:
+            from FlagEmbedding import BGEM3FlagModel
+            latency = int((time.perf_counter() - start) * 1000)
+            return {
+                "ok": True,
+                "latency_ms": latency,
+                "model": model,
+                "dimension": 1024,
+                "detail": f"In-process FlagEmbedding available ({latency}ms)",
+            }
+        except ImportError:
+            return {"ok": False, "detail": "FlagEmbedding package is not installed. Run: pip install -e \".[local]\""}
+        except Exception as e:
+            return {"ok": False, "detail": _sanitize_error(e)}
+
+    if not base_url:
+        return {"ok": False, "detail": "EMBEDDING_API_BASE_URL is required for remote embedding."}
+
+    endpoint = f"{base_url.rstrip('/')}/embeddings"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {"model": model, "input": ["healthcheck"]}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(endpoint, json=payload, headers=headers)
+        latency = int((time.perf_counter() - start) * 1000)
+        if resp.status_code != 200:
+            return {
+                "ok": False,
+                "latency_ms": latency,
+                "model": model,
+                "detail": f"HTTP {resp.status_code}: {_sanitize_error(Exception(resp.text))}",
+            }
+        data = resp.json()
+        items = data.get("data") or []
+        if not items or "embedding" not in items[0]:
+            return {"ok": False, "latency_ms": latency, "detail": "Response missing embedding vector."}
+        dim = len(items[0]["embedding"])
+        if dim != 1024:
+            return {
+                "ok": False,
+                "latency_ms": latency,
+                "dimension": dim,
+                "detail": f"Incompatible dimension: returned {dim} dims, but RagMate vector store requires exactly 1024 dimensions.",
+            }
+        return {"ok": True, "latency_ms": latency, "dimension": dim, "model": model, "detail": f"Success ({dim} dims, {latency}ms)"}
+    except Exception as e:
+        latency = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": _sanitize_error(e)}
+
+
+@router.post("/settings/test/reranker")
+async def test_reranker_connection():
+    """Test Reranker Model connection with a short query. Timeout: 5 seconds."""
+    env_dict = _parse_env_dict()
+    provider = env_dict.get("RERANKER_PROVIDER") or current_settings.RERANKER_PROVIDER
+    model = env_dict.get("RERANKER_MODEL") or current_settings.RERANKER_MODEL
+    base_url = env_dict.get("RERANKER_API_BASE_URL") or current_settings.RERANKER_API_BASE_URL
+    api_key = env_dict.get("RERANKER_API_KEY") or current_settings.RERANKER_API_KEY
+
+    start = time.perf_counter()
+    if provider == "local":
+        try:
+            from sentence_transformers import CrossEncoder
+            latency = int((time.perf_counter() - start) * 1000)
+            return {"ok": True, "latency_ms": latency, "model": model, "detail": f"Local CrossEncoder available ({latency}ms)"}
+        except ImportError:
+            return {"ok": False, "detail": "Sentence-transformers package is not installed. Run: pip install -e \".[local]\""}
+        except Exception as e:
+            return {"ok": False, "detail": _sanitize_error(e)}
+
+    if not base_url:
+        return {"ok": False, "detail": "RERANKER_API_BASE_URL is required for remote reranker."}
+
+    endpoint = f"{base_url.rstrip('/')}/rerank"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "model": model,
+        "query": "test query",
+        "documents": ["candidate doc 1", "candidate doc 2"],
+        "top_n": 2,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(endpoint, json=payload, headers=headers)
+        latency = int((time.perf_counter() - start) * 1000)
+        if resp.status_code != 200:
+            return {
+                "ok": False,
+                "latency_ms": latency,
+                "model": model,
+                "detail": f"HTTP {resp.status_code}: {_sanitize_error(Exception(resp.text))}",
+            }
+        data = resp.json()
+        results = data.get("results") or []
+        if not results:
+            return {"ok": False, "latency_ms": latency, "detail": "Response missing rerank results."}
+        return {"ok": True, "latency_ms": latency, "model": model, "detail": f"Success ({latency}ms)"}
+    except Exception as e:
+        latency = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": _sanitize_error(e)}
+

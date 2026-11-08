@@ -721,42 +721,27 @@ let currentSettingsVersion = null;
 let configuredSecrets = new Set();
 
 const FIELD_DEFS = {
-  // text / password / select inputs
-  "LLM_MODEL": { type: "text", required: true },
-  "LLM_API_KEY": { type: "secret" },
+  // Chat Model
+  "LLM_MODEL": { type: "text" },
   "LLM_API_BASE_URL": { type: "text" },
+  "LLM_API_KEY": { type: "secret" },
+  "LLM_TEMPERATURE": { type: "number", min: 0.0, max: 2.0 },
   "LLM_REASONING_EFFORT": { type: "select" },
+  // Embedding Model
   "EMBEDDING_PROVIDER": { type: "select" },
   "EMBEDDING_MODEL": { type: "text" },
   "EMBEDDING_API_BASE_URL": { type: "text" },
   "EMBEDDING_API_KEY": { type: "secret" },
+  // Reranker Model
   "RERANKER_PROVIDER": { type: "select" },
   "RERANKER_MODEL": { type: "text" },
   "RERANKER_API_BASE_URL": { type: "text" },
   "RERANKER_API_KEY": { type: "secret" },
-  "API_AUTH_TOKEN": { type: "secret" },
-  "CORS_ORIGINS": { type: "text" },
+  // Tracing Telemetry
+  "LANGSMITH_TRACING": { type: "boolean" },
   "LANGSMITH_API_KEY": { type: "secret" },
   "LANGSMITH_PROJECT": { type: "text" },
   "LANGSMITH_ENDPOINT": { type: "text" },
-  // numbers
-  "FINAL_CONTEXT_K": { type: "number", min: 1, max: 50 },
-  "RERANK_SCORE_THRESHOLD": { type: "number", min: 0, max: 1 },
-  "RERANK_CANDIDATES": { type: "number", min: 1, max: 200 },
-  "RRF_K": { type: "number", min: 1, max: 200 },
-  "LLM_TEMPERATURE": { type: "number", min: 0, max: 2 },
-  "MAX_HISTORY_TURNS": { type: "number", min: 1, max: 50 },
-  "AGENT_TIMEOUT": { type: "number", min: 5, max: 600 },
-  "RATE_LIMIT_MAX": { type: "number", min: 1, max: 1000 },
-  "RATE_LIMIT_WINDOW": { type: "number", min: 1, max: 3600 },
-  "CHUNK_SIZE": { type: "number", min: 50, max: 5000 },
-  "CHUNK_OVERLAP": { type: "number", min: 0, max: 2000 },
-  "CHUNK_SIZE_PARENT": { type: "number", min: 100, max: 10000 },
-  "CHUNK_OVERLAP_PARENT": { type: "number", min: 0, max: 3000 },
-  // booleans
-  "QUERY_CONTEXTUALIZE": { type: "boolean" },
-  "FAITHFULNESS_CHECK": { type: "boolean" },
-  "LANGSMITH_TRACING": { type: "boolean" },
 };
 
 function updateSettingsLinkage() {
@@ -781,24 +766,38 @@ function updateSettingsLinkage() {
 
 async function loadSettings() {
   const disabledBanner = $("settings-disabled-banner");
+  const unauthBanner = $("settings-unauthorized-banner");
   try {
     const res = await fetch("/settings", { headers: authHeaders() });
     if (res.status === 403) {
       if (disabledBanner) disabledBanner.hidden = false;
+      if (unauthBanner) unauthBanner.hidden = true;
       document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button:not(#settings-disabled-banner button)")
-        .forEach(el => { if (el.id !== "btn-refresh-ready") el.disabled = true; });
+        .forEach(el => {
+          if (el.id !== "btn-refresh-ready" && el.id !== "token-input" && el.id !== "btn-save-token") {
+            el.disabled = true;
+          }
+        });
       return;
     }
     if (disabledBanner) disabledBanner.hidden = true;
-    document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button")
-      .forEach(el => { el.disabled = false; });
 
     if (!res.ok) {
       if (res.status === 401) {
-        toast("API token required to access settings. Please set your browser token.");
+        if (unauthBanner) unauthBanner.hidden = false;
+        toast("API access token required. Enter your token in Access & Limits.");
+        document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button")
+          .forEach(el => {
+            if (el.id !== "btn-refresh-ready" && el.id !== "token-input" && el.id !== "btn-save-token") {
+              el.disabled = true;
+            }
+          });
       }
       return;
     }
+    if (unauthBanner) unauthBanner.hidden = true;
+    document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button")
+      .forEach(el => { el.disabled = false; });
     const data = await res.json();
     currentSettingsData = data.settings || {};
     currentSettingsVersion = data.version || null;
@@ -834,11 +833,19 @@ async function loadSettings() {
       }
     }
 
-    // Special field: MAX_UPLOAD_SIZE (bytes to MB)
-    const uploadMbEl = $("cfg-MAX_UPLOAD_SIZE_MB");
-    if (uploadMbEl && currentSettingsData.MAX_UPLOAD_SIZE) {
-      const bytes = Number(currentSettingsData.MAX_UPLOAD_SIZE) || 0;
-      uploadMbEl.value = Math.round(bytes / (1024 * 1024));
+    // Access & Limits information
+    const tokenInput = $("token-input");
+    if (tokenInput) tokenInput.value = getToken();
+
+    const authStatusEl = $("status-server-auth");
+    if (authStatusEl) {
+      authStatusEl.value = currentSettingsData.API_AUTH_TOKEN_configured ? "Enabled (API protected)" : "Disabled (Management API locked)";
+    }
+
+    const uploadLimitEl = $("status-upload-limit");
+    if (uploadLimitEl) {
+      const bytes = Number(currentSettingsData.MAX_UPLOAD_SIZE) || (50 * 1024 * 1024);
+      uploadLimitEl.value = `${Math.round(bytes / (1024 * 1024))} MB`;
     }
 
     // 1. Mark deployment environment-managed fields
@@ -997,6 +1004,49 @@ async function discardUnsavedChanges() {
   toast("Unsaved changes discarded.");
 }
 
+
+async function runConnectionTest(component, btnId, resultId) {
+  const btn = $(btnId);
+  const resultEl = $(resultId);
+  if (!btn || !resultEl) return;
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = "Testing...";
+  resultEl.className = "test-conn-result";
+  resultEl.textContent = "Connecting to service...";
+
+  try {
+    const res = await fetch(`/settings/test/${component}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+    });
+    if (res.status === 403) {
+      resultEl.className = "test-conn-result bad";
+      resultEl.textContent = "✖ Management API disabled on server (API_AUTH_TOKEN not set).";
+      return;
+    }
+    if (res.status === 401) {
+      resultEl.className = "test-conn-result bad";
+      resultEl.textContent = "✖ Unauthorized: API token required. Please enter token in Access & Limits.";
+      return;
+    }
+    const data = await res.json();
+    if (data.ok) {
+      resultEl.className = "test-conn-result ok";
+      resultEl.textContent = `✔ ${data.detail || "Success"}`;
+    } else {
+      resultEl.className = "test-conn-result bad";
+      resultEl.textContent = `✖ ${data.detail || "Connection failed"}`;
+    }
+  } catch (err) {
+    resultEl.className = "test-conn-result bad";
+    resultEl.textContent = `✖ ${err.message || "Network error"}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 function initSettingsEvents() {
   $("cfg-EMBEDDING_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
   $("cfg-RERANKER_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
@@ -1008,6 +1058,25 @@ function initSettingsEvents() {
     const banner = $("settings-restart-banner");
     if (banner) banner.hidden = true;
   });
+
+  // Test connection event listeners
+  $("btn-test-llm")?.addEventListener("click", () => runConnectionTest("llm", "btn-test-llm", "res-test-llm"));
+  $("btn-test-embedding")?.addEventListener("click", () => runConnectionTest("embedding", "btn-test-embedding", "res-test-embedding"));
+  $("btn-test-reranker")?.addEventListener("click", () => runConnectionTest("reranker", "btn-test-reranker", "res-test-reranker"));
+
+  // Browser API Token saving
+  $("token-save")?.addEventListener("click", () => {
+    const val = $("token-input")?.value?.trim() || "";
+    try {
+      if (val) localStorage.setItem(TOKEN_KEY, val);
+      else localStorage.removeItem(TOKEN_KEY);
+      toast("Browser API token saved.");
+      loadSettings();
+      loadReady();
+    } catch {
+      toast("Browser refused to save token.");
+    }
+  });
 }
 
 /* ---- 设置：令牌与服务状态 ---- */
@@ -1018,66 +1087,90 @@ unreachable: "llmUnreachable",
 http_error: "llmHttpError",
 model_missing: "llmModelMissing",
 };
-function addReadyRow(list, label, value, cls, hint) {
-const li = document.createElement("li");
-const n = document.createElement("span");
-n.textContent = label;
-const v = document.createElement("span");
-v.className = cls;
-v.textContent = value;
-if (hint) { li.title = hint; v.title = hint; }
-li.append(n, v);
-list.appendChild(li);
+function addReadyRow(list, label, value, cls, hint, dataDest) {
+  const li = document.createElement("li");
+  const left = document.createElement("div");
+  left.style.display = "flex";
+  left.style.flexDirection = "column";
+
+  const n = document.createElement("span");
+  n.textContent = label;
+  left.appendChild(n);
+
+  if (dataDest) {
+    const dest = document.createElement("span");
+    dest.className = "data-dest-hint";
+    dest.textContent = dataDest;
+    left.appendChild(dest);
+  }
+
+  const v = document.createElement("span");
+  v.className = cls;
+  v.textContent = value;
+  if (hint) { li.title = hint; v.title = hint; }
+
+  li.append(left, v);
+  list.appendChild(li);
 }
+
 async function loadReady() {
-const list = $("ready-list");
-try {
-const res = await fetch("/ready", { headers: authHeaders()});
-const data = await res.json().catch(() => ({}));
-lastReady = data;
-/* 模型名没配置就整块隐藏——宁可空着，也不显示一个没在用的模型。 */
-const chip = $("model-chip");
-if (data.model) {
-chip.textContent = data.model;
-chip.title = data.model;
-chip.hidden = false;
-}
-const checks = data.checks || {};
-list.replaceChildren();
-const title = document.createElement("li");
-const tn = document.createElement("span");
-tn.textContent = t("readinessTitle");
-const tv = document.createElement("span");
-tv.className = res.ok && data.status === "ready"? "ok": "bad";
-tv.textContent = res.ok && data.status === "ready"? t("readyOk"): t("readyBad");
-title.append(tn, tv);
-list.appendChild(title);
-Object.entries(checks).forEach(([name, ok]) => {
-const label = name === "llm"? t("llmCheck"): name;
-const hintKey = name === "llm" && !ok? LLM_HINTS[data.llm_detail]: null;
-addReadyRow(list, label, ok? t("readyOk"): t("readyBad"), ok? "ok": "bad", hintKey? t(hintKey): "");
-});
-/* 模型名与部署位置放在服务状态里，而不是塞进输入框的 chip——
-   输入框保持安静，需要判断"数据会不会出本机"时到这里看。 */
-if (data.model) {
-addReadyRow(list, t("modelLabel"), data.model, "ok");
-const local = data.model_source === "local";
-addReadyRow(list, t("deployLabel"), local? t("deployLocal"): t("deployRemote"), "ok");
-} else {
-addReadyRow(list, t("modelLabel"), t("modelMissing"), "bad");
-}
-} catch {
-lastReady = null;
-list.replaceChildren();
-const li = document.createElement("li");
-const n = document.createElement("span");
-n.textContent = t("readinessTitle");
-const v = document.createElement("span");
-v.className = "bad";
-v.textContent = t("readyUnknown");
-li.append(n, v);
-list.appendChild(li);
-}
+  const list = $("ready-list");
+  try {
+    const res = await fetch("/ready", { headers: authHeaders() });
+    const data = await res.json().catch(() => ({}));
+    lastReady = data;
+    const chip = $("model-chip");
+    if (data.model) {
+      chip.textContent = data.model;
+      chip.title = data.model;
+      chip.hidden = false;
+    }
+    const checks = data.checks || {};
+    list.replaceChildren();
+
+    // Overall status header
+    const title = document.createElement("li");
+    const tn = document.createElement("span");
+    tn.textContent = "Service Status";
+    const tv = document.createElement("span");
+    tv.className = res.ok && data.status === "ready" ? "ok" : "bad";
+    tv.textContent = res.ok && data.status === "ready" ? "Ready" : "Unavailable";
+    title.append(tn, tv);
+    list.appendChild(title);
+
+    // 1. PostgreSQL
+    addReadyRow(list, "PostgreSQL Database", checks.postgresql ? "Ready" : "Unavailable", checks.postgresql ? "ok" : "bad", null, "Stores relational schema, document catalog, and chat sessions");
+
+    // 2. pgvector
+    addReadyRow(list, "pgvector Extension", checks.pgvector ? "Ready" : "Unavailable", checks.pgvector ? "ok" : "bad", null, "Vector index with 1024-dim HNSW cosine/inner-product support");
+
+    // 3. Chat Model
+    const llmOk = checks.llm;
+    const modelName = data.model || $("cfg-LLM_MODEL")?.value || "Unconfigured";
+    const llmHint = data.llm_detail ? `Status: ${data.llm_detail}` : null;
+    addReadyRow(list, `Chat Model (${modelName})`, llmOk ? "Ready" : "Unavailable", llmOk ? "ok" : "bad", llmHint, "Receives user questions and retrieved context passages");
+
+    // 4. Embedding Model
+    const embModel = $("cfg-EMBEDDING_MODEL")?.value || "BAAI/bge-m3";
+    const embProv = $("cfg-EMBEDDING_PROVIDER")?.value || "remote";
+    addReadyRow(list, `Embedding Model (${embModel})`, checks.postgresql ? "Configured" : "Unavailable", "ok", null, `Receives document text during indexing and search queries (${embProv})`);
+
+    // 5. Reranker Model
+    const rerankModel = $("cfg-RERANKER_MODEL")?.value || "BAAI/bge-reranker-v2-m3";
+    const rerankProv = $("cfg-RERANKER_PROVIDER")?.value || "api";
+    addReadyRow(list, `Reranker Model (${rerankModel})`, "Configured", "ok", null, `Receives search queries and candidate chunks (${rerankProv})`);
+  } catch {
+    lastReady = null;
+    list.replaceChildren();
+    const li = document.createElement("li");
+    const n = document.createElement("span");
+    n.textContent = "Service Status";
+    const v = document.createElement("span");
+    v.className = "bad";
+    v.textContent = "Not connected";
+    li.append(n, v);
+    list.appendChild(li);
+  }
 }
 
 /* ---- 视图切换：侧栏导航（对话 / 文档 / 设置） ---- */
