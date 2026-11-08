@@ -581,6 +581,13 @@
             <div class="view" id="view-settings" hidden>
       <div class="scroll">
         <div class="scroll-inner">
+                    <!-- Management Disabled Notice (when server API_AUTH_TOKEN is not configured) -->
+          <div class="settings-restart-banner" id="settings-disabled-banner" style="background: #231b0e; border-color: #b45309; color: #fde68a;" hidden>
+            <div class="settings-restart-content">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>Management API is disabled because <code class="mono">API_AUTH_TOKEN</code> is not set in the server environment. Configure it in deployment to enable settings editing.</span>
+            </div>
+          </div>
           <!-- Restart Notification Banner -->
           <div class="settings-restart-banner" id="settings-restart-banner" hidden>
             <div class="settings-restart-content">
@@ -854,7 +861,7 @@
 
           <!-- 4. Actions -->
           <div class="settings-actions">
-            <button type="button" class="btn-reset-all" id="btn-reset-settings">Restore Defaults</button>
+            <button type="button" class="btn-reset-all" id="btn-discard-settings">Discard Changes</button>
             <button type="button" class="btn-save-all" id="btn-save-settings">Save Settings</button>
           </div>
         </div>

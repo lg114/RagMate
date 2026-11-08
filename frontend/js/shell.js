@@ -717,6 +717,7 @@ await loadDocuments();
 
 /* ---- 设置管理 (Settings Management) ---- */
 let currentSettingsData = null;
+let currentSettingsVersion = null;
 let configuredSecrets = new Set();
 
 const FIELD_DEFS = {
@@ -779,14 +780,28 @@ function updateSettingsLinkage() {
 }
 
 async function loadSettings() {
+  const disabledBanner = $("settings-disabled-banner");
   try {
     const res = await fetch("/settings", { headers: authHeaders() });
+    if (res.status === 403) {
+      if (disabledBanner) disabledBanner.hidden = false;
+      document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button:not(#settings-disabled-banner button)")
+        .forEach(el => { if (el.id !== "btn-refresh-ready") el.disabled = true; });
+      return;
+    }
+    if (disabledBanner) disabledBanner.hidden = true;
+    document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button")
+      .forEach(el => { el.disabled = false; });
+
     if (!res.ok) {
-      console.warn("Settings API not available or error:", res.status);
+      if (res.status === 401) {
+        toast("API token required to access settings. Please set your browser token.");
+      }
       return;
     }
     const data = await res.json();
     currentSettingsData = data.settings || {};
+    currentSettingsVersion = data.version || null;
     configuredSecrets = new Set(data.secret_keys || []);
 
     // Populate fields
@@ -891,7 +906,7 @@ async function saveAllSettings() {
     const res = await fetch("/settings", {
       method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ settings: updates }),
+      body: JSON.stringify({ settings: updates, version: currentSettingsVersion }),
     });
 
     if (!res.ok) {
@@ -925,24 +940,9 @@ async function saveAllSettings() {
   }
 }
 
-async function resetAllSettings() {
-  const ok = await confirm("Reset all settings to default values? (Existing DATABASE_URL will be preserved).");
-  if (!ok) return;
-
-  try {
-    const res = await fetch("/settings/reset", {
-      method: "POST",
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error("重置失败");
-    toast("Settings reset to defaults. A server restart is required.");
-    const banner = $("settings-restart-banner");
-    if (banner) banner.hidden = false;
-    await loadSettings();
-    await loadReady();
-  } catch (err) {
-    toast(err.message || "Failed to reset settings");
-  }
+async function discardUnsavedChanges() {
+  await loadSettings();
+  toast("Unsaved changes discarded.");
 }
 
 function initSettingsEvents() {
@@ -950,7 +950,7 @@ function initSettingsEvents() {
   $("cfg-RERANKER_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
   $("cfg-LANGSMITH_TRACING")?.addEventListener("change", updateSettingsLinkage);
   $("btn-save-settings")?.addEventListener("click", saveAllSettings);
-  $("btn-reset-settings")?.addEventListener("click", resetAllSettings);
+  $("btn-discard-settings")?.addEventListener("click", discardUnsavedChanges);
   $("btn-refresh-ready")?.addEventListener("click", loadReady);
   $("settings-restart-close")?.addEventListener("click", () => {
     const banner = $("settings-restart-banner");

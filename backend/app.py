@@ -117,13 +117,40 @@ def create_app() -> FastAPI:
     # 启用后，/chat、/documents、/ingest 下的接口必须带
     # Authorization: Bearer <token> 或 X-API-Key: <token>，否则 401。
     # 健康检查与前端静态资源不拦（探针与页面本身没有 token）。
+    # API Token 鉴权中间件：
+    # 1. 管理接口（/settings）：
+    #    - 若服务端未配置 API_AUTH_TOKEN，默认关闭管理功能（403 MANAGEMENT_DISABLED），防止公网匿名篡改。
+    #    - 若已配置，必须携带匹配的 Bearer Token 或 X-API-Key（401 UNAUTHORIZED）。
+    # 2. 业务接口（/chat, /documents, /ingest）：
+    #    - API_AUTH_TOKEN 为空时不鉴权（单机/内网默认）；非空时需验证。
+    # 3. 探针与静态资源（/health, /ready, 静态文件）：不拦截。
     _PROTECTED_PREFIXES = ("/chat", "/documents", "/ingest")
 
     @app.middleware("http")
     async def _require_api_token(request, call_next):
         token = settings.API_AUTH_TOKEN
         path = request.url.path
-        if token and any(path == p or path.startswith(p + "/") for p in _PROTECTED_PREFIXES):
+
+        # 检查管理接口权限
+        if path == "/settings" or path.startswith("/settings/"):
+            if not token:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "code": "MANAGEMENT_DISABLED",
+                        "detail": "Management API is disabled because API_AUTH_TOKEN is not configured on the server.",
+                    },
+                )
+            auth = request.headers.get("authorization", "")
+            api_key = request.headers.get("x-api-key", "")
+            if auth != f"Bearer {token}" and api_key != token:
+                return JSONResponse(
+                    status_code=401,
+                    content={"code": "UNAUTHORIZED", "detail": "Missing or invalid API token"},
+                )
+
+        # 检查常规业务接口
+        elif token and any(path == p or path.startswith(p + "/") for p in _PROTECTED_PREFIXES):
             auth = request.headers.get("authorization", "")
             api_key = request.headers.get("x-api-key", "")
             if auth != f"Bearer {token}" and api_key != token:
