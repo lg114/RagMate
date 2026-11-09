@@ -531,6 +531,40 @@ def _sanitize_error(exc: Exception) -> str:
     return msg
 
 
+def _format_http_error(resp: httpx.Response) -> str:
+    """Extract readable message from JSON or text error responses."""
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict) and "message" in err:
+                return _sanitize_error(Exception(str(err["message"])))
+            if isinstance(err, str):
+                return _sanitize_error(Exception(err))
+            if "message" in data:
+                return _sanitize_error(Exception(str(data["message"])))
+            if "detail" in data:
+                return _sanitize_error(Exception(str(data["detail"])))
+    except Exception:
+        pass
+    text = (resp.text or "").strip()
+    if text:
+        clean = re.sub(r"<[^>]+>", " ", text)
+        clean = " ".join(clean.split())
+        if clean:
+            return _sanitize_error(Exception(clean))
+    return f"Endpoint not found ({resp.status_code}). Check Base URL path and Model Name."
+
+
+def _normalize_endpoint(base_url: str, default_endpoint: str, suffix: str) -> str:
+    if not base_url or not base_url.strip():
+        return default_endpoint
+    clean = base_url.strip().rstrip("/")
+    if clean.endswith(suffix):
+        return clean
+    return f"{clean}{suffix}"
+
+
 class ConnectionTestPayload(BaseModel):
     model: Optional[str] = None
     base_url: Optional[str] = None
@@ -550,12 +584,12 @@ async def test_llm_connection(payload: Optional[ConnectionTestPayload] = None):
         return {"ok": False, "detail": "LLM_MODEL is not configured."}
 
     start = time.perf_counter()
-    endpoint = f"{base_url.rstrip('/')}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+    endpoint = _normalize_endpoint(base_url, "https://api.openai.com/v1/chat/completions", "/chat/completions")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    payload = {
+    req_body = {
         "model": model,
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 5,
@@ -563,7 +597,7 @@ async def test_llm_connection(payload: Optional[ConnectionTestPayload] = None):
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(endpoint, json=payload, headers=headers)
+            resp = await client.post(endpoint, json=req_body, headers=headers)
         latency = int((time.perf_counter() - start) * 1000)
         if resp.status_code == 200:
             return {"ok": True, "latency_ms": latency, "model": model, "detail": f"Success ({latency}ms)"}
@@ -571,7 +605,7 @@ async def test_llm_connection(payload: Optional[ConnectionTestPayload] = None):
             "ok": False,
             "latency_ms": latency,
             "model": model,
-            "detail": f"HTTP {resp.status_code}: {_sanitize_error(Exception(resp.text))}",
+            "detail": f"HTTP {resp.status_code}: {_format_http_error(resp)}",
         }
     except Exception as e:
         latency = int((time.perf_counter() - start) * 1000)
@@ -607,23 +641,23 @@ async def test_embedding_connection(payload: Optional[ConnectionTestPayload] = N
     if not base_url:
         return {"ok": False, "detail": "EMBEDDING_API_BASE_URL is required for remote embedding."}
 
-    endpoint = f"{base_url.rstrip('/')}/embeddings"
+    endpoint = _normalize_endpoint(base_url, "https://api.openai.com/v1/embeddings", "/embeddings")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    payload = {"model": model, "input": ["healthcheck"]}
+    emb_payload = {"model": model, "input": ["healthcheck"]}
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(endpoint, json=payload, headers=headers)
+            resp = await client.post(endpoint, json=emb_payload, headers=headers)
         latency = int((time.perf_counter() - start) * 1000)
         if resp.status_code != 200:
             return {
                 "ok": False,
                 "latency_ms": latency,
                 "model": model,
-                "detail": f"HTTP {resp.status_code}: {_sanitize_error(Exception(resp.text))}",
+                "detail": f"HTTP {resp.status_code}: {_format_http_error(resp)}",
             }
         data = resp.json()
         items = data.get("data") or []
@@ -666,12 +700,12 @@ async def test_reranker_connection(payload: Optional[ConnectionTestPayload] = No
     if not base_url:
         return {"ok": False, "detail": "RERANKER_API_BASE_URL is required for remote reranker."}
 
-    endpoint = f"{base_url.rstrip('/')}/rerank"
+    endpoint = _normalize_endpoint(base_url, "", "/rerank")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    payload = {
+    rerank_payload = {
         "model": model,
         "query": "test query",
         "documents": ["candidate doc 1", "candidate doc 2"],
@@ -680,14 +714,14 @@ async def test_reranker_connection(payload: Optional[ConnectionTestPayload] = No
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(endpoint, json=payload, headers=headers)
+            resp = await client.post(endpoint, json=rerank_payload, headers=headers)
         latency = int((time.perf_counter() - start) * 1000)
         if resp.status_code != 200:
             return {
                 "ok": False,
                 "latency_ms": latency,
                 "model": model,
-                "detail": f"HTTP {resp.status_code}: {_sanitize_error(Exception(resp.text))}",
+                "detail": f"HTTP {resp.status_code}: {_format_http_error(resp)}",
             }
         data = resp.json()
         results = data.get("results") or []
