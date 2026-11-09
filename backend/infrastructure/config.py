@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # .env 文件路径：优先项目根目录 .env，其次 backend/.env
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _ROOT_DIR = _BACKEND_DIR.parent
-_ENV_FILE = _ROOT_DIR / ".env" if (_ROOT_DIR / ".env").exists() else (_BACKEND_DIR / ".env")
+_ENV_FILE = (_ROOT_DIR / ".env") if (_ROOT_DIR / ".env").exists() else ((_BACKEND_DIR / ".env") if (_BACKEND_DIR / ".env").exists() else (_ROOT_DIR / ".env"))
 
 # huggingface / local / flagembedding：本进程 FlagEmbedding。openai / remote：HTTP，不加载 BGE。
 LOCAL_EMBEDDING_PROVIDERS = ("huggingface", "local", "flagembedding")

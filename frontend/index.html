@@ -520,16 +520,40 @@
     transform: translateX(18px); background-color: var(--accent-ink);
   }
 
-  /* Details / Folding */
+  /* Details / Folding with animated Chevron Indicator */
   details.settings-details {
     margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px;
   }
   details.settings-details summary {
-    cursor: pointer; font-size: 13px; color: var(--muted);
-    font-weight: 600; user-select: none; display: flex; align-items: center; gap: 6px;
+    cursor: pointer; font-size: 13.5px; color: var(--ink-soft);
+    font-weight: 600; user-select: none; display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; transition: color .15s ease;
+    list-style: none;
   }
-  details.settings-details summary:hover { color: var(--ink-soft); }
-  details.settings-details[open] summary { margin-bottom: 14px; color: var(--ink-soft); }
+  details.settings-details summary::-webkit-details-marker,
+  details.settings-details summary::marker {
+    display: none !important;
+  }
+  details.settings-details summary::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: rotate(-45deg);
+    transition: transform .2s cubic-bezier(0.4, 0, 0.2, 1), border-color .15s ease;
+    flex-shrink: 0;
+    margin-left: 2px;
+    margin-right: 2px;
+  }
+  details.settings-details summary:hover { color: var(--ink); }
+  details.settings-details summary:hover::before { border-color: var(--ink); }
+  details.settings-details[open] > summary { margin-bottom: 14px; color: var(--ink); }
+  details.settings-details[open] > summary::before {
+    transform: rotate(45deg);
+    border-color: var(--accent);
+  }
 
   /* Restart Banner */
   .settings-restart-banner {

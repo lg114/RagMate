@@ -53,6 +53,11 @@ EDITABLE_KEYS = {
     "RERANKER_MODEL",
     "RERANKER_API_BASE_URL",
     "RERANKER_API_KEY",
+    # LangSmith Observability
+    "LANGSMITH_TRACING",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_ENDPOINT",
 }
 
 SECRET_KEYS = {
@@ -270,10 +275,10 @@ def _get_field_sources(env_dict: Dict[str, str]) -> Dict[str, str]:
     for k in Settings.model_fields:
         if k not in EDITABLE_KEYS or k in deploy_managed:
             sources[k] = "environment"
-        elif k not in env_dict and k in os.environ:
-            sources[k] = "environment"
         elif k in env_dict:
             sources[k] = "file"
+        elif k in os.environ:
+            sources[k] = "env"
         else:
             sources[k] = "default"
     return sources

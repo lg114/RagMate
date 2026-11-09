@@ -858,6 +858,11 @@ const FIELD_DEFS = {
   "RERANKER_MODEL": { type: "text" },
   "RERANKER_API_BASE_URL": { type: "text" },
   "RERANKER_API_KEY": { type: "secret" },
+  // LangSmith Observability
+  "LANGSMITH_TRACING": { type: "boolean" },
+  "LANGSMITH_API_KEY": { type: "secret" },
+  "LANGSMITH_PROJECT": { type: "text" },
+  "LANGSMITH_ENDPOINT": { type: "text" },
 };
 
 function updateSettingsLinkage() {
@@ -931,6 +936,7 @@ async function loadSettings() {
     for (const [key, def] of Object.entries(FIELD_DEFS)) {
       const el = $(`cfg-${key}`);
       if (!el) continue;
+      el.disabled = false; // default enabled for all editable keys
       const val = currentSettingsData[key];
 
       if (def.type === "boolean") {
