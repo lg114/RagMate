@@ -883,7 +883,14 @@ function updateSettingsLinkage() {
 
   const tracingOn = $("cfg-LANGSMITH_TRACING")?.checked;
   const wrapTracing = $("wrap-LANGSMITH_CONFIG");
-  if (wrapTracing) wrapTracing.style.opacity = tracingOn ? "1" : "0.4";
+  if (wrapTracing) {
+    wrapTracing.style.opacity = tracingOn ? "1" : "0.4";
+    wrapTracing.style.pointerEvents = tracingOn ? "auto" : "none";
+  }
+  ["cfg-LANGSMITH_API_KEY", "cfg-LANGSMITH_PROJECT", "cfg-LANGSMITH_ENDPOINT"].forEach((id) => {
+    const el = $(id);
+    if (el) el.disabled = !tracingOn;
+  });
 }
 
 async function loadSettings() {
@@ -1051,6 +1058,9 @@ async function saveAllSettings() {
       if (sVal && sVal !== SECRET_MASK) {
         val = sVal;
         changed = true;
+      } else if (!sVal && el.dataset.cleared === "true" && currentSettingsData[key + "_configured"]) {
+        val = "__CLEAR__";
+        changed = true;
       }
     } else if (def.type === "number") {
       const raw = el.value.trim();
@@ -1141,7 +1151,16 @@ async function saveAllSettings() {
 }
 
 async function discardUnsavedChanges() {
+  connectionTestResults = { llm: null, embedding: null, reranker: null };
+  ["res-test-llm", "res-test-embedding", "res-test-reranker"].forEach((id) => {
+    const el = $(id);
+    if (el) {
+      el.textContent = "";
+      el.className = "test-conn-result";
+    }
+  });
   await loadSettings();
+  await loadReady();
   toast("Unsaved changes discarded.");
 }
 
@@ -1222,17 +1241,34 @@ async function runConnectionTest(component, btnId, resultId) {
 }
 
 function initSettingsEvents() {
-  // Secret input mask interaction
+  // Secret input mask interaction with explicit clear support
   ["LLM_API_KEY", "EMBEDDING_API_KEY", "RERANKER_API_KEY", "LANGSMITH_API_KEY"].forEach((k) => {
     const el = $(`cfg-${k}`);
+    const tag = $(`tag-${k}`);
     if (!el) return;
     el.addEventListener("focus", () => {
       if (el.value === SECRET_MASK) {
         el.value = "";
       }
     });
+    el.addEventListener("input", () => {
+      if (el.dataset.configured === "true" && !el.value.trim()) {
+        el.dataset.cleared = "true";
+        if (tag) {
+          tag.textContent = "Will be cleared on save";
+          tag.classList.remove("configured");
+        }
+      } else if (el.value.trim() && el.value !== SECRET_MASK) {
+        el.dataset.cleared = "false";
+        if (tag) {
+          tag.textContent = "Modified";
+          tag.classList.add("configured");
+        }
+      }
+    });
     el.addEventListener("blur", () => {
-      if (!el.value.trim() && el.dataset.configured === "true") {
+      // If user did not clear or type anything, restore mask
+      if (!el.value.trim() && el.dataset.cleared !== "true" && el.dataset.configured === "true") {
         el.value = SECRET_MASK;
       }
     });
@@ -1376,10 +1412,21 @@ async function loadReady() {
     addReadyRow(list, "pgvector Extension", checks.pgvector ? "Ready" : "Unavailable", checks.pgvector ? "ok" : "bad", null, "Vector index with 1024-dim HNSW cosine/inner-product support");
 
     // 3. Chat Model
-    const llmOk = checks.llm;
+    let llmOk = Boolean(checks.llm);
+    let llmStatus = llmOk ? "Ready" : "Unavailable";
+    let llmClass = llmOk ? "ok" : "bad";
+    if (connectionTestResults.llm === "ok") {
+      llmOk = true;
+      llmStatus = "Ready";
+      llmClass = "ok";
+    } else if (connectionTestResults.llm === "bad") {
+      llmOk = false;
+      llmStatus = "Unavailable";
+      llmClass = "bad";
+    }
     const modelName = data.model || $("cfg-LLM_MODEL")?.value || "Unconfigured";
     const llmHint = data.llm_detail ? `Status: ${data.llm_detail}` : null;
-    addReadyRow(list, `Chat Model (${modelName})`, llmOk ? "Ready" : "Unavailable", llmOk ? "ok" : "bad", llmHint, "Receives user questions and retrieved context passages");
+    addReadyRow(list, `Chat Model (${modelName})`, llmStatus, llmClass, llmHint, "Receives user questions and retrieved context passages");
 
     // 4. Embedding Model
     const embModel = $("cfg-EMBEDDING_MODEL")?.value || "BAAI/bge-m3";

@@ -61,7 +61,14 @@ async def _check_llm(model: str, source: str) -> tuple[bool, str]:
     except Exception as e:
         logger.warning(f"LLM endpoint {url} returned an unexpected body: {e}")
         return False, "http_error"
-    if model not in ids:
+    # Support model IDs with or without "models/" prefix (Google AI Studio returns "models/gemini-2.5-flash")
+    normalized_ids = set()
+    for i in ids:
+        if i:
+            normalized_ids.add(i)
+            if i.startswith("models/"):
+                normalized_ids.add(i[len("models/"):])
+    if model not in normalized_ids and f"models/{model}" not in normalized_ids:
         logger.warning(f"LLM endpoint {url} is up but '{model}' is not among {sorted(i for i in ids if i)}")
         return False, "model_missing"
     return True, ""

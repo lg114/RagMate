@@ -154,7 +154,7 @@ def _validate_target_config(target: Dict[str, str], raw_updates: Dict[str, Any])
             )
 
     # 2. Temperature validation
-    if "LLM_TEMPERATURE" in target:
+    if "LLM_TEMPERATURE" in target and str(target["LLM_TEMPERATURE"]).strip():
         try:
             temp = float(target["LLM_TEMPERATURE"])
             if temp < 0.0 or temp > 2.0:
