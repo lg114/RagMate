@@ -249,6 +249,20 @@ def _atomic_write_env(updates: Dict[str, str]) -> None:
 
 
 
+
+def _parse_bool(val: Any) -> Optional[bool]:
+    """Parse boolean from bool or string ('true', 'false', '1', '0', etc.)."""
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    if s in ("true", "1", "yes", "on"):
+        return True
+    if s in ("false", "0", "no", "off"):
+        return False
+    return None
+
 def _get_field_sources(env_dict: Dict[str, str]) -> Dict[str, str]:
     """Detect whether each setting is managed by environment, .env file, or code default."""
     deploy_managed = set(filter(None, [k.strip() for k in os.environ.get("DEPLOY_MANAGED_KEYS", "").split(",")]))
@@ -275,8 +289,12 @@ def _calculate_pending_restart(env_dict: Dict[str, str]) -> list[str]:
         if k in SECRET_KEYS:
             if disk_val and disk_val != running_val:
                 pending.append(k)
-        elif isinstance(running_val, bool):
-            if (disk_val.strip().lower() == "true") != running_val:
+        elif isinstance(running_val, bool) or k in ("LLM_IS_LOCAL", "EMBEDDING_NORMALIZE", "FAITHFULNESS_CHECK", "LANGSMITH_TRACING"):
+            disk_bool = _parse_bool(disk_val)
+            if disk_bool is not None and running_val is not None:
+                if disk_bool != running_val:
+                    pending.append(k)
+            elif (disk_bool is not None) != (running_val is not None):
                 pending.append(k)
         elif isinstance(running_val, (int, float)):
             try:
@@ -301,7 +319,17 @@ def get_settings():
     env_dict = _parse_env_dict()
     for k, v in env_dict.items():
         if k in Settings.model_fields:
-            data[k] = v
+            if k in ("LLM_IS_LOCAL", "EMBEDDING_NORMALIZE", "FAITHFULNESS_CHECK", "LANGSMITH_TRACING"):
+                b = _parse_bool(v)
+                data[k] = b if b is not None else False
+            else:
+                data[k] = v
+
+    try:
+        from backend.application.ingest.loaders import SUPPORTED_EXTENSIONS
+        supported_exts = sorted(list(SUPPORTED_EXTENSIONS))
+    except Exception:
+        supported_exts = [".csv", ".docx", ".epub", ".htm", ".html", ".json", ".md", ".pdf", ".pptx", ".rtf", ".txt", ".xml"]
 
     # STRICT SECURITY: Never expose DATABASE_URL or database credentials
     data.pop("DATABASE_URL", None)
@@ -432,8 +460,9 @@ def update_settings_bulk(payload: BulkSettingsUpdate):
                 updates_to_write[key] = str_val
                 target_env[key] = str_val
         else:
-            if isinstance(value, bool):
-                str_val = "true" if value else "false"
+            b_val = _parse_bool(value)
+            if b_val is not None and (isinstance(value, bool) or key in ("LLM_IS_LOCAL", "EMBEDDING_NORMALIZE", "FAITHFULNESS_CHECK", "LANGSMITH_TRACING")):
+                str_val = "true" if b_val else "false"
             elif value is None:
                 str_val = ""
             else:

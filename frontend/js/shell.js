@@ -719,6 +719,10 @@ await loadDocuments();
 let currentSettingsData = null;
 let currentSettingsVersion = null;
 let configuredSecrets = new Set();
+let currentFieldSources = {};
+let currentIndexLockedKeys = [];
+let currentEditableKeys = [];
+let connectionTestResults = { llm: null, embedding: null, reranker: null };
 
 const FIELD_DEFS = {
   // Chat Model
@@ -737,11 +741,6 @@ const FIELD_DEFS = {
   "RERANKER_MODEL": { type: "text" },
   "RERANKER_API_BASE_URL": { type: "text" },
   "RERANKER_API_KEY": { type: "secret" },
-  // Tracing Telemetry
-  "LANGSMITH_TRACING": { type: "boolean" },
-  "LANGSMITH_API_KEY": { type: "secret" },
-  "LANGSMITH_PROJECT": { type: "text" },
-  "LANGSMITH_ENDPOINT": { type: "text" },
 };
 
 function updateSettingsLinkage() {
@@ -802,6 +801,40 @@ async function loadSettings() {
     currentSettingsData = data.settings || {};
     currentSettingsVersion = data.version || null;
     configuredSecrets = new Set(data.secret_keys || []);
+    currentFieldSources = data.field_sources || {};
+    currentIndexLockedKeys = data.index_status?.locked_keys || [];
+    currentEditableKeys = data.editable_keys || [];
+
+    // Populate dynamic specs & upload info
+    const supportedTypesEl = $("status-supported-types");
+    if (supportedTypesEl && data.supported_extensions) {
+      supportedTypesEl.value = data.supported_extensions.join(", ");
+    }
+    const specChunking = $("spec-chunking");
+    if (specChunking) {
+      const strat = currentSettingsData.CHUNKING_STRATEGY || "title_path";
+      const parent = currentSettingsData.CHUNK_SIZE_PARENT || 2500;
+      const child = currentSettingsData.CHUNK_SIZE || 1000;
+      specChunking.innerHTML = `<code>${strat}</code> with Small-to-Big parent expansion (parent ${parent} chars, child ${child} chars).`;
+    }
+    const specHybrid = $("spec-hybrid");
+    if (specHybrid) {
+      const k = currentSettingsData.RRF_K || 60;
+      specHybrid.textContent = `BM25 text rank fused with 1024-dim HNSW vector search via Reciprocal Rank Fusion (k=${k}).`;
+    }
+    const specRerank = $("spec-reranker");
+    if (specRerank) {
+      const model = currentSettingsData.RERANKER_MODEL || "BAAI/bge-reranker-v2-m3";
+      const cand = currentSettingsData.RERANK_CANDIDATES || 30;
+      const thresh = currentSettingsData.RERANK_SCORE_THRESHOLD || 0.3;
+      const finalK = currentSettingsData.FINAL_CONTEXT_K || 15;
+      specRerank.textContent = `Top ${cand} candidates re-scored via ${model}; scores < ${thresh} filtered out; top ${finalK} retained.`;
+    }
+    const specGrounding = $("spec-grounding");
+    if (specGrounding) {
+      const faith = currentSettingsData.FAITHFULNESS_CHECK;
+      specGrounding.textContent = (faith ? "Faithfulness check enabled. " : "") + "Automatically hedges or refuses when retrieved passage evidence is insufficient.";
+    }
 
     // Populate fields
     for (const [key, def] of Object.entries(FIELD_DEFS)) {
@@ -810,7 +843,7 @@ async function loadSettings() {
       const val = currentSettingsData[key];
 
       if (def.type === "boolean") {
-        el.checked = Boolean(val);
+        el.checked = (val === true || val === "true" || val === 1 || val === "1");
       } else if (def.type === "secret") {
         el.value = "";
         const isConf = Boolean(currentSettingsData[key + "_configured"]);
@@ -912,40 +945,62 @@ async function saveAllSettings() {
   document.querySelectorAll(".field-error").forEach((el) => el.classList.remove("field-error"));
 
   for (const [key, def] of Object.entries(FIELD_DEFS)) {
+    // Only send editable keys; skip deployment managed or locked fields
+    if (currentEditableKeys.length > 0 && !currentEditableKeys.includes(key)) continue;
+
     const el = $(`cfg-${key}`);
-    if (!el) continue;
+    if (!el || el.disabled) continue;
+    if (currentFieldSources[key] === "environment") continue;
+    if (currentIndexLockedKeys.includes(key)) continue;
+
+    let changed = false;
+    let val = null;
 
     if (def.type === "boolean") {
-      updates[key] = el.checked;
+      val = el.checked;
+      const oldVal = Boolean(currentSettingsData[key]);
+      if (val !== oldVal) changed = true;
     } else if (def.type === "secret") {
-      const val = el.value.trim();
-      if (val) {
-        updates[key] = val; // only send if newly entered
+      const sVal = el.value.trim();
+      if (sVal) {
+        val = sVal;
+        changed = true;
       }
     } else if (def.type === "number") {
       const raw = el.value.trim();
-      if (raw === "") continue;
-      const num = Number(raw);
-      if (isNaN(num) || (def.min !== undefined && num < def.min) || (def.max !== undefined && num > def.max)) {
-        el.classList.add("field-error");
-        toast(`${key} is out of valid range (${def.min ?? "-"} ~ ${def.max ?? "-"})`);
-        hasError = true;
-        break;
+      if (raw !== "") {
+        const num = Number(raw);
+        if (isNaN(num) || (def.min !== undefined && num < def.min) || (def.max !== undefined && num > def.max)) {
+          el.classList.add("field-error");
+          toast(`${key} is out of valid range (${def.min ?? "-"} ~ ${def.max ?? "-"})`);
+          hasError = true;
+          break;
+        }
+        val = num;
+        const oldNum = Number(currentSettingsData[key]);
+        if (val !== oldNum) changed = true;
       }
-      updates[key] = num;
     } else {
-      updates[key] = el.value.trim();
+      val = el.value.trim();
+      const oldStr = (currentSettingsData[key] ?? "").toString().trim();
+      if (val !== oldStr) changed = true;
+    }
+
+    if (changed) {
+      updates[key] = val;
     }
   }
 
-  // Handle MAX_UPLOAD_SIZE_MB conversion
-  const uploadMbEl = $("cfg-MAX_UPLOAD_SIZE_MB");
-  if (uploadMbEl && uploadMbEl.value.trim() !== "") {
-    const mb = Number(uploadMbEl.value.trim());
-    if (mb > 0) updates["MAX_UPLOAD_SIZE"] = mb * 1024 * 1024;
+  if (hasError) {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Settings";
+    }
+    return;
   }
 
-  if (hasError) {
+  if (Object.keys(updates).length === 0) {
+    toast("No changes to save.");
     if (saveBtn) {
       saveBtn.disabled = false;
       saveBtn.textContent = "Save Settings";
@@ -1032,12 +1087,15 @@ async function runConnectionTest(component, btnId, resultId) {
     }
     const data = await res.json();
     if (data.ok) {
+      connectionTestResults[target] = "ok";
       resultEl.className = "test-conn-result ok";
       resultEl.textContent = `✔ ${data.detail || "Success"}`;
     } else {
+      connectionTestResults[target] = "bad";
       resultEl.className = "test-conn-result bad";
       resultEl.textContent = `✖ ${data.detail || "Connection failed"}`;
     }
+    loadReady();
   } catch (err) {
     resultEl.className = "test-conn-result bad";
     resultEl.textContent = `✖ ${err.message || "Network error"}`;
@@ -1065,7 +1123,7 @@ function initSettingsEvents() {
   $("btn-test-reranker")?.addEventListener("click", () => runConnectionTest("reranker", "btn-test-reranker", "res-test-reranker"));
 
   // Browser API Token saving
-  $("token-save")?.addEventListener("click", () => {
+  const handleSaveToken = () => {
     const val = $("token-input")?.value?.trim() || "";
     try {
       if (val) localStorage.setItem(TOKEN_KEY, val);
@@ -1076,6 +1134,11 @@ function initSettingsEvents() {
     } catch {
       toast("Browser refused to save token.");
     }
+  };
+  $("btn-save-token")?.addEventListener("click", handleSaveToken);
+  $("token-save")?.addEventListener("click", handleSaveToken);
+  $("token-input")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") handleSaveToken();
   });
 }
 
@@ -1153,12 +1216,30 @@ async function loadReady() {
     // 4. Embedding Model
     const embModel = $("cfg-EMBEDDING_MODEL")?.value || "BAAI/bge-m3";
     const embProv = $("cfg-EMBEDDING_PROVIDER")?.value || "remote";
-    addReadyRow(list, `Embedding Model (${embModel})`, checks.postgresql ? "Configured" : "Unavailable", "ok", null, `Receives document text during indexing and search queries (${embProv})`);
+    let embStatus = "Untested";
+    let embClass = "untested";
+    if (connectionTestResults.embedding === "ok") {
+      embStatus = "Ready";
+      embClass = "ok";
+    } else if (connectionTestResults.embedding === "bad") {
+      embStatus = "Failed";
+      embClass = "bad";
+    }
+    addReadyRow(list, `Embedding Model (${embModel})`, embStatus, embClass, null, `Receives document text during indexing and search queries (${embProv})`);
 
     // 5. Reranker Model
     const rerankModel = $("cfg-RERANKER_MODEL")?.value || "BAAI/bge-reranker-v2-m3";
     const rerankProv = $("cfg-RERANKER_PROVIDER")?.value || "api";
-    addReadyRow(list, `Reranker Model (${rerankModel})`, "Configured", "ok", null, `Receives search queries and candidate chunks (${rerankProv})`);
+    let rerankStatus = "Untested";
+    let rerankClass = "untested";
+    if (connectionTestResults.reranker === "ok") {
+      rerankStatus = "Ready";
+      rerankClass = "ok";
+    } else if (connectionTestResults.reranker === "bad") {
+      rerankStatus = "Failed";
+      rerankClass = "bad";
+    }
+    addReadyRow(list, `Reranker Model (${rerankModel})`, rerankStatus, rerankClass, null, `Receives search queries and candidate chunks (${rerankProv})`);
   } catch {
     lastReady = null;
     list.replaceChildren();
@@ -1196,7 +1277,10 @@ if (name === "settings") { loadReady(); loadSettings(); }
 }
 
 /* ---- 侧栏（移动端） ---- */
-function closeSidebar() { $("sidebar").classList.remove("open");}
+function closeSidebar() {
+  $("sidebar").classList.remove("open");
+  $("sidebar-backdrop")?.classList.remove("active");
+}
 
 /* ---- 接线 ---- */
 sendBtn.addEventListener("click", () => {
@@ -1217,8 +1301,22 @@ if (!btn) return;
 if (btn.dataset.view === "chat") startNewChat();
 else setView(btn.dataset.view);
 });
-$("sidebar-collapse").addEventListener("click", () => $("sidebar").classList.toggle("collapsed"));
-$("sidebar-expand").addEventListener("click", () => $("sidebar").classList.remove("collapsed"));
+$("sidebar-collapse").addEventListener("click", () => {
+  if (window.innerWidth <= 860) {
+    closeSidebar();
+  } else {
+    $("sidebar").classList.toggle("collapsed");
+  }
+});
+$("sidebar-expand").addEventListener("click", () => {
+  if (window.innerWidth <= 860) {
+    $("sidebar").classList.add("open");
+    $("sidebar-backdrop")?.classList.add("active");
+  } else {
+    $("sidebar").classList.remove("collapsed");
+  }
+});
+$("sidebar-backdrop")?.addEventListener("click", closeSidebar);
 $("chats-toggle").addEventListener("click", () => {
   $("chats-toggle").classList.toggle("collapsed");
   $("history-content").classList.toggle("collapsed");

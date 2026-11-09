@@ -49,8 +49,10 @@ def mock_infrastructure():
 
 
 @pytest.fixture
-def client(mock_infrastructure):
+def client(mock_infrastructure, monkeypatch):
     """创建测试客户端。"""
+    from backend.infrastructure.config import settings
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
     from backend.app import create_app
     app = create_app()
     return TestClient(app)
