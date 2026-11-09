@@ -19,6 +19,26 @@ services:
       timeout: 5s
       retries: 10
 
+  ragmate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ragmate-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ragmate
+    env_file:
+      - path: backend/.env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./documents:/app/documents
+    profiles: ["app", "all"]
+
 networks:
   default:
     name: ragmate-network

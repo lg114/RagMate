@@ -46,12 +46,21 @@ if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
 async def lifespan(app: FastAPI):
     from backend.application.ingest_manager import cancel_ingest, reconcile_stale_ingest
 
-    try:
-        await init_db()
-        logger.info("Database initialized")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        raise
+    retries = 5
+    for attempt in range(1, retries + 1):
+        try:
+            await init_db()
+            logger.info("Database initialized")
+            break
+        except Exception as e:
+            if attempt < retries:
+                logger.warning(
+                    f"Database initialization attempt {attempt}/{retries} failed ({e}), retrying in 2s..."
+                )
+                await asyncio.sleep(2)
+            else:
+                logger.error(f"Database initialization failed after {retries} attempts: {e}")
+                raise
 
     # 表就绪后再对账：心跳已死的 running 收成 interrupted，并放开对应的锁。
     try:

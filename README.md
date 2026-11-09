@@ -65,13 +65,50 @@ RagMate is a self-hosted RAG application that turns documents into a searchable 
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.12+ (Python 3.10+ supported)
 - Docker Desktop, or Docker Engine with Compose v2
-- An OpenAI-compatible LLM endpoint and API key
-- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint. Docker Compose runs Postgres with pgvector; it does not serve these models.
+- An OpenAI-compatible LLM endpoint and API key (can also be configured via Settings in the Web UI)
+- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint (or configure via Settings).
 - Local FlagEmbedding is optional. That path needs about 8 GB of RAM for CPU inference, and a GPU helps on larger collections.
 
-### 1. Start the infrastructure
+---
+
+### Option A: One-Click Start (Recommended)
+
+From the repository root:
+
+- **Windows**: Double-click `start.bat` or run:
+  ```powershell
+  python run.py
+  ```
+- **macOS / Linux**: Run:
+  ```bash
+  ./start.sh   # or: python3 run.py
+  ```
+
+`run.py` automatically:
+1. Detects and enters `backend/.venv` (no manual activation or PowerShell execution policy issues).
+2. Initializes `backend/.env` from `.env.example` with working defaults if missing.
+3. Automatically starts the PostgreSQL container (`docker compose up -d postgres`) if not running.
+4. Starts the Uvicorn web server at `http://localhost:8000`.
+5. Automatically opens your default browser once the service is ready.
+
+---
+
+### Option B: Full Docker Stack
+
+To run both Postgres and the RagMate application fully in Docker without installing Python on host:
+
+```bash
+docker compose --profile all up -d
+```
+Then open [http://localhost:8000](http://localhost:8000).
+
+---
+
+### Option C: Step-by-Step Manual Start
+
+#### 1. Start the infrastructure
 
 From the repository root:
 
@@ -90,7 +127,7 @@ To stop services without deleting data:
 docker compose stop
 ```
 
-### 2. Install the backend
+#### 2. Install the backend
 
 ```bash
 cd backend
@@ -109,7 +146,7 @@ pip install -e .
 
 For a byte-identical environment, use the lockfile instead (from `backend/`): `uv sync --frozen --extra test`. Exact versions are pinned in `backend/uv.lock`; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`.
 
-### 3. Configure the application
+#### 3. Configure the application
 
 Stay in the `backend` directory:
 
@@ -141,7 +178,7 @@ RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 
 The default database URL matches the Docker Compose stack. Vectors live in that same database (`VECTOR_TABLE`, default `ragmate_docs`). See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
 
-### 4. Run RagMate
+#### 4. Run RagMate
 
 Return to the repository root, with the virtual environment still active:
 

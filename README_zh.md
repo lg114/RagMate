@@ -54,13 +54,49 @@ RagMate 是一个自托管 RAG 应用，可将文档构建为可搜索的知识�
 
 ### 前置要求
 
-- Python 3.12+
+- Python 3.12+（支持 Python 3.10+）
 - Docker Desktop，或支持 Compose v2 的 Docker Engine
-- 一个 OpenAI 兼容的 LLM 接口及 API Key
-- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口。Docker Compose 启动带 pgvector 的 Postgres，不负责这两个模型服务。
+- 一个 OpenAI 兼容的 LLM 接口及 API Key（支持启动后直接在前端设置面板中配置）
+- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口（或在设置面板配置，亦支持本地模型）
 - 本地 FlagEmbedding 是可选项。这条路径在 CPU 上大约需要 8 GB 内存；知识库较大时建议使用 GPU。
 
-### 1. 启动基础设施
+---
+
+### 方式一：一键极简启动（推荐）
+
+在项目根目录下：
+
+- **Windows 用户**：直接双击 `start.bat`，或在命令行运行：
+  ```powershell
+  python run.py
+  ```
+- **macOS / Linux 用户**：执行：
+  ```bash
+  ./start.sh   # 或 python3 run.py
+  ```
+
+`run.py` 启动器会自动处理所有繁琐步骤：
+1. **自动识别虚拟环境**：检测并直接使用 `backend/.venv`，无需手动 `activate`，彻底告别 Windows PowerShell 脚本执行策略拦截（ExecutionPolicy）。
+2. **自动补齐配置**：若不存在 `backend/.env`，会自动从 `.env.example` 复制初始化，并填充可用占位地址，避免启动闪退。
+3. **自动拉起数据库**：检测本地 PostgreSQL 端口（5432）；若未运行，会自动执行 `docker compose up -d postgres` 并等待其健康就绪。
+4. **启动服务并自动打开浏览器**：启动后端并在服务就绪后自动在浏览器中打开 `http://localhost:8000`。
+
+---
+
+### 方式二：全 Docker 容器化启动
+
+无需在宿主机安装任何 Python 环境，直接通过 Docker Compose 一键拉起数据库与应用：
+
+```bash
+docker compose --profile all up -d
+```
+启动后直接访问 [http://localhost:8000](http://localhost:8000) 即可。
+
+---
+
+### 方式三：分步手动启动
+
+#### 1. 启动基础设施
 
 在项目根目录执行：
 
@@ -79,7 +115,7 @@ docker compose ps
 docker compose stop
 ```
 
-### 2. 安装后端依赖
+#### 2. 安装后端依赖
 
 ```bash
 cd backend
@@ -98,7 +134,7 @@ pip install -e .
 
 要装出和锁定版本完全一致的环境，改用锁文件（在 `backend/` 下）：`uv sync --frozen --extra test`。确切版本钉在 `backend/uv.lock` 里；改 `pyproject.toml` 里的依赖后，用 `uv lock` 重新生成。
 
-### 3. 配置环境变量
+#### 3. 配置环境变量
 
 仍在 `backend` 目录时执行：
 
@@ -130,7 +166,7 @@ RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
 
 默认数据库地址与 Docker Compose 保持一致。向量写在同一个库的 `VECTOR_TABLE`（默认 `ragmate_docs`）。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
 
-### 4. 启动 RagMate
+#### 4. 启动 RagMate
 
 回到项目根目录，并确保虚拟环境仍处于激活状态：
 
