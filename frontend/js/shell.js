@@ -1152,10 +1152,35 @@ async function runConnectionTest(component, btnId, resultId) {
   resultEl.className = "test-conn-result";
   resultEl.textContent = "Connecting to service...";
 
+  // Collect form input values to test current inputs even before saving
+  let testPayload = {};
+  if (component === "llm") {
+    testPayload = {
+      model: $("cfg-LLM_MODEL")?.value?.trim() || null,
+      base_url: $("cfg-LLM_API_BASE_URL")?.value?.trim() || null,
+      api_key: $("cfg-LLM_API_KEY")?.value?.trim() || null,
+    };
+  } else if (component === "embedding") {
+    testPayload = {
+      provider: $("cfg-EMBEDDING_PROVIDER")?.value || null,
+      model: $("cfg-EMBEDDING_MODEL")?.value?.trim() || null,
+      base_url: $("cfg-EMBEDDING_API_BASE_URL")?.value?.trim() || null,
+      api_key: $("cfg-EMBEDDING_API_KEY")?.value?.trim() || null,
+    };
+  } else if (component === "reranker") {
+    testPayload = {
+      provider: $("cfg-RERANKER_PROVIDER")?.value || null,
+      model: $("cfg-RERANKER_MODEL")?.value?.trim() || null,
+      base_url: $("cfg-RERANKER_API_BASE_URL")?.value?.trim() || null,
+      api_key: $("cfg-RERANKER_API_KEY")?.value?.trim() || null,
+    };
+  }
+
   try {
     const res = await fetch(`/settings/test/${component}`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(testPayload),
     });
     if (res.status === 403) {
       resultEl.className = "test-conn-result bad";
@@ -1169,11 +1194,11 @@ async function runConnectionTest(component, btnId, resultId) {
     }
     const data = await res.json();
     if (data.ok) {
-      connectionTestResults[target] = "ok";
+      connectionTestResults[component] = "ok";
       resultEl.className = "test-conn-result ok";
       resultEl.textContent = `✔ ${data.detail || "Success"}`;
     } else {
-      connectionTestResults[target] = "bad";
+      connectionTestResults[component] = "bad";
       resultEl.className = "test-conn-result bad";
       resultEl.textContent = `✖ ${data.detail || "Connection failed"}`;
     }

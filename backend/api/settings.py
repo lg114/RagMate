@@ -531,13 +531,20 @@ def _sanitize_error(exc: Exception) -> str:
     return msg
 
 
+class ConnectionTestPayload(BaseModel):
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    provider: Optional[str] = None
+
+
 @router.post("/settings/test/llm")
-async def test_llm_connection():
+async def test_llm_connection(payload: Optional[ConnectionTestPayload] = None):
     """Test Chat Model connection with a short prompt. Timeout: 5 seconds."""
     env_dict = _parse_env_dict()
-    model = env_dict.get("LLM_MODEL") or current_settings.LLM_MODEL
-    base_url = env_dict.get("LLM_API_BASE_URL") or current_settings.LLM_API_BASE_URL
-    api_key = env_dict.get("LLM_API_KEY") or current_settings.LLM_API_KEY
+    model = (payload.model if payload and payload.model else None) or env_dict.get("LLM_MODEL") or current_settings.LLM_MODEL
+    base_url = (payload.base_url if payload and payload.base_url else None) or env_dict.get("LLM_API_BASE_URL") or current_settings.LLM_API_BASE_URL
+    api_key = (payload.api_key if payload and payload.api_key else None) or env_dict.get("LLM_API_KEY") or current_settings.LLM_API_KEY
 
     if not model:
         return {"ok": False, "detail": "LLM_MODEL is not configured."}
@@ -572,13 +579,13 @@ async def test_llm_connection():
 
 
 @router.post("/settings/test/embedding")
-async def test_embedding_connection():
+async def test_embedding_connection(payload: Optional[ConnectionTestPayload] = None):
     """Test Embedding Model connection and verify 1024-dimension compatibility. Timeout: 5s."""
     env_dict = _parse_env_dict()
-    provider = env_dict.get("EMBEDDING_PROVIDER") or current_settings.EMBEDDING_PROVIDER
-    model = env_dict.get("EMBEDDING_MODEL") or current_settings.EMBEDDING_MODEL
-    base_url = env_dict.get("EMBEDDING_API_BASE_URL") or current_settings.EMBEDDING_API_BASE_URL
-    api_key = env_dict.get("EMBEDDING_API_KEY") or current_settings.EMBEDDING_API_KEY
+    provider = (payload.provider if payload and payload.provider else None) or env_dict.get("EMBEDDING_PROVIDER") or current_settings.EMBEDDING_PROVIDER
+    model = (payload.model if payload and payload.model else None) or env_dict.get("EMBEDDING_MODEL") or current_settings.EMBEDDING_MODEL
+    base_url = (payload.base_url if payload and payload.base_url else None) or env_dict.get("EMBEDDING_API_BASE_URL") or current_settings.EMBEDDING_API_BASE_URL
+    api_key = (payload.api_key if payload and payload.api_key else None) or env_dict.get("EMBEDDING_API_KEY") or current_settings.EMBEDDING_API_KEY
 
     start = time.perf_counter()
     if provider in LOCAL_EMBEDDING_PROVIDERS:
@@ -637,13 +644,13 @@ async def test_embedding_connection():
 
 
 @router.post("/settings/test/reranker")
-async def test_reranker_connection():
+async def test_reranker_connection(payload: Optional[ConnectionTestPayload] = None):
     """Test Reranker Model connection with a short query. Timeout: 5 seconds."""
     env_dict = _parse_env_dict()
-    provider = env_dict.get("RERANKER_PROVIDER") or current_settings.RERANKER_PROVIDER
-    model = env_dict.get("RERANKER_MODEL") or current_settings.RERANKER_MODEL
-    base_url = env_dict.get("RERANKER_API_BASE_URL") or current_settings.RERANKER_API_BASE_URL
-    api_key = env_dict.get("RERANKER_API_KEY") or current_settings.RERANKER_API_KEY
+    provider = (payload.provider if payload and payload.provider else None) or env_dict.get("RERANKER_PROVIDER") or current_settings.RERANKER_PROVIDER
+    model = (payload.model if payload and payload.model else None) or env_dict.get("RERANKER_MODEL") or current_settings.RERANKER_MODEL
+    base_url = (payload.base_url if payload and payload.base_url else None) or env_dict.get("RERANKER_API_BASE_URL") or current_settings.RERANKER_API_BASE_URL
+    api_key = (payload.api_key if payload and payload.api_key else None) or env_dict.get("RERANKER_API_KEY") or current_settings.RERANKER_API_KEY
 
     start = time.perf_counter()
     if provider == "local":
