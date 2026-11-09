@@ -1,0 +1,37 @@
+# Virtual environments
+.venv
+backend/.venv
+venv/
+ENV/
+env/
+
+# Database & local data
+volumes/
+*.db
+*.sqlite
+
+# Cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+pytest-of-*/
+torchinductor_*/
+
+# Git and tools
+.git/
+.github/
+.gitignore
+.workbuddy/
+.workbuddy-ai/
+
+# Environment files
+.env
+backend/.env
+
+# Temporary documents
+documents/
