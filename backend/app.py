@@ -124,40 +124,46 @@ def create_app() -> FastAPI:
     # 2. 业务接口（/chat, /documents, /ingest）：
     #    - API_AUTH_TOKEN 为空时不鉴权（单机/内网默认）；非空时需验证。
     # 3. 探针与静态资源（/health, /ready, 静态文件）：不拦截。
-    _PROTECTED_PREFIXES = ("/chat", "/documents", "/ingest")
+    from backend.api.auth import is_local_request, is_authenticated
+
+    _ALL_PROTECTED_PREFIXES = ("/chat", "/documents", "/ingest", "/settings")
 
     @app.middleware("http")
     async def _require_api_token(request, call_next):
         token = settings.API_AUTH_TOKEN
         path = request.url.path
 
-        # 检查管理接口权限
-        if path == "/settings" or path.startswith("/settings/"):
-            if not token:
+        # 探针、认证端点、静态前端不拦截
+        if (
+            path in ("/health", "/ready")
+            or path.startswith("/auth/")
+            or not any(path == p or path.startswith(p + "/") for p in _ALL_PROTECTED_PREFIXES)
+        ):
+            return await call_next(request)
+
+        is_local = is_local_request(request)
+
+        # 场景 1：服务端未配置 API_AUTH_TOKEN（密码）
+        if not token:
+            if not is_local:
+                # 局域网或外部请求在未设密码时严格禁止访问受保护接口
                 return JSONResponse(
                     status_code=403,
                     content={
-                        "code": "MANAGEMENT_DISABLED",
-                        "detail": "Management API is disabled because API_AUTH_TOKEN is not configured on the server.",
+                        "code": "MANAGEMENT_DISABLED" if path.startswith("/settings") else "REMOTE_ACCESS_DISABLED",
+                        "detail": "Remote access is disabled because API_AUTH_TOKEN is not configured on the server.",
                     },
                 )
-            auth = request.headers.get("authorization", "")
-            api_key = request.headers.get("x-api-key", "")
-            if auth != f"Bearer {token}" and api_key != token:
-                return JSONResponse(
-                    status_code=401,
-                    content={"code": "UNAUTHORIZED", "detail": "Missing or invalid API token"},
-                )
+            # 仅本机使用（127.0.0.1 / localhost）：免密放行！
+            return await call_next(request)
 
-        # 检查常规业务接口
-        elif token and any(path == p or path.startswith(p + "/") for p in _PROTECTED_PREFIXES):
-            auth = request.headers.get("authorization", "")
-            api_key = request.headers.get("x-api-key", "")
-            if auth != f"Bearer {token}" and api_key != token:
-                return JSONResponse(
-                    status_code=401,
-                    content={"code": "UNAUTHORIZED", "detail": "Missing or invalid API token"},
-                )
+        # 场景 2：服务端已配置 API_AUTH_TOKEN -> 要求统一密码鉴权
+        if not is_authenticated(request, token):
+            return JSONResponse(
+                status_code=401,
+                content={"code": "UNAUTHORIZED", "detail": "Missing or invalid API token or session."},
+            )
+
         return await call_next(request)
 
     # 上传大小限制中间件：包装 ASGI receive，流式检查实际 body 大小
@@ -223,8 +229,10 @@ def create_app() -> FastAPI:
     from backend.api.documents import router as documents_router
     from backend.api.ingest import router as ingest_router
     from backend.api.settings import router as settings_router
+    from backend.api.auth import router as auth_router
 
     app.include_router(health_router)
+    app.include_router(auth_router)
     app.include_router(settings_router)
     app.include_router(chat_router)
     app.include_router(documents_router)

@@ -13,19 +13,27 @@ def client():
     return TestClient(app)
 
 
-def test_management_disabled_by_default_when_no_token(client, monkeypatch):
-    """When API_AUTH_TOKEN is not configured on the server, management API must return 403."""
+def test_management_disabled_for_remote_when_no_token(client, monkeypatch):
+    """When API_AUTH_TOKEN is not configured, remote callers receive 403."""
     monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
     
-    res = client.get("/settings")
+    res = client.get("/settings", headers={"Host": "remote.external.com"})
     assert res.status_code == 403
     data = res.json()
     assert data.get("code") == "MANAGEMENT_DISABLED"
     assert "not configured" in data.get("detail", "").lower()
 
-    res_put = client.put("/settings", json={"settings": {"LLM_MODEL": "gpt-4o"}})
+    res_put = client.put("/settings", json={"settings": {"LLM_MODEL": "gpt-4o"}}, headers={"Host": "remote.external.com"})
     assert res_put.status_code == 403
     assert res_put.json().get("code") == "MANAGEMENT_DISABLED"
+
+
+def test_management_allowed_for_localhost_when_no_token(client, monkeypatch):
+    """When API_AUTH_TOKEN is not configured, localhost requests are allowed directly."""
+    monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
+    res = client.get("/settings")
+    assert res.status_code == 200
+    assert "settings" in res.json()
 
 
 def test_management_auth_with_token(client, monkeypatch):
@@ -360,11 +368,11 @@ def test_test_endpoints_require_auth(client, monkeypatch):
     res = client.post("/settings/test/llm")
     assert res.status_code == 401
 
-    # 2. When server token is empty -> 403 MANAGEMENT_DISABLED
+    # 2. When server token is empty and caller is remote -> 403 MANAGEMENT_DISABLED
     monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
-    res_disabled = client.post("/settings/test/llm")
+    res_disabled = client.post("/settings/test/llm", headers={"Host": "remote.external.com"})
     assert res_disabled.status_code == 403
-    assert res_disabled.json()["code"] == "MANAGEMENT_DISABLED"
+    assert res_disabled.json()["code"] == "MANAGEMENT_DISABLED" 
 
 
 def test_test_embedding_checks_1024_dimension(client, monkeypatch):

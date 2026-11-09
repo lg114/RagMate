@@ -50,6 +50,12 @@ class TestAuthDisabled:
         response = client.post("/chat", json={"message": "hi"})
         assert response.status_code != 401
 
+    def test_remote_request_without_token_blocked(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
+        response = client.post("/chat", json={"message": "hi"}, headers={"Host": "remote.external.com"})
+        assert response.status_code == 403
+        assert response.json()["code"] == "REMOTE_ACCESS_DISABLED" 
+
 
 class TestAuthEnabled:
     def test_missing_token_rejected(self, client, with_token):
@@ -88,3 +94,52 @@ class TestAuthEnabled:
     def test_health_not_protected(self, client, with_token):
         response = client.get("/health")
         assert response.status_code == 200
+
+    def test_login_and_cookie_session_flow(self, client, with_token):
+        # 1. Login with bad password -> 401
+        res_bad = client.post("/auth/login", json={"password": "wrong"})
+        assert res_bad.status_code == 401
+
+        # 2. Login with correct password -> 200 and set cookie
+        res_ok = client.post("/auth/login", json={"password": "test-secret"})
+        assert res_ok.status_code == 200
+        assert res_ok.json()["ok"] is True
+        session_token = res_ok.json()["token"]
+        assert len(session_token) > 20
+
+        # 3. Access protected endpoint using the returned session cookie
+        res_chat = client.post("/chat", json={"message": "hi"})
+        assert res_chat.status_code != 401
+
+        # 4. Access protected endpoint using Bearer session token
+        res_bearer = client.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={"Authorization": f"Bearer {session_token}"},
+        )
+        assert res_bearer.status_code != 401
+
+        # 5. Logout invalidates session
+        res_logout = client.post("/auth/logout")
+        assert res_logout.status_code == 200
+
+        # Now calling with old session token gets rejected
+        client.cookies.clear()
+        res_revoked = client.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={"Authorization": f"Bearer {session_token}"},
+        )
+        assert res_revoked.status_code == 401
+
+    def test_auth_status_endpoint(self, client, with_token):
+        res = client.get("/auth/status")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["auth_required"] is True
+        assert data["authenticated"] is False
+
+        # After logging in
+        client.post("/auth/login", json={"password": "test-secret"})
+        res_after = client.get("/auth/status")
+        assert res_after.json()["authenticated"] is True

@@ -8,7 +8,7 @@ POST /ingest、GET /ingest/status、GET /ready。
 界面中英双语（localStorage ragmate_lang，默认跟浏览器语言）。
 引用只含文件名与页码（后端 public_citations 的口径）；检索详情里的
 片段预览来自 debug 轨迹（每块截断 240 字），默认折叠。 */
-const TOKEN_KEY = "ragmate_api_token";
+const AUTH_TOKEN_KEY = "ragmate_auth_token";
 const SESSION_KEY = "ragmate_session_id";
 const LANG_KEY = "ragmate_lang";
 
@@ -156,14 +156,20 @@ return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function scrollToBottom() {
 scrollBox.scrollTop = scrollBox.scrollHeight;
 }
-function getToken() {
-try { return (localStorage.getItem(TOKEN_KEY) || "").trim();} catch { return "";}
+function getAuthToken() {
+  try { return (sessionStorage.getItem(AUTH_TOKEN_KEY) || "").trim(); } catch { return ""; }
+}
+function setAuthToken(val) {
+  try {
+    if (val) sessionStorage.setItem(AUTH_TOKEN_KEY, val);
+    else sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {}
 }
 function authHeaders(extra) {
-const headers = {...(extra || {})};
-const token = getToken();
-if (token) headers.Authorization = `Bearer ${token}`;
-return headers;
+  const headers = { ...(extra || {}) };
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 function errorFrom(status, data) {
 if (status === 401) return t("err401");
@@ -181,7 +187,12 @@ opts.body = JSON.stringify(body);
 }
 const res = await fetch(path, opts);
 const data = await res.json().catch(() => ({}));
-if (!res.ok) throw new Error(errorFrom(res.status, data));
+if (!res.ok) {
+  if (res.status === 401) {
+    showUnlockOverlay("Session expired or password required.");
+  }
+  throw new Error(errorFrom(res.status, data));
+}
 return data;
 }
 function peekSessionId() {
@@ -414,6 +425,9 @@ signal: aborter.signal,
 });
 if (!res.ok) {
 const data = await res.json().catch(() => ({}));
+if (res.status === 401) {
+  showUnlockOverlay("Session expired or password required.");
+}
 throw new Error(errorFrom(res.status, data));
 }
 const reader = res.body.getReader();
@@ -649,13 +663,14 @@ toast(err.message || t("errGeneric"));
 lastDocs = [];
 }
 renderDocs();
+updateDocsMeta();
 return lastDocs;
 }
 function uploadDocument(file) {
 return new Promise((resolve, reject) => {
 const xhr = new XMLHttpRequest();
 xhr.open("POST", "/documents/upload");
-const token = getToken();
+const token = getAuthToken();
 if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 xhr.onload = () => {
 let data = {};
@@ -715,6 +730,70 @@ await loadDocuments();
 }
 
 
+
+/* ---- 统一认证与解锁遮罩 ---- */
+function showUnlockOverlay(msg) {
+  const overlay = $("unlock-overlay");
+  const input = $("unlock-password");
+  const err = $("unlock-error");
+  if (overlay) overlay.hidden = false;
+  if (err) {
+    if (msg) {
+      err.textContent = msg;
+      err.hidden = false;
+    } else {
+      err.hidden = true;
+    }
+  }
+  if (input) {
+    input.value = "";
+    setTimeout(() => input.focus(), 60);
+  }
+}
+
+function hideUnlockOverlay() {
+  const overlay = $("unlock-overlay");
+  if (overlay) overlay.hidden = true;
+}
+
+async function checkAuthStatus() {
+  try {
+    const res = await fetch("/auth/status", { headers: authHeaders() });
+    const data = await res.json().catch(() => ({}));
+    const logoutBtn = $("btn-logout");
+    if (data.auth_required) {
+      if (logoutBtn) logoutBtn.hidden = false;
+      if (!data.authenticated) {
+        showUnlockOverlay();
+        return false;
+      }
+    } else {
+      if (logoutBtn) logoutBtn.hidden = true;
+    }
+    hideUnlockOverlay();
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+async function updateDocsMeta() {
+  try {
+    const res = await fetch("/settings", { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.supported_extensions) {
+      const el = $("docs-meta-types");
+      if (el) el.textContent = data.supported_extensions.join(", ");
+    }
+    if (data.settings && data.settings.MAX_UPLOAD_SIZE) {
+      const el = $("docs-meta-limit");
+      const mb = Math.round(Number(data.settings.MAX_UPLOAD_SIZE) / (1024 * 1024));
+      if (el) el.textContent = `${mb} MB`;
+    }
+  } catch {}
+}
+
 /* ---- 设置管理 (Settings Management) ---- */
 let currentSettingsData = null;
 let currentSettingsVersion = null;
@@ -764,39 +843,17 @@ function updateSettingsLinkage() {
 }
 
 async function loadSettings() {
-  const disabledBanner = $("settings-disabled-banner");
-  const unauthBanner = $("settings-unauthorized-banner");
   try {
     const res = await fetch("/settings", { headers: authHeaders() });
-    if (res.status === 403) {
-      if (disabledBanner) disabledBanner.hidden = false;
-      if (unauthBanner) unauthBanner.hidden = true;
-      document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button:not(#settings-disabled-banner button)")
-        .forEach(el => {
-          if (el.id !== "btn-refresh-ready" && el.id !== "token-input" && el.id !== "btn-save-token") {
-            el.disabled = true;
-          }
-        });
+    if (res.status === 401) {
+      showUnlockOverlay("Session expired. Please enter instance password.");
       return;
     }
-    if (disabledBanner) disabledBanner.hidden = true;
-
     if (!res.ok) {
-      if (res.status === 401) {
-        if (unauthBanner) unauthBanner.hidden = false;
-        toast("API access token required. Enter your token in Access & Limits.");
-        document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button")
-          .forEach(el => {
-            if (el.id !== "btn-refresh-ready" && el.id !== "token-input" && el.id !== "btn-save-token") {
-              el.disabled = true;
-            }
-          });
-      }
+      const errData = await res.json().catch(() => ({}));
+      toast(errData.detail || "Failed to load settings");
       return;
     }
-    if (unauthBanner) unauthBanner.hidden = true;
-    document.querySelectorAll("#view-settings input, #view-settings select, #view-settings button")
-      .forEach(el => { el.disabled = false; });
     const data = await res.json();
     currentSettingsData = data.settings || {};
     currentSettingsVersion = data.version || null;
@@ -805,11 +862,7 @@ async function loadSettings() {
     currentIndexLockedKeys = data.index_status?.locked_keys || [];
     currentEditableKeys = data.editable_keys || [];
 
-    // Populate dynamic specs & upload info
-    const supportedTypesEl = $("status-supported-types");
-    if (supportedTypesEl && data.supported_extensions) {
-      supportedTypesEl.value = data.supported_extensions.join(", ");
-    }
+    // Populate dynamic specs
     const specChunking = $("spec-chunking");
     if (specChunking) {
       const strat = currentSettingsData.CHUNKING_STRATEGY || "title_path";
@@ -864,21 +917,6 @@ async function loadSettings() {
       } else {
         el.value = val !== undefined && val !== null ? String(val) : "";
       }
-    }
-
-    // Access & Limits information
-    const tokenInput = $("token-input");
-    if (tokenInput) tokenInput.value = getToken();
-
-    const authStatusEl = $("status-server-auth");
-    if (authStatusEl) {
-      authStatusEl.value = currentSettingsData.API_AUTH_TOKEN_configured ? "Enabled (API protected)" : "Disabled (Management API locked)";
-    }
-
-    const uploadLimitEl = $("status-upload-limit");
-    if (uploadLimitEl) {
-      const bytes = Number(currentSettingsData.MAX_UPLOAD_SIZE) || (50 * 1024 * 1024);
-      uploadLimitEl.value = `${Math.round(bytes / (1024 * 1024))} MB`;
     }
 
     // 1. Mark deployment environment-managed fields
@@ -1122,23 +1160,54 @@ function initSettingsEvents() {
   $("btn-test-embedding")?.addEventListener("click", () => runConnectionTest("embedding", "btn-test-embedding", "res-test-embedding"));
   $("btn-test-reranker")?.addEventListener("click", () => runConnectionTest("reranker", "btn-test-reranker", "res-test-reranker"));
 
-  // Browser API Token saving
-  const handleSaveToken = () => {
-    const val = $("token-input")?.value?.trim() || "";
+  // Unlock form submission
+  $("unlock-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pwd = $("unlock-password")?.value || "";
+    const btn = $("btn-unlock");
+    const err = $("unlock-error");
+    if (btn) btn.disabled = true;
+    if (err) err.hidden = true;
     try {
-      if (val) localStorage.setItem(TOKEN_KEY, val);
-      else localStorage.removeItem(TOKEN_KEY);
-      toast("Browser API token saved.");
-      loadSettings();
-      loadReady();
-    } catch {
-      toast("Browser refused to save token.");
+      const res = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        if (err) {
+          err.textContent = data.detail || "Incorrect instance password";
+          err.hidden = false;
+        }
+        return;
+      }
+      if (data.token) {
+        setAuthToken(data.token);
+      }
+      hideUnlockOverlay();
+      const logoutBtn = $("btn-logout");
+      if (logoutBtn) logoutBtn.hidden = false;
+      toast("Instance unlocked successfully");
+      initApp();
+    } catch (ex) {
+      if (err) {
+        err.textContent = ex.message || "Failed to connect to server";
+        err.hidden = false;
+      }
+    } finally {
+      if (btn) btn.disabled = false;
     }
-  };
-  $("btn-save-token")?.addEventListener("click", handleSaveToken);
-  $("token-save")?.addEventListener("click", handleSaveToken);
-  $("token-input")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") handleSaveToken();
+  });
+
+  // Logout button
+  $("btn-logout")?.addEventListener("click", async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST", headers: authHeaders() });
+    } catch {}
+    setAuthToken("");
+    toast("Session locked");
+    showUnlockOverlay("Session locked. Enter instance password to unlock.");
   });
 }
 
@@ -1343,40 +1412,36 @@ fileInput.addEventListener("change", () => {
 if (fileInput.files.length) handleFiles([...fileInput.files]);
 fileInput.value = "";
 });
-if ($("token-input")) $("token-input").value = getToken();
-$("token-save")?.addEventListener("click", () => {
-const value = $("token-input")?.value?.trim() || "";
-try {
-if (value) localStorage.setItem(TOKEN_KEY, value);
-else localStorage.removeItem(TOKEN_KEY);
-toast(t("tokenSaved"));
-} catch {
-toast(t("tokenSaveFail"));
+
+
+async function initApp() {
+  loadReady();
+  loadSessions();
+  loadDocuments();
+  if (currentView === "settings") loadSettings();
+  const current = peekSessionId();
+  if (current) {
+    try {
+      const data = await request("GET", `/chat/sessions/${encodeURIComponent(current)}`);
+      if (data.messages && data.messages.length) {
+        thread.replaceChildren();
+        data.messages.forEach((m) => {
+          if (m.role === "user") addUserMsg(m.content || "");
+          else renderAssistant(m.content || "", null);
+        });
+        renderHistory();
+        scrollToBottom();
+      }
+    } catch { /* 会话已删或后端未就绪：留在空态 */}
+  }
 }
-});
 
 /* ---- 启动 ---- */
 applyI18n();
 syncEmptyState();
-loadReady();
 initSettingsEvents();
-loadSettings();
-loadDocuments();
-loadSessions();
-(async () => {
-const current = peekSessionId();
-if (current) {
-try {
-const data = await request("GET", `/chat/sessions/${encodeURIComponent(current)}`);
-if (data.messages && data.messages.length) {
-thread.replaceChildren();
-data.messages.forEach((m) => {
-if (m.role === "user") addUserMsg(m.content || "");
-else renderAssistant(m.content || "", null);
+checkAuthStatus().then((isAuthed) => {
+  if (isAuthed) {
+    initApp();
+  }
 });
-renderHistory();
-scrollToBottom();
-}
-} catch { /* 会话已删或后端未就绪：留在空态 */}
-}
-})();

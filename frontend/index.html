@@ -345,6 +345,57 @@
     border: 1px solid var(--line); padding: 1px 6px;
     border-radius: 4px; font-size: 11px; font-weight: 500;
   }
+
+  /* Unified Unlock Overlay */
+  .unlock-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .unlock-overlay[hidden] { display: none !important; }
+  .unlock-card {
+    background: var(--bg-elev); border: 1px solid var(--line-strong);
+    border-radius: 14px; padding: 36px 30px; width: 100%; max-width: 380px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.18); text-align: center;
+  }
+  .unlock-brand {
+    display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px;
+  }
+  .unlock-brand h2 { font-size: 22px; font-weight: 700; margin: 0; color: var(--ink); }
+  .unlock-desc { font-size: 13px; color: var(--muted); margin: 0 0 22px; line-height: 1.4; }
+  .unlock-form { display: flex; flex-direction: column; gap: 12px; }
+  .unlock-input-wrap input {
+    width: 100%; padding: 10px 14px; font-size: 14px; font-family: inherit;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); outline: none; transition: border-color .15s ease;
+  }
+  .unlock-input-wrap input:focus { border-color: var(--accent); }
+  .unlock-submit-btn {
+    width: 100%; padding: 10px 14px; font-size: 14px; font-weight: 600;
+    background: var(--ink); color: var(--bg); border: 0; border-radius: var(--radius);
+    cursor: pointer; transition: opacity .15s ease;
+  }
+  .unlock-submit-btn:hover { opacity: 0.9; }
+  .unlock-error {
+    font-size: 12.5px; color: #ef4444; background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.25); border-radius: 6px; padding: 8px 12px;
+  }
+  .sidebar-lock-btn {
+    border: 0; background: none; color: var(--ink-soft);
+    cursor: pointer; padding: 4px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sidebar-lock-btn:hover { background: var(--bg-sunken); color: var(--ink); }
+  .sidebar-lock-btn[hidden] { display: none !important; }
+
+  /* Documents Upload Meta */
+  .docs-upload-meta {
+    margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px; font-size: 12.5px; color: var(--muted);
+  }
+  .docs-upload-meta strong { color: var(--ink-soft); font-weight: 600; }
+  .meta-separator { color: var(--line-strong); }
   .sidebar-backdrop { display: none; }
 
   @media (max-width: 860px) {
@@ -531,6 +582,26 @@
 </style>
 </head>
 <body>
+  <!-- Unified Unlock Overlay -->
+  <div class="unlock-overlay" id="unlock-overlay" hidden>
+    <div class="unlock-card">
+      <div class="unlock-brand">
+        <svg class="unlock-logo" width="36" height="36" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100" height="100" rx="18" fill="#fff" stroke="#111" stroke-width="4"/>
+          <text x="50" y="66" font-family="system-ui, -apple-system, sans-serif" font-size="44" font-weight="700" fill="#111" text-anchor="middle" letter-spacing="-1">RM</text>
+        </svg>
+        <h2>RagMate</h2>
+      </div>
+      <p class="unlock-desc">Instance password required to access this server.</p>
+      <form class="unlock-form" id="unlock-form">
+        <div class="unlock-input-wrap">
+          <input type="password" id="unlock-password" placeholder="Instance password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="unlock-submit-btn" id="btn-unlock">Unlock Instance</button>
+        <div class="unlock-error" id="unlock-error" hidden></div>
+      </form>
+    </div>
+  </div>
 <div class="app">
   <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
   <aside class="sidebar" id="sidebar">
@@ -540,6 +611,9 @@
         <text x="50" y="66" font-family="system-ui, -apple-system, sans-serif" font-size="44" font-weight="700" fill="#111" text-anchor="middle" letter-spacing="-1">RM</text>
       </svg>
       <span class="sidebar-brand">RagMate</span>
+      <button type="button" class="sidebar-lock-btn" id="btn-logout" aria-label="Lock session" title="Lock session" hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </button>
       <button type="button" class="sidebar-collapse" id="sidebar-collapse" aria-label="Collapse sidebar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
@@ -625,6 +699,11 @@
             <ul class="doc-list" id="doc-list"></ul>
             <p class="doc-empty" id="doc-empty" hidden data-i18n="docsEmpty">还没有入库的文档，先上传一份。</p>
             <div class="dropzone" id="dropzone" role="button" tabindex="0" data-i18n="dropzone">拖入文件或点这里上传新文档</div>
+            <div class="docs-upload-meta" id="docs-upload-meta">
+              <span class="meta-item">Supported formats: <strong id="docs-meta-types">.pdf, .docx, .txt, .md, .pptx, .xlsx, .csv, .html, .rtf, .json, .xml, .epub</strong></span>
+              <span class="meta-separator">•</span>
+              <span class="meta-item">Max file size: <strong id="docs-meta-limit">50 MB</strong></span>
+            </div>
             <input type="file" id="file-input" hidden>
           </section>
         </div>
@@ -634,33 +713,6 @@
             <div class="view" id="view-settings" hidden>
       <div class="scroll">
         <div class="scroll-inner">
-          <!-- Management Disabled Notice (when server API_AUTH_TOKEN is not configured) -->
-          <div class="settings-restart-banner" id="settings-disabled-banner" style="background: #231b0e; border-color: #b45309; color: #fde68a;" hidden>
-            <div class="settings-restart-content">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              <span>Management API is disabled because <code class="mono">API_AUTH_TOKEN</code> is not set in the server environment. Configure it in deployment to enable settings editing.</span>
-            </div>
-          </div>
-
-          <!-- Token Required Notice (when browser lacks valid API token) -->
-          <div class="settings-restart-banner" id="settings-unauthorized-banner" style="background: #1e1b4b; border-color: #6366f1; color: #c7d2fe;" hidden>
-            <div class="settings-restart-content">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              <span>Authentication required: Enter your token under <a href="#token-input" style="color: #93c5fd; text-decoration: underline;">Access &amp; Limits</a> and click "Save to Browser" to view and edit settings.</span>
-            </div>
-          </div>
-
-          <!-- Restart Notification Banner -->
-          <div class="settings-restart-banner" id="settings-restart-banner" hidden>
-            <div class="settings-restart-content">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              <span id="settings-restart-text">Settings updated and written to <code class="mono">.env</code>. Core changes (models, providers, base URLs, auth token) require a service restart to take effect.</span>
-            </div>
-            <button type="button" class="settings-restart-close" id="settings-restart-close" aria-label="Close notification">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-
           <!-- 1. Model Connections (Default Open, Put First) -->
           <section class="panel" style="margin-bottom: 18px;">
             <div class="settings-section-title">
@@ -800,44 +852,7 @@
             <ul class="ready-list" id="ready-list"></ul>
           </section>
 
-          <!-- 3. Access & Limits -->
-          <section class="panel" style="margin-bottom: 18px;">
-            <div class="settings-section-title">
-              <span>Access & Limits</span>
-            </div>
-            <p class="settings-section-desc">Manage local browser authorization tokens and review server upload limits.</p>
-
-            <div class="settings-grid">
-              <div class="settings-field">
-                <label for="token-input">Browser API Token</label>
-                <div style="display: flex; gap: 8px;">
-                  <input type="password" id="token-input" placeholder="API token (optional, empty by default)" style="flex: 1;">
-                  <button type="button" class="btn-reset-all" id="token-save" style="padding: 0 14px; font-size: 13px;">Save</button>
-                </div>
-                <span class="field-hint">Stored only in this browser for API authorization. Leave blank if server auth is not set.</span>
-              </div>
-
-              <div class="settings-field">
-                <label>Server Authentication Status</label>
-                <input type="text" id="status-server-auth" readonly value="Checking..." style="opacity: .85; cursor: default;">
-                <span class="field-hint">Controlled by server API_AUTH_TOKEN environment variable.</span>
-              </div>
-
-              <div class="settings-field">
-                <label>Single File Upload Limit</label>
-                <input type="text" id="status-upload-limit" readonly value="50 MB" style="opacity: .85; cursor: default;">
-                <span class="field-hint">Configured via MAX_UPLOAD_SIZE in server deployment.</span>
-              </div>
-
-              <div class="settings-field">
-                <label>Supported Document Types</label>
-                <input type="text" id="status-supported-types" readonly value=".pdf, .docx, .txt, .pptx, .xlsx, .csv, .html, .rtf, .json, .xml, .epub" style="opacity: .85; cursor: default;">
-                <span class="field-hint">Parsed with structure-preserving section headers.</span>
-              </div>
-            </div>
-          </section>
-
-          <!-- 4. Advanced Architecture (Read-Only Specs + Tracing) -->
+          <!-- 3. Advanced Architecture (Read-Only Specs) -->
           <section class="panel" style="margin-bottom: 18px;">
             <details class="settings-details" style="margin-top: 0; border-top: 0; padding-top: 0;">
               <summary style="font-size: 14px; font-weight: 600; color: var(--ink);">Advanced Architecture & Retrieval Specs</summary>
