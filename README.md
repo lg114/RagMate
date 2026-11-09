@@ -39,16 +39,16 @@ RagMate turns your private documents into an interactive, cited knowledge base. 
 The recommended standard deployment requires only **Docker** and **Compose v2** — no local Python environment or build step needed.
 
 ```bash
-# 1. Copy the configuration template
+# 1. (Optional) Copy configuration template
 cp .env.example .env    # Windows: copy .env.example .env
 
-# 2. Edit .env with your model credentials (OpenAI, DeepSeek, or host Ollama)
-
-# 3. Launch the full stack
+# 2. Launch the full stack
 docker compose up -d
 ```
 
 Open [http://localhost:8000](http://localhost:8000) in your browser.
+
+> **Tip**: You can enter without configuring `.env` first — RagMate boots gracefully in zero-friction mode, allowing you to configure model endpoints and API keys directly in the **Settings** view with instant connection testing.
 
 - **Zero Database Setup**: PostgreSQL 15, pgvector extension, and database tables initialize automatically on first boot.
 - **Persistent Data**: Vector embeddings, documents, and chat sessions persist across restarts in Docker named volumes (`postgres_data`, `ragmate_docs`).
@@ -127,10 +127,10 @@ flowchart LR
 ```
 
 ### Ingestion Path
-File discovery (mtime detection) $ightarrow$ format loader $ightarrow$ title-path hierarchical chunking $ightarrow$ content-hash deduplication against pgvector $ightarrow$ dense embedding via API $ightarrow$ atomic vector swap (insert new chunks before deleting old chunks) $ightarrow$ document table sync.
+File discovery (mtime detection)  →  format loader  →  title-path hierarchical chunking  →  content-hash deduplication against pgvector  →  dense embedding via API  →  atomic vector swap (insert new chunks before deleting old chunks)  →  document table sync.
 
 ### Retrieval Path
-User query $ightarrow$ parallel Dense HNSW (inner product) and lexical BM25 $ightarrow$ Reciprocal Rank Fusion (RRF, $k=60$) $ightarrow$ cross-encoder reranking $ightarrow$ score-gap truncation and dynamic thresholding ($0.5 	imes 	ext{top score}$) $ightarrow$ single-pass grounded generation with verified citations.
+User query  →  parallel Dense HNSW (inner product) and lexical BM25  →  Reciprocal Rank Fusion (RRF, $k=60$)  →  cross-encoder reranking  →  score-gap truncation and dynamic thresholding (0.5 × top score)  →  single-pass grounded generation with verified citations.
 
 ---
 
@@ -143,14 +143,14 @@ RagMate loads settings from `.env` in the project root (or `backend/.env`).
 | Variable | Description | Default |
 |---|---|---|
 | `LLM_MODEL` | Chat model name (e.g. `gpt-4o`, `deepseek-chat`, `qwen2.5:7b`) | `gpt-4o` |
-| `LLM_API_KEY` | API key for the chat model provider | *required* |
+| `LLM_API_KEY` | API key for chat model (can also be set in Web UI Settings) | *optional at boot* |
 | `LLM_API_BASE_URL` | Base URL for OpenAI-compatible LLM endpoint | `https://api.openai.com/v1` |
 | `LLM_TEMPERATURE` | Generation temperature (kept low for factual answers) | `0.01` |
 | `EMBEDDING_MODEL` | Embedding model identifier | `BAAI/bge-m3` |
-| `EMBEDDING_API_BASE_URL` | Base URL for OpenAI-compatible embeddings | `http://host.docker.internal:11434/v1` |
+| `EMBEDDING_API_BASE_URL` | Base URL for embeddings endpoint (can also be set in Web UI Settings) | *optional at boot* |
 | `EMBEDDING_API_KEY` | API key for embeddings (optional for local Ollama/sidecars) | *empty* |
 | `RERANKER_MODEL` | Cross-encoder reranker model identifier | `BAAI/bge-reranker-v2-m3` |
-| `RERANKER_API_BASE_URL` | Base URL for reranker endpoint (e.g. Jina, SiliconFlow) | `http://host.docker.internal:11434/v1` |
+| `RERANKER_API_BASE_URL` | Base URL for reranker endpoint (can also be set in Web UI Settings) | *optional at boot* |
 | `RERANKER_API_KEY` | API key for reranker (optional for local sidecars) | *empty* |
 
 ### Security & Instance Access

@@ -39,16 +39,16 @@ RagMate 能够将你的私有文档转化为支持精确引用核对的交互式
 标准自托管部署仅需安装 **Docker** 与 **Compose v2**，宿主机无需安装任何 Python 环境或编译工具。
 
 ```bash
-# 1. 复制配置文件模板
+# 1. （可选）复制配置文件模板
 cp .env.example .env    # Windows 请使用: copy .env.example .env
 
-# 2. 编辑 .env 填入你的模型 API Key 与地址（支持 OpenAI、DeepSeek、本地 Ollama 等）
-
-# 3. 一键启动
+# 2. 一键启动完整服务栈
 docker compose up -d
 ```
 
 启动完成后在浏览器打开 [http://localhost:8000](http://localhost:8000) 即可开始使用。
+
+> **提示**：即便未预先配置 `.env`，RagMate 也会零摩擦就绪；你可以直接进入网页端右上角的 **Settings（设置）** 填写模型密钥与接口地址，并利用“测试连接”功能即时验证。
 
 - **免手动建库**：PostgreSQL 15 容器、pgvector 向量扩展与数据库表结构在初次启动时全自动初始化。
 - **数据持久化**：文档、向量索引与会话记录保存在 Docker 命名卷（`postgres_data`、`ragmate_docs`）中，容器销毁或镜像升级数据不丢失。
@@ -127,10 +127,10 @@ flowchart LR
 ```
 
 ### 入库流程
-文档扫描与修改时间检测 $ightarrow$ 格式解析 $ightarrow$ 层级分块（携带 `H1 > H2 > H3` 路径） $ightarrow$ 向量表内容哈希排重 $ightarrow$ 调用 Embedding API 编码 $ightarrow$ 原子替换向量（先插新向量再删旧向量） $ightarrow$ 同步元数据状态。
+文档扫描与修改时间检测  →  格式解析  →  层级分块（携带 `H1 > H2 > H3` 路径）  →  向量表内容哈希排重  →  调用 Embedding API 编码  →  原子替换向量（先插新向量再删旧向量）  →  同步元数据状态。
 
 ### 检索流程
-用户提问 $ightarrow$ 稠密向量内积检索与词法 BM25 并行 $ightarrow$ 互惠排序融合（RRF，$k=60$） $ightarrow$ CrossEncoder 重排序 $ightarrow$ 分数断崖过滤与动态阈值筛选（$0.5 	imes 	ext{最高分}$） $ightarrow$ 单次受控生成带来源标注的回答。
+用户提问  →  稠密向量内积检索与词法 BM25 并行  →  互惠排序融合（RRF，$k=60$）  →  CrossEncoder 重排序  →  分数断崖过滤与动态阈值筛选（0.5 × 最高分）  →  单次受控生成带来源标注的回答。
 
 ---
 
@@ -143,7 +143,7 @@ RagMate 会自动读取项目根目录或 `backend/.env` 的配置。
 | 配置项 | 说明 | 默认值 |
 |---|---|---|
 | `LLM_MODEL` | 对话模型名称（如 `gpt-4o`、`deepseek-chat`、`qwen2.5:7b`） | `gpt-4o` |
-| `LLM_API_KEY` | 对话模型 API 密钥 | *必填* |
+| `LLM_API_KEY` | 对话模型 API 密钥（亦可在前端设置面板中直接填写） | *启动期可选* |
 | `LLM_API_BASE_URL` | OpenAI 兼容接口地址 | `https://api.openai.com/v1` |
 | `LLM_TEMPERATURE` | 采样温度（保持低值确保事实准确度） | `0.01` |
 | `EMBEDDING_MODEL` | 向量嵌入模型标识 | `BAAI/bge-m3` |
