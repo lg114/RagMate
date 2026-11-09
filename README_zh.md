@@ -52,131 +52,23 @@ RagMate 是一个自托管 RAG 应用，可将文档构建为可搜索的知识�
 
 ## 快速开始
 
-### 前置要求
-
-- Python 3.12+（支持 Python 3.10+）
-- Docker Desktop，或支持 Compose v2 的 Docker Engine
-- 一个 OpenAI 兼容的 LLM 接口及 API Key（支持启动后直接在前端设置面板中配置）
-- 一个 OpenAI 兼容的嵌入接口，以及一个 `/rerank` 接口（或在设置面板配置，亦支持本地模型）
-- 本地 FlagEmbedding 是可选项。这条路径在 CPU 上大约需要 8 GB 内存；知识库较大时建议使用 GPU。
-
----
-
-### 方式一：一键极简启动（推荐）
-
-在项目根目录下：
-
-- **Windows 用户**：直接双击 `start.bat`，或在命令行运行：
-  ```powershell
-  python run.py
-  ```
-- **macOS / Linux 用户**：执行：
-  ```bash
-  ./start.sh   # 或 python3 run.py
-  ```
-
-`run.py` 启动器会自动处理所有繁琐步骤：
-1. **自动识别虚拟环境**：检测并直接使用 `backend/.venv`，无需手动 `activate`，彻底告别 Windows PowerShell 脚本执行策略拦截（ExecutionPolicy）。
-2. **自动补齐配置**：若不存在 `backend/.env`，会自动从 `.env.example` 复制初始化，并填充可用占位地址，避免启动闪退。
-3. **自动拉起数据库**：检测本地 PostgreSQL 端口（5432）；若未运行，会自动执行 `docker compose up -d postgres` 并等待其健康就绪。
-4. **启动服务并自动打开浏览器**：启动后端并在服务就绪后自动在浏览器中打开 `http://localhost:8000`。
-
----
-
-### 方式二：全 Docker 容器化启动
-
-无需在宿主机安装任何 Python 环境，直接通过 Docker Compose 一键拉起数据库与应用：
+标准自托管部署仅需 Docker 与 Compose v2，无需配置宿主机 Python 环境。
 
 ```bash
-docker compose --profile all up -d
-```
-启动后直接访问 [http://localhost:8000](http://localhost:8000) 即可。
+# 1. 复制配置文件模板
+cp .env.example .env    # Windows 请使用: copy .env.example .env
 
----
+# 2. 打开 .env 填入你的模型 API Key 与地址（支持 OpenAI、DeepSeek、本地 Ollama 等）
 
-### 方式三：分步手动启动
-
-#### 1. 启动基础设施
-
-在项目根目录执行：
-
-```bash
+# 3. 一键启动
 docker compose up -d
-docker compose ps
 ```
 
-服务端口：PostgreSQL `5432`（含 pgvector）。开发时应用本身运行在宿主机上。应用第一次启动时会执行 `CREATE EXTENSION vector` 并建好向量表。
+启动完成后在浏览器打开 [http://localhost:8000](http://localhost:8000) 即可使用。
 
-入库状态、锁、取消标志和失败原因都在 PostgreSQL。会话历史也在 PostgreSQL。限流用进程内计数，单进程够用。
-
-停止服务但保留数据：
-
-```bash
-docker compose stop
-```
-
-#### 2. 安装后端依赖
-
-```bash
-cd backend
-python -m venv .venv
-
-# macOS / Linux
-source .venv/bin/activate
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
-
-python -m pip install --upgrade pip
-pip install -e .
-```
-
-`ragmate-eval retrieval-gate` 随上面的安装一起提供。测试和检索门禁只需要默认安装。
-
-要装出和锁定版本完全一致的环境，改用锁文件（在 `backend/` 下）：`uv sync --frozen --extra test`。确切版本钉在 `backend/uv.lock` 里；改 `pyproject.toml` 里的依赖后，用 `uv lock` 重新生成。
-
-#### 3. 配置环境变量
-
-仍在 `backend` 目录时执行：
-
-```bash
-cp .env.example .env
-```
-
-Windows PowerShell 请使用 `Copy-Item .env.example .env`。
-
-> [!IMPORTANT]
-> 以下变量缺失时进程拒绝启动：`DATABASE_URL`、`LLM_API_KEY`、`EMBEDDING_API_BASE_URL`、`RERANKER_API_BASE_URL`。
-> 嵌入和重排的 API Key 在服务不校验时可以留空。
-> 若要在 API 进程内加载 BGE-M3 和交叉编码器，设置 `EMBEDDING_PROVIDER=huggingface` 与 `RERANKER_PROVIDER=local`（说明见 `.env.example`）。`local` 和 `flagembedding` 与 `huggingface` 相同。
-
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
-LLM_API_KEY=your-api-key
-LLM_MODEL=gpt-4o
-
-# 可选：使用任意 OpenAI 兼容的对话服务
-LLM_API_BASE_URL=https://api.openai.com/v1
-
-# 默认远程提供方时必填。两边可以指向同一个侧车或托管 API。
-EMBEDDING_PROVIDER=remote
-EMBEDDING_API_BASE_URL=http://127.0.0.1:8081/v1
-RERANKER_PROVIDER=api
-RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
-```
-
-默认数据库地址与 Docker Compose 保持一致。向量写在同一个库的 `VECTOR_TABLE`（默认 `ragmate_docs`）。完整带注释的配置项见 [`backend/.env.example`](backend/.env.example)，其中包含本地 FlagEmbedding 的打开方式。
-
-#### 4. 启动 RagMate
-
-回到项目根目录，并确保虚拟环境仍处于激活状态：
-
-```bash
-uvicorn backend.app:app --reload --port 8000
-```
-
-常规启动不会下载 BGE-M3 或重排序模型，也不会 import torch。第一次入库和第一次提问会请求你配置的嵌入与重排地址。若改成了本地模型，首次启动才会下载权重（数 GB）并在后台预热。
-
-打开 [http://localhost:8000](http://localhost:8000) 使用 Web 界面；API 文档位于 [http://localhost:8000/docs](http://localhost:8000/docs)。
+- **免手动建库**：PostgreSQL 15 与 pgvector 扩展、数据表结构在启动时全自动初始化。
+- **持久化数据**：文档、向量索引与会话数据保存在 Docker 命名卷中（`postgres_data`、`ragmate_docs`），重启与升级镜像不丢数据。
+- **默认仅绑定本机**：服务默认仅监听 `127.0.0.1:8000`，数据库不对外发布端口，安全开箱即用。
 
 ---
 
@@ -384,23 +276,39 @@ RAGAS judge 打分已删除：它始终没跑出可用的基线，此前已从 C
 
 ---
 
-## 开发
+## 开发与贡献
 
+如果你需要修改后端代码、运行测试或在宿主机本地调试：
+
+### 1. 启动开发数据库
+通过开发覆盖配置将 PostgreSQL 端口（5432）暴露给宿主机：
 ```bash
-cd backend
-pip install -e ".[test]"
-pytest -v
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
 ```
 
-测试位于 `backend/tests/`，目前覆盖检索过滤与去重逻辑；`conftest.py` 提供了 `override_settings` fixture，用于临时改写配置。没有 `backend/.env` 时，它会补上占位的 `DATABASE_URL`、`LLM_API_KEY` 和远程嵌入/重排 URL，因此 `pytest` 不需要 GPU 或正在运行的模型服务。仓库里如果已有 `.env`，则原样使用。`ragmate-eval retrieval-gate` 不经过 `conftest`；请像 CI 一样导出同样的占位 URL，或保留一份能通过校验的 `.env`。
+### 2. 安装本地 Python 依赖
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate       # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -e ".[test]"
+```
+或使用 `uv`：`uv sync --extra test`
 
-> [!NOTE]
-> `ruff` 与 `mypy` 尚未在 `pyproject.toml` 中配置。代码遵循 PEP 8、4 空格缩进，公共函数使用中文 docstring。
+### 3. 运行本地开发服务
+在项目根目录执行：
+```bash
+python run.py                  # 自动检测环境与端口并拉起
+# 或直接通过 uvicorn 启动：
+uvicorn backend.app:app --reload --port 8000
+```
 
-所有阻塞调用（模型推理、向量 I/O、入库）都通过 `asyncio.to_thread` 丢到线程中执行，请勿在协程里直接加入阻塞逻辑。
+### 4. 执行自动化测试
+```bash
+pytest backend/tests -v
+```
 
 ---
-
 ## 数据、备份与安全
 
 Docker 数据卷写入 `volumes/`，包含 PostgreSQL 的数据（向量表也在里面）。为保证备份一致性，请先停止服务，再复制该目录，完成后重新启动服务。`volumes/etcd`、`volumes/minio`、`volumes/milvus` 是旧栈留下的，不再使用。

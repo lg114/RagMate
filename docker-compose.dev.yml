@@ -1,0 +1,7 @@
+# Development override: exposes PostgreSQL port 5432 to localhost for local testing/debugging.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"

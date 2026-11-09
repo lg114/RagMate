@@ -4,9 +4,10 @@ from pathlib import Path
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# .env 文件路径：相对于 backend/ 目录（config.py 的祖父目录）
+# .env 文件路径：优先项目根目录 .env，其次 backend/.env
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
-_ENV_FILE = _BACKEND_DIR / ".env"
+_ROOT_DIR = _BACKEND_DIR.parent
+_ENV_FILE = _ROOT_DIR / ".env" if (_ROOT_DIR / ".env").exists() else (_BACKEND_DIR / ".env")
 
 # huggingface / local / flagembedding：本进程 FlagEmbedding。openai / remote：HTTP，不加载 BGE。
 LOCAL_EMBEDDING_PROVIDERS = ("huggingface", "local", "flagembedding")
@@ -27,7 +28,11 @@ def resolve_vector_table(vector_table: str) -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(str(_ROOT_DIR / ".env"), str(_BACKEND_DIR / ".env")),
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
     # LLM
     # 必填：留空时 /ready 不返回模型名（前端不显示），提问会失败。
@@ -63,7 +68,7 @@ class Settings(BaseSettings):
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
 
     # Database
-    DATABASE_URL: str = ""
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate"
 
     # pgvector 表，建在 DATABASE_URL 的同一个 Postgres 里。
     # 留空则用 ragmate_docs。

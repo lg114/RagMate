@@ -63,132 +63,23 @@ RagMate is a self-hosted RAG application that turns documents into a searchable 
 
 ## Quick start
 
-### Prerequisites
-
-- Python 3.12+ (Python 3.10+ supported)
-- Docker Desktop, or Docker Engine with Compose v2
-- An OpenAI-compatible LLM endpoint and API key (can also be configured via Settings in the Web UI)
-- An OpenAI-compatible embeddings endpoint and a `/rerank` endpoint (or configure via Settings).
-- Local FlagEmbedding is optional. That path needs about 8 GB of RAM for CPU inference, and a GPU helps on larger collections.
-
----
-
-### Option A: One-Click Start (Recommended)
-
-From the repository root:
-
-- **Windows**: Double-click `start.bat` or run:
-  ```powershell
-  python run.py
-  ```
-- **macOS / Linux**: Run:
-  ```bash
-  ./start.sh   # or: python3 run.py
-  ```
-
-`run.py` automatically:
-1. Detects and enters `backend/.venv` (no manual activation or PowerShell execution policy issues).
-2. Initializes `backend/.env` from `.env.example` with working defaults if missing.
-3. Automatically starts the PostgreSQL container (`docker compose up -d postgres`) if not running.
-4. Starts the Uvicorn web server at `http://localhost:8000`.
-5. Automatically opens your default browser once the service is ready.
-
----
-
-### Option B: Full Docker Stack
-
-To run both Postgres and the RagMate application fully in Docker without installing Python on host:
+The standard deployment requires only Docker with Compose v2 — no local Python or build tools needed.
 
 ```bash
-docker compose --profile all up -d
-```
-Then open [http://localhost:8000](http://localhost:8000).
+# 1. Copy configuration template
+cp .env.example .env    # Windows: copy .env.example .env
 
----
+# 2. Fill in your model credentials in .env (OpenAI, DeepSeek, or host Ollama)
 
-### Option C: Step-by-Step Manual Start
-
-#### 1. Start the infrastructure
-
-From the repository root:
-
-```bash
+# 3. Start RagMate
 docker compose up -d
-docker compose ps
 ```
 
-The stack exposes PostgreSQL (`5432`) with the pgvector extension. The application itself runs on your host during development. On first start the API runs `CREATE EXTENSION vector` and creates the chunk table.
+Open [http://localhost:8000](http://localhost:8000) in your browser.
 
-Ingest status, the lock, cancel, and failure reasons live in PostgreSQL. Chat history does too. Rate limits use an in-process counter, which is enough for one uvicorn process.
-
-To stop services without deleting data:
-
-```bash
-docker compose stop
-```
-
-#### 2. Install the backend
-
-```bash
-cd backend
-python -m venv .venv
-
-# macOS / Linux
-source .venv/bin/activate
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
-
-python -m pip install --upgrade pip
-pip install -e .
-```
-
-`ragmate-eval retrieval-gate` is part of that install. Tests and the retrieval gate need only the default install.
-
-For a byte-identical environment, use the lockfile instead (from `backend/`): `uv sync --frozen --extra test`. Exact versions are pinned in `backend/uv.lock`; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`.
-
-#### 3. Configure the application
-
-Stay in the `backend` directory:
-
-```bash
-cp .env.example .env
-```
-
-On Windows PowerShell, use `Copy-Item .env.example .env` instead.
-
-> [!IMPORTANT]
-> The process refuses to start unless these are set: `DATABASE_URL`, `LLM_API_KEY`, `EMBEDDING_API_BASE_URL`, and `RERANKER_API_BASE_URL`.
-> Embedding and rerank API keys are optional when the service does not check them.
-> To load BGE-M3 and the cross-encoder inside the API process instead, set `EMBEDDING_PROVIDER=huggingface` and `RERANKER_PROVIDER=local` (see the comments in `.env.example`). `local` and `flagembedding` are aliases of `huggingface`.
-
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate
-LLM_API_KEY=your-api-key
-LLM_MODEL=gpt-4o
-
-# Optional: any OpenAI-compatible chat provider
-LLM_API_BASE_URL=https://api.openai.com/v1
-
-# Required with the default remote providers. Point both at your sidecar or hosted API.
-EMBEDDING_PROVIDER=remote
-EMBEDDING_API_BASE_URL=http://127.0.0.1:8081/v1
-RERANKER_PROVIDER=api
-RERANKER_API_BASE_URL=http://127.0.0.1:8081/v1
-```
-
-The default database URL matches the Docker Compose stack. Vectors live in that same database (`VECTOR_TABLE`, default `ragmate_docs`). See [`backend/.env.example`](backend/.env.example) for the annotated full list, including the local FlagEmbedding opt-in.
-
-#### 4. Run RagMate
-
-Return to the repository root, with the virtual environment still active:
-
-```bash
-uvicorn backend.app:app --reload --port 8000
-```
-
-A normal start does not download BGE-M3 or the reranker, and it does not import torch. The first ingest and the first query call your embedding and rerank URLs. If you opted into local models, that first start downloads the weights (a few GB) and warms them in the background.
-
-Open [http://localhost:8000](http://localhost:8000) for the web UI. Interactive API docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
+- **Zero database setup**: PostgreSQL with pgvector and all tables initialize automatically on first boot.
+- **Persistent storage**: Vectors, documents, and chat sessions are preserved in Docker named volumes (`postgres_data`, `ragmate_docs`).
+- **Safe defaults**: Port binds to `127.0.0.1:8000` by default; database is isolated inside the internal Docker network.
 
 ---
 
@@ -398,21 +289,37 @@ RAGAS judge scoring was removed: it never produced a usable baseline and had bee
 
 ## Development
 
+For developers contributing to RagMate or testing backend code on the host machine:
+
+### 1. Start the development database
+To expose PostgreSQL (`5432`) to the host for local Python development:
 ```bash
-cd backend
-pip install -e ".[test]"
-pytest -v
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
 ```
 
-Tests live in `backend/tests/` and cover the retrieval filtering and deduplication logic. `conftest.py` provides an `override_settings` fixture for temporarily patching configuration. With no `backend/.env`, that file also fills placeholder `DATABASE_URL`, `LLM_API_KEY`, and the remote embed/rerank URLs so `pytest` does not need a GPU or a running model server. A checked-in `.env` is used as-is. `ragmate-eval retrieval-gate` does not go through `conftest`; export the same placeholder URLs (as CI does) or keep a valid `.env`.
+### 2. Install backend dependencies
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate       # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -e ".[test]"
+```
+Or using `uv`: `uv sync --extra test`
 
-> [!NOTE]
-> `ruff` and `mypy` are not configured in `pyproject.toml` yet. The codebase follows PEP 8, 4-space indentation, and Chinese docstrings on public functions.
+### 3. Run development server
+From the repository root:
+```bash
+python run.py                  # Automatic environment detection & launch
+# Or directly via uvicorn:
+uvicorn backend.app:app --reload --port 8000
+```
 
-Every blocking call — model inference, vector I/O, ingestion — is pushed to a thread with `asyncio.to_thread`, so avoid adding blocking work directly to coroutines.
+### 4. Run test suite
+```bash
+pytest backend/tests -v
+```
 
 ---
-
 ## Data, backup, and security
 
 Docker volumes are written to `volumes/` and hold PostgreSQL data, including the pgvector table. For a consistent backup, stop the stack, copy the directory, then restart it. `volumes/etcd`, `volumes/minio`, and `volumes/milvus` are leftovers from the old stack and are not used.

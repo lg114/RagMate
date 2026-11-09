@@ -166,7 +166,7 @@ def ensure_postgres(no_docker: bool = False) -> None:
 
     log("PostgreSQL is not running. Starting container via 'docker compose up -d postgres' ...")
     try:
-        subprocess.run(["docker", "compose", "up", "-d", "postgres"], cwd=ROOT_DIR, check=True)
+        subprocess.run(["docker", "compose", "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml", "up", "-d", "postgres"], cwd=ROOT_DIR, check=True)
     except Exception as e:
         log_warn(f"Could not automatically start Docker container: {e}")
         log_warn("If Docker Desktop is running, you can manually run: docker compose up -d postgres")

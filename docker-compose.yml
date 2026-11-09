@@ -1,44 +1,42 @@
 services:
-  # Postgres 15 + pgvector（sparsevec 需要扩展 >= 0.7）。
-  # 文档、会话、入库状态和向量都在这一个库里。API 启动时 CREATE EXTENSION vector。
-  # 从旧的 postgres:15 数据卷换过来时：docker compose up -d --force-recreate postgres
   postgres:
     container_name: ragmate-postgres
     image: pgvector/pgvector:0.8.7-pg15
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ragmate
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
     volumes:
-      - ./volumes/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ragmate"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 10
 
-  ragmate:
+  app:
+    container_name: ragmate-app
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ragmate-app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ragmate
+      - DOCUMENTS_DIR=/app/documents
     env_file:
-      - path: backend/.env
+      - path: .env
         required: false
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - ./documents:/app/documents
-    profiles: ["app", "all"]
+      - ragmate_docs:/app/documents
 
-networks:
-  default:
-    name: ragmate-network
+volumes:
+  postgres_data:
+  ragmate_docs:
