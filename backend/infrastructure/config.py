@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     INGEST_HEARTBEAT_STALE: int = Field(default=30, gt=0)  # 心跳超过该秒数视为持锁 worker 已退出
 
     # Documents
-    DOCUMENTS_DIR: str = str(_BACKEND_DIR / "documents")
+    DOCUMENTS_DIR: str = str(_ROOT_DIR / "documents")
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
