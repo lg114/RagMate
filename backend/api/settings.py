@@ -596,7 +596,7 @@ async def test_llm_connection(payload: Optional[ConnectionTestPayload] = None):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(endpoint, json=req_body, headers=headers)
         latency = int((time.perf_counter() - start) * 1000)
         if resp.status_code == 200:
@@ -607,9 +607,13 @@ async def test_llm_connection(payload: Optional[ConnectionTestPayload] = None):
             "model": model,
             "detail": f"HTTP {resp.status_code}: {_format_http_error(resp)}",
         }
+    except httpx.TimeoutException:
+        latency = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": "Request timed out (>8s)"}
     except Exception as e:
         latency = int((time.perf_counter() - start) * 1000)
-        return {"ok": False, "latency_ms": latency, "model": model, "detail": _sanitize_error(e)}
+        detail = _sanitize_error(e) or type(e).__name__
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": detail}
 
 
 @router.post("/settings/test/embedding")
@@ -649,7 +653,7 @@ async def test_embedding_connection(payload: Optional[ConnectionTestPayload] = N
     emb_payload = {"model": model, "input": ["healthcheck"]}
 
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(endpoint, json=emb_payload, headers=headers)
         latency = int((time.perf_counter() - start) * 1000)
         if resp.status_code != 200:
@@ -672,9 +676,13 @@ async def test_embedding_connection(payload: Optional[ConnectionTestPayload] = N
                 "detail": f"Incompatible dimension: returned {dim} dims, but RagMate vector store requires exactly 1024 dimensions.",
             }
         return {"ok": True, "latency_ms": latency, "dimension": dim, "model": model, "detail": f"Success ({dim} dims, {latency}ms)"}
+    except httpx.TimeoutException:
+        latency = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": "Request timed out (>8s)"}
     except Exception as e:
         latency = int((time.perf_counter() - start) * 1000)
-        return {"ok": False, "latency_ms": latency, "model": model, "detail": _sanitize_error(e)}
+        detail = _sanitize_error(e) or type(e).__name__
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": detail}
 
 
 @router.post("/settings/test/reranker")
@@ -713,7 +721,7 @@ async def test_reranker_connection(payload: Optional[ConnectionTestPayload] = No
     }
 
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(endpoint, json=rerank_payload, headers=headers)
         latency = int((time.perf_counter() - start) * 1000)
         if resp.status_code != 200:
@@ -728,7 +736,11 @@ async def test_reranker_connection(payload: Optional[ConnectionTestPayload] = No
         if not results:
             return {"ok": False, "latency_ms": latency, "detail": "Response missing rerank results."}
         return {"ok": True, "latency_ms": latency, "model": model, "detail": f"Success ({latency}ms)"}
+    except httpx.TimeoutException:
+        latency = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": "Request timed out (>8s)"}
     except Exception as e:
         latency = int((time.perf_counter() - start) * 1000)
-        return {"ok": False, "latency_ms": latency, "model": model, "detail": _sanitize_error(e)}
+        detail = _sanitize_error(e) or type(e).__name__
+        return {"ok": False, "latency_ms": latency, "model": model, "detail": detail}
 
