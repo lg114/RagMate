@@ -257,10 +257,10 @@
   }
   .settings-note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
   .ready-list { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13.5px; }
-  .ready-list li { display: flex; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--line); }
+  .ready-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
   .ready-list li:first-child { border-top: 0; }
-  .ready-list .ok { color: var(--ink-soft); }
-  .ready-list .bad { color: #b91c1c; }
+  .ready-list .ok { color: var(--ink-soft); font-size: 13px; white-space: nowrap; flex-shrink: 0; line-height: 1.6; }
+  .ready-list .bad { color: #ef4444; font-size: 13px; white-space: nowrap; flex-shrink: 0; line-height: 1.6; }
 
   .composer {
     flex: none; background: var(--bg);
@@ -341,9 +341,8 @@
   .modal-btn-confirm:hover { opacity: 0.9; }
 
   .ready-list span.untested {
-    background: var(--bg-sunken); color: var(--muted);
-    border: 1px solid var(--line); padding: 1px 6px;
-    border-radius: 4px; font-size: 11px; font-weight: 500;
+    color: var(--muted); font-size: 13px; white-space: nowrap;
+    flex-shrink: 0; line-height: 1.6;
   }
 
   /* Unified Unlock Overlay */
@@ -629,7 +628,8 @@
   }
   .spec-card code { font-family: var(--mono); font-size: 11.5px; }
 
-  .data-dest-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .data-dest-hint { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  .ready-row-left { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 
 </style>
 </head>

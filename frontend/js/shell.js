@@ -1271,11 +1271,11 @@ model_missing: "llmModelMissing",
 function addReadyRow(list, label, value, cls, hint, dataDest) {
   const li = document.createElement("li");
   const left = document.createElement("div");
-  left.style.display = "flex";
-  left.style.flexDirection = "column";
+  left.className = "ready-row-left";
 
   const n = document.createElement("span");
   n.textContent = label;
+  n.style.fontWeight = "500";
   left.appendChild(n);
 
   if (dataDest) {
