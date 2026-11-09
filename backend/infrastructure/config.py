@@ -216,3 +216,37 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+def _sync_env_to_settings(s: Settings) -> None:
+    """Ensure settings reflect .env file values over stale environment variables."""
+    if not _ENV_FILE.exists():
+        return
+    try:
+        raw = _ENV_FILE.read_text(encoding="utf-8")
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = re.split(r"\s+#", v.strip())[0].strip()
+            if hasattr(s, k):
+                cur = getattr(s, k)
+                if isinstance(cur, bool):
+                    setattr(s, k, v.lower() in ("true", "1", "yes"))
+                elif isinstance(cur, float):
+                    try:
+                        setattr(s, k, float(v))
+                    except ValueError:
+                        pass
+                elif isinstance(cur, int):
+                    try:
+                        setattr(s, k, int(v))
+                    except ValueError:
+                        pass
+                else:
+                    setattr(s, k, v)
+    except Exception:
+        pass
+
+_sync_env_to_settings(settings)

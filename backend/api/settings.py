@@ -73,6 +73,7 @@ SECRET_KEYS = {
 RESTART_KEYS = {
     "LLM_MODEL",
     "LLM_API_BASE_URL",
+    "LLM_TEMPERATURE",
     "LLM_IS_LOCAL",
     "LLM_REASONING_EFFORT",
     "EMBEDDING_PROVIDER",
@@ -241,7 +242,16 @@ def _atomic_write_env(updates: Dict[str, str]) -> None:
         tf.write(content)
         tf.flush()
         tf.close()
-        os.replace(tf.name, str(env_path))
+        try:
+            os.replace(tf.name, str(env_path))
+        except OSError:
+            # Fallback for Docker single-file bind mounts where os.replace raises EBUSY / EXDEV
+            import shutil
+            shutil.copyfile(tf.name, str(env_path))
+            try:
+                os.remove(tf.name)
+            except Exception:
+                pass
     except Exception:
         if os.path.exists(tf.name):
             try:
@@ -283,9 +293,11 @@ def _get_field_sources(env_dict: Dict[str, str]) -> Dict[str, str]:
             sources[k] = "default"
     return sources
 
+_STAGED_RESTART_KEYS: set[str] = set()
+
 def _calculate_pending_restart(env_dict: Dict[str, str]) -> list[str]:
-    """Identify keys whose saved values on disk differ from the active runtime configuration."""
-    pending = []
+    """Identify keys whose saved values on disk differ from the initial runtime configuration or were modified."""
+    pending = set(_STAGED_RESTART_KEYS)
     for k in EDITABLE_KEYS:
         disk_val = env_dict.get(k)
         if disk_val is None:
@@ -293,24 +305,17 @@ def _calculate_pending_restart(env_dict: Dict[str, str]) -> list[str]:
         running_val = getattr(current_settings, k, None)
         if k in SECRET_KEYS:
             if disk_val and disk_val != running_val:
-                pending.append(k)
-        elif isinstance(running_val, bool) or k in ("LLM_IS_LOCAL", "EMBEDDING_NORMALIZE", "FAITHFULNESS_CHECK", "LANGSMITH_TRACING"):
-            disk_bool = _parse_bool(disk_val)
-            if disk_bool is not None and running_val is not None:
-                if disk_bool != running_val:
-                    pending.append(k)
-            elif (disk_bool is not None) != (running_val is not None):
-                pending.append(k)
+                pending.add(k)
         elif isinstance(running_val, (int, float)):
             try:
                 if float(disk_val) != float(running_val):
-                    pending.append(k)
+                    pending.add(k)
             except ValueError:
-                pending.append(k)
+                pending.add(k)
         else:
-            if disk_val.strip() != (str(running_val) if running_val is not None else "").strip():
-                pending.append(k)
-    return sorted(pending)
+            if str(disk_val).strip() != (str(running_val) if running_val is not None else "").strip():
+                pending.add(k)
+    return sorted(list(pending))
 
 @router.get("/settings")
 def get_settings():
@@ -483,6 +488,29 @@ def update_settings_bulk(payload: BulkSettingsUpdate):
 
     if updates_to_write:
         _atomic_write_env(updates_to_write)
+        for k in updates_to_write:
+            if k in RESTART_KEYS:
+                _STAGED_RESTART_KEYS.add(k)
+
+        # Hot-apply updates to in-memory settings
+        for k, v in updates_to_write.items():
+            if hasattr(current_settings, k):
+                if k in ("LLM_IS_LOCAL", "EMBEDDING_NORMALIZE", "FAITHFULNESS_CHECK", "LANGSMITH_TRACING"):
+                    setattr(current_settings, k, _parse_bool(v))
+                elif k in ("LLM_TEMPERATURE", "EMBEDDING_API_TIMEOUT", "RERANKER_API_TIMEOUT"):
+                    try:
+                        setattr(current_settings, k, float(v))
+                    except ValueError:
+                        pass
+                else:
+                    setattr(current_settings, k, v)
+
+        # Hot-clear LLM instance cache so next chat/health probe uses newly saved settings immediately
+        try:
+            from backend.infrastructure.model_factory import get_llm
+            get_llm.cache_clear()
+        except Exception:
+            pass
 
     new_env = _parse_env_dict()
     new_pending = _calculate_pending_restart(new_env)

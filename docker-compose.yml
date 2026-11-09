@@ -36,6 +36,7 @@ services:
         condition: service_healthy
     volumes:
       - ragmate_docs:/app/documents
+      - ./.env:/app/.env
 
 volumes:
   postgres_data:

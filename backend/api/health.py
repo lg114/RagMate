@@ -21,18 +21,24 @@ _LLM_CHECK_TIMEOUT = 3  # 模型探活更短：它只列一下模型，不该拖
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal", "host.lima.internal"}
 
 
-def _model_source() -> str:
-    """模型部署在本地还是远程 API。显式配置 LLM_IS_LOCAL 优先于按 host 推断。"""
+def _get_active_llm_config() -> tuple[str, str, str, str]:
+    """获取当前生效的 LLM 配置。"""
+    model = (settings.LLM_MODEL or "").strip()
+    base_url = (settings.LLM_API_BASE_URL or "").strip()
+    api_key = (settings.LLM_API_KEY or "").strip()
+
     if settings.LLM_IS_LOCAL is not None:
-        return "local" if settings.LLM_IS_LOCAL else "remote"
-    base = (settings.LLM_API_BASE_URL or "").strip()
-    if not base:
-        return "remote"  # 未指定 base_url：走 SDK 默认的官方端点
-    host = (urlparse(base).hostname or "").lower()
-    return "local" if host in _LOCAL_HOSTS else "remote"
+        source = "local" if settings.LLM_IS_LOCAL else "remote"
+    elif base_url:
+        host = (urlparse(base_url).hostname or "").lower()
+        source = "local" if host in _LOCAL_HOSTS else "remote"
+    else:
+        source = "remote"
+
+    return model, base_url, api_key, source
 
 
-async def _check_llm(model: str, source: str) -> tuple[bool, str]:
+async def _check_llm(model: str, base_url: str, api_key: str, source: str) -> tuple[bool, str]:
     """探一下模型端点，返回 (是否就绪, 原因码)。
 
     只看端点活着不够——本地 Ollama 服务起来了但模型没 pull 时照样列不出目标模型，
@@ -40,12 +46,12 @@ async def _check_llm(model: str, source: str) -> tuple[bool, str]:
     """
     if not model:
         return False, "not_configured"
-    base = (settings.LLM_API_BASE_URL or "").strip().rstrip("/")
+    base = base_url.rstrip("/")
     # 与 OpenAI SDK 的约定一致：base_url 已含 /v1，模型列表就挂在它下面。
     url = f"{base}/models" if base else "https://api.openai.com/v1/models"
     headers = {}
-    if settings.LLM_API_KEY:
-        headers["Authorization"] = f"Bearer {settings.LLM_API_KEY}"
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         # 本地部署不走系统代理：代理会把 127.0.0.1 的请求转发出去而失败。
         async with httpx.AsyncClient(timeout=_LLM_CHECK_TIMEOUT, trust_env=source != "local") as client:
@@ -81,8 +87,7 @@ def health():
 
 @router.get("/ready")
 async def ready():
-    model = (settings.LLM_MODEL or "").strip()
-    source = _model_source() if model else "unknown"
+    model, base_url, api_key, source = _get_active_llm_config()
 
     async def check_postgres() -> bool:
         try:
@@ -104,7 +109,7 @@ async def ready():
 
     # 三项并发：串行时全挂要等 13 秒，健康检查不该这么慢。
     pg_ok, vectors_ok, (llm_ok, llm_detail) = await asyncio.gather(
-        check_postgres(), check_pgvector(), _check_llm(model, source)
+        check_postgres(), check_pgvector(), _check_llm(model, base_url, api_key, source)
     )
     status = {"postgresql": pg_ok, "pgvector": vectors_ok, "llm": llm_ok}
 

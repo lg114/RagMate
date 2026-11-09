@@ -1224,7 +1224,7 @@ async function runConnectionTest(component, btnId, resultId) {
     if (data.ok) {
       connectionTestResults[component] = "ok";
       resultEl.className = "test-conn-result ok";
-      resultEl.textContent = `✔ ${data.detail || "Success"}`;
+      resultEl.textContent = `✔ ${data.detail || "Success"} (Click "Save Settings" below to persist)`;
     } else {
       connectionTestResults[component] = "bad";
       resultEl.className = "test-conn-result bad";
