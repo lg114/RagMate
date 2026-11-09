@@ -486,6 +486,14 @@
   .settings-field input::placeholder {
     color: var(--muted); font-size: 13px;
   }
+  /* Hide browser number spinner arrows (can render as floppy-disk glyphs on some OS) */
+  .settings-field input[type=number]::-webkit-inner-spin-button,
+  .settings-field input[type=number]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+  }
+  .settings-field input[type=number] { -moz-appearance: textfield; }
   .settings-field .field-hint {
     font-size: 11.5px; color: var(--muted); line-height: 1.4;
   }
