@@ -51,6 +51,12 @@ deleteDocConfirm: "删除“{name}”？文档与向量都会删除。",
 replaceConfirm: "“{name}”已存在。用新文件替换它？",
 deleteSessionConfirm: "删除这段对话？",
 docIngested: "已入库", docUploaded: "待入库", docIngesting: "入库中", docFailed: "入库失败",
+pwdDesc: "此实例已设置访问密码，请输入以继续。",
+pwdPlaceholder: "请输入实例访问密码",
+pwdUnlockBtn: "解锁访问",
+pwdRequired: "请输入密码",
+pwdIncorrect: "密码错误，请重新输入",
+pwdUnlocked: "实例解锁成功",
 },
 en: {
 navChat: "Chat", navDocuments: "Documents", navSettings: "Settings",
@@ -90,6 +96,12 @@ deleteDocConfirm: "Delete “{name}”? The document and its vectors will be rem
 replaceConfirm: "“{name}” already exists. Replace it with the new file?",
 deleteSessionConfirm: "Delete this conversation?",
 docIngested: "Ingested", docUploaded: "Pending", docIngesting: "Ingesting", docFailed: "Failed",
+pwdDesc: "Instance password required to access this server.",
+pwdPlaceholder: "Instance password",
+pwdUnlockBtn: "Unlock Instance",
+pwdRequired: "Please enter the instance password",
+pwdIncorrect: "Incorrect instance password",
+pwdUnlocked: "Instance unlocked successfully",
 },
 };
 
@@ -732,18 +744,39 @@ await loadDocuments();
 
 
 /* ---- 统一认证与解锁遮罩 ---- */
+function showUnlockError(message) {
+  const errBox = $("unlock-error");
+  const errText = $("unlock-error-text");
+  const pwdInput = $("unlock-password");
+  const card = $("unlock-card");
+
+  if (errText) errText.textContent = message;
+  if (errBox) errBox.hidden = false;
+  if (pwdInput) {
+    pwdInput.classList.add("error");
+    pwdInput.focus();
+  }
+  if (card) {
+    card.classList.remove("shake");
+    void card.offsetWidth;
+    card.classList.add("shake");
+  }
+}
+
+function clearUnlockError() {
+  const errBox = $("unlock-error");
+  const pwdInput = $("unlock-password");
+  if (errBox) errBox.hidden = true;
+  if (pwdInput) pwdInput.classList.remove("error");
+}
+
 function showUnlockOverlay(msg) {
   const overlay = $("unlock-overlay");
   const input = $("unlock-password");
-  const err = $("unlock-error");
+  clearUnlockError();
   if (overlay) overlay.hidden = false;
-  if (err) {
-    if (msg) {
-      err.textContent = msg;
-      err.hidden = false;
-    } else {
-      err.hidden = true;
-    }
+  if (msg) {
+    showUnlockError(msg);
   }
   if (input) {
     input.value = "";
@@ -753,6 +786,7 @@ function showUnlockOverlay(msg) {
 
 function hideUnlockOverlay() {
   const overlay = $("unlock-overlay");
+  clearUnlockError();
   if (overlay) overlay.hidden = true;
 }
 
@@ -1164,14 +1198,23 @@ function initSettingsEvents() {
   $("btn-test-embedding")?.addEventListener("click", () => runConnectionTest("embedding", "btn-test-embedding", "res-test-embedding"));
   $("btn-test-reranker")?.addEventListener("click", () => runConnectionTest("reranker", "btn-test-reranker", "res-test-reranker"));
 
-  // Unlock form submission
+  // Unlock form submission & input cleanup
+  $("unlock-password")?.addEventListener("input", clearUnlockError);
+
   $("unlock-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const pwd = $("unlock-password")?.value || "";
     const btn = $("btn-unlock");
-    const err = $("unlock-error");
+
+    clearUnlockError();
+
+    // 1. Client-side empty validation (no browser native tooltip bubble)
+    if (!pwd.trim()) {
+      showUnlockError(t("pwdRequired"));
+      return;
+    }
+
     if (btn) btn.disabled = true;
-    if (err) err.hidden = true;
     try {
       const res = await fetch("/auth/login", {
         method: "POST",
@@ -1180,10 +1223,9 @@ function initSettingsEvents() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        if (err) {
-          err.textContent = data.detail || "Incorrect instance password";
-          err.hidden = false;
-        }
+        const detail = data.detail || "";
+        const isWrong = detail.toLowerCase().includes("incorrect");
+        showUnlockError(isWrong ? t("pwdIncorrect") : (detail || t("pwdIncorrect")));
         return;
       }
       if (data.token) {
@@ -1192,13 +1234,10 @@ function initSettingsEvents() {
       hideUnlockOverlay();
       const logoutBtn = $("btn-logout");
       if (logoutBtn) logoutBtn.hidden = false;
-      toast("Instance unlocked successfully");
+      toast(t("pwdUnlocked"));
       initApp();
     } catch (ex) {
-      if (err) {
-        err.textContent = ex.message || "Failed to connect to server";
-        err.hidden = false;
-      }
+      showUnlockError(ex.message || t("errNetwork"));
     } finally {
       if (btn) btn.disabled = false;
     }

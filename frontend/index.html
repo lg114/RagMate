@@ -304,7 +304,7 @@
     position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
     background: var(--ink); color: var(--bg); font-size: 13.5px;
     padding: 8px 16px; border-radius: 999px; opacity: 0; pointer-events: none;
-    transition: opacity .2s; max-width: 90vw; text-align: center; z-index: 10;
+    transition: opacity .2s; max-width: 90vw; text-align: center; z-index: 10001;
   }
   .toast.show { opacity: 1; }
   .hint { color: var(--muted); font-size: 14px; }
@@ -348,39 +348,59 @@
 
   /* Unified Unlock Overlay */
   .unlock-overlay {
-    position: fixed; inset: 0; z-index: 1000;
-    background: var(--bg);
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(15, 15, 15, 0.88); backdrop-filter: blur(12px);
     display: flex; align-items: center; justify-content: center;
     padding: 20px;
   }
   .unlock-overlay[hidden] { display: none !important; }
   .unlock-card {
     background: var(--bg-elev); border: 1px solid var(--line-strong);
-    border-radius: 14px; padding: 36px 30px; width: 100%; max-width: 380px;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.18); text-align: center;
+    border-radius: 16px; padding: 36px 30px; width: 100%; max-width: 380px;
+    box-shadow: 0 20px 48px rgba(0,0,0,0.45); text-align: center;
+    transition: transform .2s ease;
+  }
+  .unlock-card.shake {
+    animation: unlock-shake 0.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  }
+  @keyframes unlock-shake {
+    10%, 90% { transform: translate3d(-2px, 0, 0); }
+    20%, 80% { transform: translate3d(3px, 0, 0); }
+    30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+    40%, 60% { transform: translate3d(4px, 0, 0); }
   }
   .unlock-brand {
     display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px;
   }
   .unlock-brand h2 { font-size: 22px; font-weight: 700; margin: 0; color: var(--ink); }
-  .unlock-desc { font-size: 13px; color: var(--muted); margin: 0 0 22px; line-height: 1.4; }
+  .unlock-desc { font-size: 13.5px; color: var(--muted); margin: 0 0 22px; line-height: 1.5; }
   .unlock-form { display: flex; flex-direction: column; gap: 12px; }
+  .unlock-input-wrap { position: relative; width: 100%; }
   .unlock-input-wrap input {
-    width: 100%; padding: 10px 14px; font-size: 14px; font-family: inherit;
+    width: 100%; padding: 11px 14px; font-size: 14px; font-family: inherit;
     background: var(--bg); color: var(--ink); border: 1px solid var(--line-strong);
-    border-radius: var(--radius); outline: none; transition: border-color .15s ease;
+    border-radius: var(--radius); outline: none; transition: border-color .15s ease, box-shadow .15s ease;
   }
   .unlock-input-wrap input:focus { border-color: var(--accent); }
+  .unlock-input-wrap input.error {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
+  }
   .unlock-submit-btn {
-    width: 100%; padding: 10px 14px; font-size: 14px; font-weight: 600;
+    width: 100%; padding: 11px 14px; font-size: 14px; font-weight: 600;
     background: var(--ink); color: var(--bg); border: 0; border-radius: var(--radius);
-    cursor: pointer; transition: opacity .15s ease;
+    cursor: pointer; transition: opacity .15s ease, transform .1s ease;
   }
-  .unlock-submit-btn:hover { opacity: 0.9; }
+  .unlock-submit-btn:hover { opacity: 0.92; }
+  .unlock-submit-btn:active { transform: scale(0.99); }
+  .unlock-submit-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .unlock-error {
-    font-size: 12.5px; color: #ef4444; background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.25); border-radius: 6px; padding: 8px 12px;
+    font-size: 13px; color: #f87171; background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.22); border-radius: 8px; padding: 9px 12px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    line-height: 1.4; text-align: left;
   }
+  .unlock-error[hidden] { display: none !important; }
   .sidebar-lock-btn {
     border: 0; background: none; color: var(--ink-soft);
     cursor: pointer; padding: 4px; border-radius: 6px;
@@ -592,13 +612,16 @@
         </svg>
         <h2>RagMate</h2>
       </div>
-      <p class="unlock-desc">Instance password required to access this server.</p>
-      <form class="unlock-form" id="unlock-form">
+      <p class="unlock-desc" data-i18n="pwdDesc">Instance password required to access this server.</p>
+      <form class="unlock-form" id="unlock-form" novalidate>
         <div class="unlock-input-wrap">
-          <input type="password" id="unlock-password" placeholder="Instance password" autocomplete="current-password" required>
+          <input type="password" id="unlock-password" placeholder="Instance password" data-i18n-ph="pwdPlaceholder" autocomplete="current-password">
         </div>
-        <button type="submit" class="unlock-submit-btn" id="btn-unlock">Unlock Instance</button>
-        <div class="unlock-error" id="unlock-error" hidden></div>
+        <div class="unlock-error" id="unlock-error" hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="unlock-error-text"></span>
+        </div>
+        <button type="submit" class="unlock-submit-btn" id="btn-unlock" data-i18n="pwdUnlockBtn">Unlock Instance</button>
       </form>
     </div>
   </div>
