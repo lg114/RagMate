@@ -257,7 +257,7 @@ def main() -> None:
         str(args.port),
     ]
     if not args.no_reload:
-        uvicorn_cmd.append("--reload")
+        uvicorn_cmd.extend(["--reload", "--reload-dir", "backend", "--reload-dir", "frontend"])
 
     proc = None
     try:

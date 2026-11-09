@@ -143,18 +143,39 @@ async def save_document(
             os.remove(tmp_path)
         raise
 
-    # 4. DB 提交成功后原子重命名（同文件系统上 rename 是原子操作）
-    try:
-        os.replace(tmp_path, filepath)
-    except Exception:
-        # rename 失败则删除已提交的 DB 记录，保持磁盘与 DB 一致
+    # 4. DB 提交成功后原子重命名或安全覆盖（兼容 Windows 文件锁与 Docker 挂载）
+    replace_ok = False
+    for attempt in range(5):
+        try:
+            os.replace(tmp_path, filepath)
+            replace_ok = True
+            break
+        except OSError:
+            try:
+                import shutil
+                shutil.copyfile(tmp_path, filepath)
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+                replace_ok = True
+                break
+            except OSError:
+                import time
+                time.sleep(0.05)
+
+    if not replace_ok:
+        # 写入失败则删除已提交的 DB 记录，保持磁盘与 DB 一致
         try:
             await session.execute(delete(Document).where(Document.filename == name))
             await session.commit()
         except Exception:
             logger.warning(f"Failed to rollback DB record for {name}", exc_info=True)
         if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
         raise
 
     return {

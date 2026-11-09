@@ -238,7 +238,7 @@ pip install -e ".[test]"
 python run.py
 
 # 或直接通过 Uvicorn 启动
-uvicorn backend.app:app --reload --port 8000
+uvicorn backend.app:app --reload --reload-dir backend --port 8000
 ```
 
 ### 4. 执行自动化测试

@@ -238,7 +238,7 @@ From the project root:
 python run.py
 
 # Or directly via Uvicorn
-uvicorn backend.app:app --reload --port 8000
+uvicorn backend.app:app --reload --reload-dir backend --port 8000
 ```
 
 ### 4. Run Test Suite
