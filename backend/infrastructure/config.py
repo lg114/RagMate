@@ -171,26 +171,11 @@ class Settings(BaseSettings):
                 f"got '{self.EMBEDDING_PROVIDER}'"
             )
 
-        missing = []
+        # 基础设施检查：仅强校验 DATABASE_URL。
+        # 模型相关密钥和端点（LLM_API_KEY, EMBEDDING_API_BASE_URL, RERANKER_API_BASE_URL）在启动时不作强阻断，
+        # 允许应用先就绪、前端可访问并在 Settings 页面配置，实际调用模型接口时若未配置再返回明确提示。
         if not self.DATABASE_URL:
-            missing.append("DATABASE_URL")
-        if not self.LLM_API_KEY:
-            missing.append("LLM_API_KEY")
-        # 默认就是远程。URL 缺失时启动失败，避免进程悄悄去加载本地 torch / BGE。
-        # 密钥保持可选：很多 OpenAI 兼容侧车不校验 Authorization。
-        if self.EMBEDDING_PROVIDER in REMOTE_EMBEDDING_PROVIDERS and not self.EMBEDDING_API_BASE_URL.strip():
-            missing.append("EMBEDDING_API_BASE_URL")
-        if self.RERANKER_PROVIDER == "api" and not self.RERANKER_API_BASE_URL.strip():
-            missing.append("RERANKER_API_BASE_URL")
-        if missing:
-            raise ValueError(
-                f"Required env vars not set: {', '.join(missing)}. Check your .env file. "
-                "EMBEDDING_API_BASE_URL is required when EMBEDDING_PROVIDER is openai or remote (the default). "
-                "RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api (the default). "
-                "Keys for those endpoints are optional. "
-                "To load FlagEmbedding and the cross-encoder in this process instead, set "
-                "EMBEDDING_PROVIDER=huggingface (local and flagembedding are aliases) and RERANKER_PROVIDER=local."
-            )
+            raise ValueError("Required env var not set: DATABASE_URL. Check your environment or .env file.")
 
         # 验证所有 chunk size 配置
         chunk_configs = [

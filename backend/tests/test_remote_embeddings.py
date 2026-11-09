@@ -93,34 +93,32 @@ def _base_env(monkeypatch):
     monkeypatch.delenv("RERANKER_API_KEY", raising=False)
 
 
-def test_remote_provider_requires_base_url(monkeypatch):
+def test_remote_provider_allows_startup_without_base_url(monkeypatch):
     _base_env(monkeypatch)
     monkeypatch.setenv("EMBEDDING_PROVIDER", "remote")
     monkeypatch.setenv("RERANKER_PROVIDER", "local")
     monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
     monkeypatch.setenv("RERANKER_API_BASE_URL", "")
-    with pytest.raises(ValueError, match="EMBEDDING_API_BASE_URL is required when EMBEDDING_PROVIDER is openai or remote"):
-        Settings(_env_file=None)
+    loaded = Settings(_env_file=None)
+    assert loaded.EMBEDDING_PROVIDER == "remote"
+    assert loaded.EMBEDDING_API_BASE_URL == ""
 
 
-def test_openai_provider_requires_base_url(monkeypatch):
+def test_openai_provider_allows_startup_without_base_url(monkeypatch):
     _base_env(monkeypatch)
     monkeypatch.setenv("EMBEDDING_PROVIDER", "openai")
     monkeypatch.setenv("RERANKER_PROVIDER", "local")
     monkeypatch.setenv("EMBEDDING_API_BASE_URL", "   ")
-    with pytest.raises(ValueError, match="EMBEDDING_API_BASE_URL"):
-        Settings(_env_file=None)
+    loaded = Settings(_env_file=None)
+    assert loaded.EMBEDDING_PROVIDER == "openai"
 
 
-def test_default_providers_are_remote_and_require_both_urls(monkeypatch):
-    _base_env(monkeypatch)
-    monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
-    monkeypatch.setenv("RERANKER_API_BASE_URL", " ")
-    with pytest.raises(ValueError, match="EMBEDDING_API_BASE_URL") as exc:
-        Settings(_env_file=None)
-    message = str(exc.value)
-    assert "RERANKER_API_BASE_URL" in message
-    assert "Required env vars not set: EMBEDDING_API_BASE_URL, RERANKER_API_BASE_URL" in message
+def test_remote_embedding_call_fails_when_url_unconfigured(monkeypatch):
+    from backend.domain.errors import ServiceUnavailableError
+    monkeypatch.setattr(settings, "EMBEDDING_PROVIDER", "remote")
+    monkeypatch.setattr(settings, "EMBEDDING_API_BASE_URL", "")
+    with pytest.raises(ServiceUnavailableError, match="EMBEDDING_API_BASE_URL"):
+        encode_documents(["hello"])
 
 
 def test_default_providers_accept_urls_without_keys(monkeypatch):

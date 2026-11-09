@@ -107,6 +107,14 @@ class TestChatEndpoints:
         response = client.post("/chat/stream", json={})
         assert response.status_code == 422
 
+    def test_chat_unconfigured_returns_503(self, client, monkeypatch):
+        """未配置 LLM 时请求聊天应返回 503 且带明确提示。"""
+        from backend.infrastructure.config import settings
+        monkeypatch.setattr(settings, "LLM_API_KEY", "")
+        response = client.post("/chat", json={"message": "hi", "session_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"})
+        assert response.status_code == 503
+        assert "not configured" in response.json()["detail"].lower()
+
 
 class TestIngestEndpoints:
     """测试入库端点。"""
@@ -121,6 +129,15 @@ class TestIngestEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "idle"
+
+    def test_ingest_unconfigured_returns_503(self, client, monkeypatch):
+        """未配置 Embedding API URL 时请求入库应返回 503 且带明确提示。"""
+        from backend.infrastructure.config import settings
+        monkeypatch.setattr(settings, "EMBEDDING_PROVIDER", "remote")
+        monkeypatch.setattr(settings, "EMBEDDING_API_BASE_URL", "")
+        response = client.post("/ingest", json={"filenames": ["test.txt"]})
+        assert response.status_code == 503
+        assert "not configured" in response.json()["detail"].lower()
 
 
 class TestErrorHandling:

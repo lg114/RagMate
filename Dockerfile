@@ -14,12 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend source code and frontend assets
+# 1. Install Python dependencies using pyproject.toml (Docker layer cached)
+COPY backend/pyproject.toml /app/backend/
+RUN python -c "import tomllib; p = tomllib.load(open('/app/backend/pyproject.toml', 'rb')); print('\n'.join(p['project']['dependencies']))" > /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
+
+# 2. Copy application source code and frontend assets
 COPY backend/ /app/backend/
 COPY frontend/ /app/frontend/
-
-# Install RagMate backend package and dependencies
-RUN pip install /app/backend
 
 # Create directory for documents
 RUN mkdir -p /app/documents

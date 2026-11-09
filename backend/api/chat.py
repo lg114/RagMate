@@ -3,7 +3,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import delete, func, select
 from starlette.responses import StreamingResponse
 
@@ -22,6 +22,11 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
+    if not (settings.LLM_MODEL or "").strip() or not (settings.LLM_API_KEY or "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="LLM model or API key is not configured. Please configure them in Settings.",
+        )
     result = await chat(body.message, body.session_id, replace_last=body.replace_last, debug=body.debug)
     return ChatResponse(
         response=result["response"],
@@ -37,6 +42,11 @@ async def chat_endpoint(body: ChatRequest, request: Request):
 @router.post("/chat/stream")
 async def chat_stream_endpoint(body: ChatRequest, request: Request):
     await check_rate_limit(get_client_ip(request))
+    if not (settings.LLM_MODEL or "").strip() or not (settings.LLM_API_KEY or "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="LLM model or API key is not configured. Please configure them in Settings.",
+        )
 
     _SENTINEL = object()
 

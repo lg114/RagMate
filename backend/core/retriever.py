@@ -232,7 +232,11 @@ def _api_rerank_scores(query: str, texts: list[str]) -> list[float]:
     429 时重试：优先用响应里的 Retry-After，否则按 5/10/20/40 秒指数退避，
     最多 5 次；其它错误直接抛出。rerank 是只读调用，重试安全。
     """
-    url = settings.RERANKER_API_BASE_URL.rstrip("/") + "/rerank"
+    base = (settings.RERANKER_API_BASE_URL or "").strip().rstrip("/")
+    if not base:
+        from backend.domain.errors import ServiceUnavailableError
+        raise ServiceUnavailableError("Reranker service base URL (RERANKER_API_BASE_URL) is not configured. Please configure it in Settings.")
+    url = base + "/rerank"
     payload = json.dumps({
         "model": settings.RERANKER_MODEL,
         "query": query,

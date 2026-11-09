@@ -1,8 +1,10 @@
 """入库端点。"""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from backend.api.deps import get_client_ip
 from backend.application.ingest_manager import reconcile_stale_ingest, request_ingest_cancellation, start_ingest
+from backend.infrastructure.config import settings
+from backend.infrastructure.encoding import uses_remote_embeddings
 from backend.infrastructure.rate_limiter import check_rate_limit
 from backend.domain.schemas import IngestRequest
 
@@ -12,6 +14,11 @@ router = APIRouter()
 @router.post("/ingest")
 async def trigger_ingest(request: Request, body: IngestRequest | None = None):
     await check_rate_limit(get_client_ip(request))
+    if uses_remote_embeddings() and not (settings.EMBEDDING_API_BASE_URL or "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding API base URL is not configured. Please configure it in Settings.",
+        )
     filenames = body.filenames if body and body.filenames else None
     return await start_ingest(filenames)
 

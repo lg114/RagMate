@@ -28,9 +28,6 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ragmate
       - DOCUMENTS_DIR=/app/documents
-      - LLM_API_KEY=${LLM_API_KEY:-not-configured-yet}
-      - EMBEDDING_API_BASE_URL=${EMBEDDING_API_BASE_URL:-https://api.openai.com/v1}
-      - RERANKER_API_BASE_URL=${RERANKER_API_BASE_URL:-https://api.jina.ai/v1/rerank}
     env_file:
       - path: .env
         required: false

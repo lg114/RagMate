@@ -89,15 +89,24 @@ class TestApiProvider:
         assert captured["auth"] is None
 
 
-def test_api_provider_requires_base_url(monkeypatch):
+def test_api_provider_allows_startup_without_base_url(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/ragmate")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "huggingface")
     monkeypatch.setenv("RERANKER_PROVIDER", "api")
     monkeypatch.setenv("EMBEDDING_API_BASE_URL", "")
     monkeypatch.setenv("RERANKER_API_BASE_URL", "")
-    with pytest.raises(ValueError, match="RERANKER_API_BASE_URL is required when RERANKER_PROVIDER=api"):
-        Settings(_env_file=None)
+    loaded = Settings(_env_file=None)
+    assert loaded.RERANKER_PROVIDER == "api"
+    assert loaded.RERANKER_API_BASE_URL == ""
+
+
+def test_api_provider_call_fails_when_url_unconfigured(monkeypatch):
+    from backend.domain.errors import ServiceUnavailableError
+    monkeypatch.setattr(settings, "RERANKER_PROVIDER", "api")
+    monkeypatch.setattr(settings, "RERANKER_API_BASE_URL", "")
+    with pytest.raises(ServiceUnavailableError, match="RERANKER_API_BASE_URL"):
+        retriever.score_pairs("q", ["a"])
 
 
 class TestCallSites:

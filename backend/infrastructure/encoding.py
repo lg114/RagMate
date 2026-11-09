@@ -54,7 +54,11 @@ def _post_embeddings(texts: list[str]) -> list[dict]:
     最多 5 次；其它错误直接抛出。入库一次调几百个 batch，没有重试的话
     一次限流就让整个入库白跑（编码全在写入前，失败不落盘）。
     """
-    url = settings.EMBEDDING_API_BASE_URL.rstrip("/") + "/embeddings"
+    base = (settings.EMBEDDING_API_BASE_URL or "").strip().rstrip("/")
+    if not base:
+        from backend.domain.errors import ServiceUnavailableError
+        raise ServiceUnavailableError("Embedding service base URL (EMBEDDING_API_BASE_URL) is not configured. Please configure it in Settings.")
+    url = base + "/embeddings"
     payload = json.dumps({
         "model": settings.EMBEDDING_MODEL,
         "input": texts,
