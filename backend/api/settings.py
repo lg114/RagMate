@@ -453,9 +453,9 @@ def update_settings_bulk(payload: BulkSettingsUpdate):
                 detail=f"Field '{key}' is not editable via the settings API.",
             )
 
-        # Handle secret keys: None or "" means preserve existing
+        # Handle secret keys: None, "", or mask means preserve existing
         if key in SECRET_KEYS:
-            if value is None or value == "":
+            if value is None or value == "" or str(value).startswith("••"):
                 continue
             if value == "__CLEAR__":
                 updates_to_write[key] = ""

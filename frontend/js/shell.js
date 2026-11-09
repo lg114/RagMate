@@ -833,6 +833,7 @@ async function updateDocsMeta() {
 }
 
 /* ---- 设置管理 (Settings Management) ---- */
+const SECRET_MASK = "••••••••••••••••";
 let currentSettingsData = null;
 let currentSettingsVersion = null;
 let configuredSecrets = new Set();
@@ -942,16 +943,19 @@ async function loadSettings() {
       if (def.type === "boolean") {
         el.checked = (val === true || val === "true" || val === 1 || val === "1");
       } else if (def.type === "secret") {
-        el.value = "";
         const isConf = Boolean(currentSettingsData[key + "_configured"]);
         const tag = $(`tag-${key}`);
         if (isConf) {
+          el.value = SECRET_MASK;
+          el.dataset.configured = "true";
           el.placeholder = "Configured (enter new value to change)";
           if (tag) {
             tag.textContent = "Configured";
             tag.classList.add("configured");
           }
         } else {
+          el.value = "";
+          el.dataset.configured = "false";
           el.placeholder = "Not set";
           if (tag) {
             tag.textContent = "Not set";
@@ -1044,7 +1048,7 @@ async function saveAllSettings() {
       if (val !== oldVal) changed = true;
     } else if (def.type === "secret") {
       const sVal = el.value.trim();
-      if (sVal) {
+      if (sVal && sVal !== SECRET_MASK) {
         val = sVal;
         changed = true;
       }
@@ -1153,26 +1157,31 @@ async function runConnectionTest(component, btnId, resultId) {
   resultEl.textContent = "Connecting to service...";
 
   // Collect form input values to test current inputs even before saving
+  const getSecretVal = (id) => {
+    const v = $(id)?.value?.trim();
+    return (v && v !== SECRET_MASK) ? v : null;
+  };
+
   let testPayload = {};
   if (component === "llm") {
     testPayload = {
       model: $("cfg-LLM_MODEL")?.value?.trim() || null,
       base_url: $("cfg-LLM_API_BASE_URL")?.value?.trim() || null,
-      api_key: $("cfg-LLM_API_KEY")?.value?.trim() || null,
+      api_key: getSecretVal("cfg-LLM_API_KEY"),
     };
   } else if (component === "embedding") {
     testPayload = {
       provider: $("cfg-EMBEDDING_PROVIDER")?.value || null,
       model: $("cfg-EMBEDDING_MODEL")?.value?.trim() || null,
       base_url: $("cfg-EMBEDDING_API_BASE_URL")?.value?.trim() || null,
-      api_key: $("cfg-EMBEDDING_API_KEY")?.value?.trim() || null,
+      api_key: getSecretVal("cfg-EMBEDDING_API_KEY"),
     };
   } else if (component === "reranker") {
     testPayload = {
       provider: $("cfg-RERANKER_PROVIDER")?.value || null,
       model: $("cfg-RERANKER_MODEL")?.value?.trim() || null,
       base_url: $("cfg-RERANKER_API_BASE_URL")?.value?.trim() || null,
-      api_key: $("cfg-RERANKER_API_KEY")?.value?.trim() || null,
+      api_key: getSecretVal("cfg-RERANKER_API_KEY"),
     };
   }
 
@@ -1213,6 +1222,22 @@ async function runConnectionTest(component, btnId, resultId) {
 }
 
 function initSettingsEvents() {
+  // Secret input mask interaction
+  ["LLM_API_KEY", "EMBEDDING_API_KEY", "RERANKER_API_KEY", "LANGSMITH_API_KEY"].forEach((k) => {
+    const el = $(`cfg-${k}`);
+    if (!el) return;
+    el.addEventListener("focus", () => {
+      if (el.value === SECRET_MASK) {
+        el.value = "";
+      }
+    });
+    el.addEventListener("blur", () => {
+      if (!el.value.trim() && el.dataset.configured === "true") {
+        el.value = SECRET_MASK;
+      }
+    });
+  });
+
   $("cfg-EMBEDDING_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
   $("cfg-RERANKER_PROVIDER")?.addEventListener("change", updateSettingsLinkage);
   $("cfg-LANGSMITH_TRACING")?.addEventListener("change", updateSettingsLinkage);
