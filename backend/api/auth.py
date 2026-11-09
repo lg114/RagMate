@@ -10,6 +10,7 @@ Supports:
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import secrets
 import time
 from urllib.parse import urlparse
@@ -31,11 +32,32 @@ _LOCAL_IPS: Set[str] = {"127.0.0.1", "::1", "localhost", "testclient"}
 _LOCAL_HOST_NAMES: Set[str] = {"localhost", "127.0.0.1", "::1", "testserver"}
 
 
+def _is_loopback_or_private_ip(client_ip: str) -> bool:
+    if not client_ip:
+        return False
+    if client_ip in _LOCAL_IPS:
+        return True
+    try:
+        ip = ipaddress.ip_address(client_ip)
+        # Loopback or Docker private bridge network gateway (172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16)
+        return ip.is_loopback or ip.is_private
+    except ValueError:
+        return False
+
+
 def is_local_request(request: Request) -> bool:
-    """Validate whether request originates from localhost, verifying client IP, Host, and Origin."""
+    """Validate whether request originates from localhost, verifying client IP, Host, and Origin.
+    
+    In Docker container environments, port mappings to 127.0.0.1 arrive via the Docker
+    bridge network gateway (RFC1918 private IP, e.g. 172.19.0.1 or 192.168.65.1).
+    Requests are recognized as local when:
+    1. Client IP is loopback or Docker bridge private IP, AND
+    2. Host header matches a loopback hostname (localhost, 127.0.0.1, ::1), AND
+    3. Origin header (if present) matches a loopback hostname.
+    """
     # 1. Check client IP
     client_ip = request.client.host if request.client else ""
-    if client_ip not in _LOCAL_IPS:
+    if not _is_loopback_or_private_ip(client_ip):
         return False
 
     # 2. Check Host header (prevent DNS rebinding / host spoofing)
@@ -97,32 +119,37 @@ class LoginPayload(BaseModel):
 @router.get("/status")
 async def auth_status(request: Request):
     """Report whether authentication is required and if the current caller is authenticated."""
-    token = settings.API_AUTH_TOKEN
+    token = (settings.API_AUTH_TOKEN or "").strip()
     is_local = is_local_request(request)
-    auth_required = bool(token) or not is_local
 
-    authenticated = False
-    if not auth_required:
-        authenticated = True
-    elif token and is_authenticated(request, token):
-        authenticated = True
+    # 场景 1：未设置服务端密码 -> 本地完全免登录；外部访问因无密码而禁用
+    if not token:
+        return {
+            "auth_required": False,
+            "authenticated": is_local,
+            "is_local": is_local,
+            "remote_disabled": not is_local,
+        }
 
+    # 场景 2：已设置服务端密码 -> 统一受密码保护
+    authenticated = is_authenticated(request, token)
     return {
-        "auth_required": auth_required,
+        "auth_required": True,
         "authenticated": authenticated,
         "is_local": is_local,
+        "remote_disabled": False,
     }
 
 
 @router.post("/login")
 async def login(request: Request, payload: LoginPayload):
     """Verify instance password and establish a session."""
-    token = settings.API_AUTH_TOKEN
+    token = (settings.API_AUTH_TOKEN or "").strip()
     if not token:
         # If no password configured on server, login is trivial or not needed
         return {"ok": True, "token": "", "detail": "No password configured on server"}
 
-    if not hmac.compare_digest(payload.password.strip(), token.strip()):
+    if not hmac.compare_digest(payload.password.strip(), token):
         return JSONResponse(status_code=401, content={"ok": False, "detail": "Incorrect instance password"})
 
     cleanup_expired_sessions()

@@ -56,6 +56,17 @@ class TestAuthDisabled:
         assert response.status_code == 403
         assert response.json()["code"] == "REMOTE_ACCESS_DISABLED" 
 
+    def test_docker_bridge_gateway_with_localhost_host_is_accepted(self, client, monkeypatch):
+        """Docker 内部网桥转发的请求（如 172.19.0.1）携带 Host: localhost 视为本机请求免密放行。"""
+        monkeypatch.setattr(settings, "API_AUTH_TOKEN", "")
+        client_with_docker_ip = TestClient(client.app, client=("172.19.0.1", 45678))
+        response = client_with_docker_ip.get("/auth/status", headers={"Host": "localhost:8000"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_local"] is True
+        assert data["auth_required"] is False
+        assert data["authenticated"] is True
+
 
 class TestAuthEnabled:
     def test_missing_token_rejected(self, client, with_token):

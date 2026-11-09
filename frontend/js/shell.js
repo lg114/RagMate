@@ -761,6 +761,10 @@ async function checkAuthStatus() {
     const res = await fetch("/auth/status", { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     const logoutBtn = $("btn-logout");
+    if (data.remote_disabled) {
+      showUnlockOverlay("Remote access is disabled because API_AUTH_TOKEN is not configured on the server.");
+      return false;
+    }
     if (data.auth_required) {
       if (logoutBtn) logoutBtn.hidden = false;
       if (!data.authenticated) {
