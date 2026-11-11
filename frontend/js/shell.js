@@ -243,12 +243,15 @@ return x.split(/\n{2,}/).map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`).
 return html.join("");
 }
 function splitSourceLine(text) {
-const m = text.match(/\n\s*数据来源：([^\n]*)\s*$/);
+const m = text.match(/(?:^|\n)\s*(?:数据来源[:：]|Sources:)\s*([^\n]*)\s*$/i);
 if (!m) return { body: text, citations: []};
 const cites = [];
-for (const chunk of m[1].split("、")) {
-const mm = chunk.match(/【(.+?)(?:[,，]\s*第(\d+)页)?】/);
-if (mm) cites.push({ source: mm[1], page: mm[2]? Number(mm[2]): null});
+const re = /【([^】]+?)[,，]\s*第(\d+)页】|【([^】]+)】|\[([^\[\]]+?),\s*page\s+(\d+)\]|\[([^\[\]]+)\]/gi;
+let mm;
+while ((mm = re.exec(m[1]))) {
+const source = mm[1] || mm[3] || mm[4] || mm[6];
+const page = mm[2] || mm[5];
+if (source) cites.push({ source: source.trim(), page: page ? Number(page) : null});
 }
 return { body: text.slice(0, m.index).trimEnd(), citations: cites};
 }

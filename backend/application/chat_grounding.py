@@ -5,8 +5,12 @@ import logging
 
 from backend.application.chat_citations import (
     apply_grounding,
+    citations_for_answer,
+    extract_model_citations,
     note_unsupported_claims,
     public_citations,
+    question_language,
+    strip_citation_markup,
 )
 
 logger = logging.getLogger("ragmate")
@@ -59,11 +63,15 @@ async def _pop_retrieval_signals(
 
 async def _ground_response(
     session_id: str, response_text: str, is_error: bool, *, debug: bool = False,
-    rdata: dict | None = None,
+    rdata: dict | None = None, question: str | None = None,
 ) -> tuple[str, dict]:
     """按检索置信度改写回答。返回 (最终文本, 要并入 API 的附加字段)。
 
     rdata 为 None 时表示本次没有检索信号；单次检索链路直接传入。
+    question 用来决定引用格式的语言；缺省时保持中文。
+    对外 citations 只保留模型写过且能对上检索片段的页，按首次出现排序。
+    模型一条都没写出可解析的引用、但回答仍然接地时，改回取得分最高的 3 条。
+    拒答不带引用。
     """
     confidence, unsupported, citations, debug_trace = await _pop_retrieval_signals(
         session_id, response_text, is_error, debug=debug, rdata=rdata,
@@ -76,7 +84,20 @@ async def _ground_response(
             extra["confidence"] = confidence
         return response_text, extra
 
-    response_text, grounding = apply_grounding(response_text, confidence, citations)
+    lang = question_language(question) if question else "zh"
+    publishable = bool(confidence) and int(confidence.get("chunks") or 0) > 0
+    if publishable:
+        parsed = extract_model_citations(response_text)
+        chosen = citations_for_answer(response_text, citations)
+        # 写了引用但一条都对不上检索结果：丢掉这些标记，也不要用别的页充数。
+        if parsed and not chosen:
+            response_text = strip_citation_markup(response_text)
+        attach = chosen
+    else:
+        chosen = []
+        attach = citations
+
+    response_text, grounding = apply_grounding(response_text, confidence, attach, lang)
     if grounding == "refused":
         unsupported = None
     elif unsupported:
@@ -85,7 +106,12 @@ async def _ground_response(
         extra["confidence"] = confidence
     if grounding:
         extra["grounding"] = grounding
-    public = public_citations(citations) if grounding != "refused" else []
+    if grounding == "refused":
+        public = []
+    elif publishable:
+        public = public_citations(chosen)
+    else:
+        public = public_citations(citations)
     if public:
         extra["citations"] = public
     if unsupported:
