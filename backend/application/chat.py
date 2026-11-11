@@ -131,6 +131,7 @@ async def _chat_single(message: str, session_id: str, history: list[dict], debug
 
     visible, extra = await _ground_response(
         session_id, response_text, False, debug=debug, rdata=_retrieval_rdata(bundle),
+        question=message,
     )
     elapsed = time.monotonic() - t0
     logger.info(
@@ -213,6 +214,7 @@ async def _chat_stream_single(message: str, session_id: str, history: list[dict]
     response_text = normalize_citations("".join(full_response))
     visible, extra = await _ground_response(
         session_id, response_text, False, debug=debug, rdata=_retrieval_rdata(bundle),
+        question=message,
     )
     logger.info(
         f"chat_stream ok: session={session_id[:8]} resp_len={len(visible)} elapsed={time.monotonic() - t0:.1f}s"
